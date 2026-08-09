@@ -65,6 +65,10 @@ type Styles struct {
 	DiffAction      lipgloss.Style
 	InactivePane    lipgloss.Style
 	ActivePane      lipgloss.Style
+	Palette         lipgloss.Style
+	PaletteItem     lipgloss.Style
+	PaletteSelect   lipgloss.Style
+	PaletteDim      lipgloss.Style
 }
 
 // NewStyles builds Styles from a Theme.
@@ -213,6 +217,25 @@ func NewStyles(t *Theme) *Styles {
 	s.FileTreeSelect = lipgloss.NewStyle().
 		Background(t.Surface).
 		Foreground(t.Accent)
+
+	// Command Palette
+	s.Palette = lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(t.Accent).
+		Background(t.Background).
+		Padding(0, 1)
+	s.PaletteItem = lipgloss.NewStyle().
+		Foreground(t.Text).
+		Padding(0, 1)
+	s.PaletteSelect = lipgloss.NewStyle().
+		Background(t.Surface).
+		Foreground(t.Accent).
+		Bold(true).
+		Padding(0, 1)
+	s.PaletteDim = lipgloss.NewStyle().
+		Foreground(t.Muted).
+		Italic(true).
+		Padding(0, 1)
 
 	return s
 }

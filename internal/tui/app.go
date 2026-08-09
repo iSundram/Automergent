@@ -3,11 +3,14 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/sahilm/fuzzy"
 
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/ai"
@@ -18,10 +21,9 @@ import (
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
-// agentEventMsg wraps an agent.Event for BubbleTea dispatch.
 type agentEventMsg struct{ ev agent.Event }
+type modelsFetchedMsg []ai.Model
 
-// App is the root Bubble Tea model.
 type App struct {
 	cfg            *config.Config
 	ag             *agent.Agent
@@ -41,6 +43,7 @@ type App struct {
 	stats          components.Stats
 	helpOverlay    components.HelpOverlay
 	fileTree       components.FileTree
+	palette        components.CommandPalette
 	width          int
 	height         int
 	thinking       bool
@@ -50,15 +53,16 @@ type App struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	initialPrompt  string
-	focus          string // "input", "conversation", "diff", "tree"
+	focus          string
+
+	availableModels []ai.Model
+	fetchingModels  bool
 }
 
-// NewApp creates the root TUI model.
 func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialPrompt string) *App {
 	theme := themes.Get(cfg.Theme)
 	styles := themes.NewStyles(theme)
 	kb := keys.Get(cfg.Keybindings)
-
 	ctx, cancel := context.WithCancel(context.Background())
 
 	app := &App{
@@ -80,6 +84,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialP
 		stats:          components.NewStats(styles),
 		helpOverlay:    components.NewHelpOverlay(styles),
 		fileTree:       components.NewFileTree(styles),
+		palette:        components.NewCommandPalette(styles),
 		ctx:            ctx,
 		cancel:         cancel,
 		initialPrompt:  initialPrompt,
@@ -92,7 +97,6 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialP
 	return app
 }
 
-// Init is the initial command.
 func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		a.input.Focus(),
@@ -105,21 +109,46 @@ func (a *App) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// startAgent kicks off the agent goroutine and begins polling events.
 func (a *App) startAgent(prompt string) tea.Cmd {
+	prompt = a.expandPrompt(prompt)
+	if strings.HasPrefix(prompt, "!") {
+		return a.runShellPassthrough(prompt[1:])
+	}
 	a.thinking = true
 	a.spin.Start()
 	a.conversation.AddMessage("user", prompt, false)
 	a.statusBar.SetStatus("Thinking…")
-
-	go func() {
-		_ = a.ag.Run(a.ctx, prompt)
-	}()
-
+	go func() { _ = a.ag.Run(a.ctx, prompt) }()
 	return a.waitForAgentEvent()
 }
 
-// waitForAgentEvent returns a Cmd that blocks until the next agent event.
+func (a *App) expandPrompt(prompt string) string {
+	words := strings.Fields(prompt)
+	for i, word := range words {
+		if strings.HasPrefix(word, "@") {
+			path := word[1:]
+			content, err := os.ReadFile(path)
+			if err == nil {
+				words[i] = fmt.Sprintf("\n--- %s ---\n%s\n", path, string(content))
+			}
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+func (a *App) runShellPassthrough(command string) tea.Cmd {
+	a.conversation.AddMessage("user", "!"+command, false)
+	return func() tea.Msg {
+		cmd := exec.Command("bash", "-c", command)
+		output, _ := cmd.CombinedOutput()
+		content := string(output)
+		if content == "" {
+			content = "(no output)"
+		}
+		return agentEventMsg{ev: agent.Event{Type: agent.EventDone, Payload: content}}
+	}
+}
+
 func (a *App) waitForAgentEvent() tea.Cmd {
 	return func() tea.Msg {
 		ev := <-a.ag.Events()
@@ -127,42 +156,48 @@ func (a *App) waitForAgentEvent() tea.Cmd {
 	}
 }
 
-// Update handles messages.
+func (a *App) fetchModels() tea.Cmd {
+	if a.fetchingModels {
+		return nil
+	}
+	a.fetchingModels = true
+	return func() tea.Msg {
+		models, _ := a.ag.Provider().Models(a.ctx)
+		return modelsFetchedMsg(models)
+	}
+}
+
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var (
 		cmd  tea.Cmd
 		cmds []tea.Cmd
 	)
-
 	switch m := msg.(type) {
 	case tea.WindowSizeMsg:
-		a.width = m.Width
-		a.height = m.Height
+		a.width, a.height = m.Width, m.Height
 		a.layout()
 		return a, nil
-
 	case tea.KeyMsg:
 		cmd = a.handleKey(m)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-
 	case agentEventMsg:
 		cmd = a.handleAgentEvent(m.ev)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-
 	case spinner.TickMsg:
 		sp, cmd := a.spin.Update(msg)
 		a.spin = sp
 		cmds = append(cmds, cmd)
-
 	case components.FileTreeLoadedMsg:
 		a.fileTree.SetItems(m.Items)
+	case modelsFetchedMsg:
+		a.availableModels = m
+		a.fetchingModels = false
+		a.updatePalette()
 	}
-
-	// Always update these if they're visible
 	if a.sessionBrowser.Visible() {
 		sb, cmd := a.sessionBrowser.Update(msg)
 		a.sessionBrowser = sb
@@ -173,7 +208,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.confirm = c
 		cmds = append(cmds, cmd)
 	}
-
 	return a, tea.Batch(cmds...)
 }
 
@@ -184,70 +218,82 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 	}
-
-	// Global Hotkeys
 	key := m.String()
+	if a.palette.Visible() {
+		switch key {
+		case "enter":
+			if sel := a.palette.Selected(); sel != nil {
+				a.input.InsertValue(sel.Value)
+				a.palette.Hide()
+				a.layout()
+				return nil
+			}
+		case "up", "down", "ctrl+p", "ctrl+n", "tab":
+			pal, cmd := a.palette.Update(m)
+			a.palette = pal
+			return cmd
+		case "esc":
+			a.palette.Hide()
+			a.layout()
+			return nil
+		}
+	}
 	switch key {
-	case "ctrl+c", "ctrl+q":
+	case "ctrl+c", "ctrl+d":
 		a.cancel()
 		return tea.Quit
-	case "ctrl+d":
-		a.diffPane.Toggle()
-		a.layout()
-		return nil
 	case "ctrl+l":
-		a.lspPanel.Toggle()
-		a.layout()
-		return nil
-	case "ctrl+s":
-		a.sessionBrowser.Show()
+		a.conversation.Clear()
 		return nil
 	case "ctrl+t":
 		a.showFileTree = !a.showFileTree
 		a.layout()
 		return nil
-	case "?":
-		if a.input.Value() == "" {
-			a.showHelp = true
-			return nil
-		}
+	case "f1":
+		a.showHelp = true
+		return nil
+	case "f2":
+		a.diffPane.Toggle()
+		a.layout()
+		return nil
 	case "tab":
-		// Cycle focus
-		switch a.focus {
-		case "input":
-			a.focus = "conversation"
-		case "conversation":
-			if a.diffPane.Visible() {
-				a.focus = "diff"
-			} else if a.showFileTree {
-				a.focus = "tree"
-			} else {
+		if !a.palette.Visible() {
+			switch a.focus {
+			case "input":
+				a.focus = "conversation"
+			case "conversation":
+				if a.diffPane.Visible() {
+					a.focus = "diff"
+				} else if a.showFileTree {
+					a.focus = "tree"
+				} else {
+					a.focus = "input"
+				}
+			case "diff":
+				if a.showFileTree {
+					a.focus = "tree"
+				} else {
+					a.focus = "input"
+				}
+			case "tree":
 				a.focus = "input"
 			}
-		case "diff":
-			if a.showFileTree {
-				a.focus = "tree"
-			} else {
-				a.focus = "input"
+			if a.focus == "input" {
+				return a.input.Focus()
 			}
-		case "tree":
-			a.focus = "input"
+			a.input.Blur()
+			a.diffPane.Focus(a.focus == "diff")
 		}
-		if a.focus == "input" {
-			return a.input.Focus()
-		}
-		a.input.Blur()
 		return nil
 	}
-
-	// Forward keys to focused component
-	var cmd tea.Cmd
 	switch a.focus {
 	case "input":
 		if (key == "enter" || key == "ctrl+m") && !a.thinking {
 			prompt := strings.TrimSpace(a.input.Value())
 			if prompt != "" {
 				a.input.Reset()
+				a.palette.Hide()
+				a.layout()
 				if strings.HasPrefix(prompt, "/") {
 					return a.handleSlashCommand(prompt)
 				}
@@ -256,6 +302,18 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		}
 		inp, cmd := a.input.Update(m)
 		a.input = inp
+		trigger := a.input.TriggerType()
+		if trigger != "" {
+			a.palette.Show()
+			a.updatePalette()
+			a.layout()
+			if trigger == "model" && len(a.availableModels) == 0 {
+				return a.fetchModels()
+			}
+		} else if a.palette.Visible() {
+			a.palette.Hide()
+			a.layout()
+		}
 		return cmd
 	case "conversation":
 		conv, cmd := a.conversation.Update(m)
@@ -270,8 +328,78 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		a.fileTree = tree
 		return cmd
 	}
+	return nil
+}
 
-	return cmd
+func (a *App) updatePalette() {
+	trigger := a.input.TriggerType()
+	filter := a.input.TriggerValue()
+
+	var items []components.PaletteItem
+	switch trigger {
+	case "help", "command":
+		allCmds := []components.PaletteItem{
+			{Name: "model", Description: "Switch AI model", Value: "model", Icon: "🤖"},
+			{Name: "provider", Description: "Switch provider", Value: "provider", Icon: "🔌"},
+			{Name: "mode", Description: "Change approval mode", Value: "mode", Icon: "⚙️"},
+			{Name: "clear", Description: "Clear screen", Value: "clear", Icon: "🧹"},
+			{Name: "reset", Description: "Reset history", Value: "reset", Icon: "🔄"},
+			{Name: "sessions", Description: "Browse sessions", Value: "sessions", Icon: "📁"},
+			{Name: "diff", Description: "Toggle diff pane", Value: "diff", Icon: "🔍"},
+			{Name: "tree", Description: "Toggle file tree", Value: "tree", Icon: "🌳"},
+			{Name: "stats", Description: "Show statistics", Value: "stats", Icon: "📈"},
+			{Name: "quit", Description: "Exit Automergent", Value: "quit", Icon: "🚪"},
+		}
+		items = a.fuzzyFilter(allCmds, filter)
+
+	case "model":
+		var modelItems []components.PaletteItem
+		for _, m := range a.availableModels {
+			modelItems = append(modelItems, components.PaletteItem{
+				Name:        m.ID,
+				Description: fmt.Sprintf("Model (Limit: %d)", m.ContextLimit),
+				Value:       m.ID,
+				Icon:        "🤖",
+			})
+		}
+		if len(modelItems) == 0 && a.fetchingModels {
+			items = []components.PaletteItem{{Name: "Loading...", Description: "Fetching models from provider", Value: "", Icon: "⏳"}}
+		} else {
+			items = a.fuzzyFilter(modelItems, filter)
+		}
+
+	case "file":
+		var fileItems []components.PaletteItem
+		for _, item := range a.fileTree.Items() {
+			if !item.IsDir {
+				fileItems = append(fileItems, components.PaletteItem{
+					Name:        item.Name,
+					Description: item.Path,
+					Value:       item.Path,
+					Icon:        "📄",
+				})
+			}
+		}
+		items = a.fuzzyFilter(fileItems, filter)
+	}
+
+	a.palette.SetItems(items)
+}
+
+func (a *App) fuzzyFilter(items []components.PaletteItem, filter string) []components.PaletteItem {
+	if filter == "" {
+		return items
+	}
+	var targets []string
+	for _, item := range items {
+		targets = append(targets, item.Name)
+	}
+	matches := fuzzy.Find(filter, targets)
+	var filtered []components.PaletteItem
+	for _, match := range matches {
+		filtered = append(filtered, items[match.Index])
+	}
+	return filtered
 }
 
 func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
@@ -281,7 +409,6 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.conversation.AppendToken(tok)
 		}
 		return a.waitForAgentEvent()
-
 	case agent.EventToolCall:
 		if tc, ok := ev.Payload.(ai.ToolCall); ok {
 			a.conversation.AddToolCall(tc.Name, "")
@@ -289,17 +416,14 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.statusBar.SetStatus(fmt.Sprintf("⚙ %s…", tc.Name))
 		}
 		return a.waitForAgentEvent()
-
 	case agent.EventToolDone:
 		a.statusBar.SetStatus("Thinking…")
 		return a.waitForAgentEvent()
-
 	case agent.EventStatus:
 		if s, ok := ev.Payload.(string); ok {
 			a.statusBar.SetStatus(s)
 		}
 		return a.waitForAgentEvent()
-
 	case agent.EventDone:
 		a.thinking = false
 		a.spin.Stop()
@@ -307,8 +431,10 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
 		a.header.SetTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
+		if text, ok := ev.Payload.(string); ok && text != "" {
+			a.conversation.AddMessage("assistant", text, false)
+		}
 		return nil
-
 	case agent.EventError:
 		a.thinking = false
 		a.spin.Stop()
@@ -317,7 +443,6 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		}
 		a.statusBar.SetStatus("Error")
 		return nil
-
 	case agent.EventConfirm:
 		if payload, ok := ev.Payload.(map[string]any); ok {
 			if tc, ok := payload["tool_call"].(ai.ToolCall); ok {
@@ -339,13 +464,16 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 	}
 	cmd := parts[0]
 	args := parts[1:]
-
 	switch cmd {
 	case "/help":
 		a.showHelp = true
 	case "/clear":
 		a.conversation.Clear()
 		a.statusBar.SetStatus("Conversation cleared")
+	case "/reset":
+		a.conversation.Clear()
+		a.sess.Messages = nil
+		a.statusBar.SetStatus("History reset")
 	case "/model":
 		if len(args) > 0 {
 			a.cfg.Model = args[0]
@@ -358,19 +486,8 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 			a.header.SetMode(args[0])
 			a.conversation.AddMessage("system", fmt.Sprintf("Mode switched to %s", args[0]), false)
 		}
-	case "/sessions":
-		a.sessionBrowser.Show()
-	case "/diff":
-		a.diffPane.Toggle()
-		a.layout()
-	case "/tree":
-		a.showFileTree = !a.showFileTree
-		a.layout()
-	case "/lsp":
-		a.lspPanel.Toggle()
-		a.layout()
-	case "/stats":
-		a.conversation.AddMessage("system", a.stats.View(), false)
+	case "/quit", "/exit":
+		return tea.Quit
 	}
 	return nil
 }
@@ -379,17 +496,18 @@ func (a *App) layout() {
 	if a.width <= 0 || a.height <= 0 {
 		return
 	}
-	headerH := 4
-	statusH := 1
+	headerH, statusH := 4, 1
 	inputH := a.input.LineCount() + 2
 	if inputH < 3 {
 		inputH = 3
 	}
-	if inputH > 10 {
-		inputH = 10
+
+	paletteH := 0
+	if a.palette.Visible() {
+		paletteH = 9
 	}
 
-	mainH := a.height - headerH - statusH - inputH
+	mainH := a.height - headerH - statusH - inputH - paletteH
 	if mainH < 1 {
 		mainH = 1
 	}
@@ -397,6 +515,7 @@ func (a *App) layout() {
 	a.header.SetWidth(a.width)
 	a.statusBar.SetWidth(a.width)
 	a.input.SetWidth(a.width)
+	a.palette.SetWidth(a.width / 2)
 
 	mainW := a.width
 	if a.showFileTree {
@@ -407,7 +526,6 @@ func (a *App) layout() {
 		a.fileTree.SetSize(treeW, mainH)
 		mainW = a.width - treeW - 1
 	}
-
 	if a.diffPane.Visible() {
 		convW := mainW * 4 / 10
 		diffW := mainW - convW - 1
@@ -416,9 +534,7 @@ func (a *App) layout() {
 	} else {
 		a.conversation.SetSize(mainW, mainH)
 	}
-
 	a.sessionBrowser.SetSize(a.width*3/4, a.height*3/4)
-	a.helpOverlay.SetSize(a.width*3/4, a.height*3/4)
 }
 
 func (a *App) View() string {
@@ -428,9 +544,7 @@ func (a *App) View() string {
 	if a.showHelp {
 		return a.helpOverlay.View()
 	}
-
 	var sb strings.Builder
-
 	headerView := a.header.View()
 	sb.WriteString(headerView)
 	if headerView != "" {
@@ -442,32 +556,23 @@ func (a *App) View() string {
 	} else {
 		var mainRow string
 		convView := a.conversation.View()
-
-		// Style conversation based on focus
 		if a.focus == "conversation" {
 			convView = a.styles.ActivePane.Width(lipgloss.Width(convView)).Render(convView)
 		}
-
 		if a.showFileTree {
-			treeView := a.fileTree.View()
-			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, treeView, " ", convView)
+			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, a.fileTree.View(), " ", convView)
 		} else {
 			mainRow = convView
 		}
-
 		if a.diffPane.Visible() {
-			diffView := a.diffPane.View()
-			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", diffView)
-		}
-
-		if a.lspPanel.Visible() {
-			mainRow = lipgloss.JoinVertical(lipgloss.Left, mainRow, a.lspPanel.View())
+			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", a.diffPane.View())
 		}
 		sb.WriteString(mainRow)
 	}
-
 	sb.WriteByte('\n')
-
+	if a.palette.Visible() {
+		sb.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.palette.View()) + "\n")
+	}
 	if a.confirm.Visible() {
 		sb.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
 	} else if a.thinking {
@@ -475,10 +580,8 @@ func (a *App) View() string {
 	} else {
 		sb.WriteString(a.input.View())
 	}
-
 	sb.WriteByte('\n')
 	sb.WriteString(a.statusBar.View())
-
 	return sb.String()
 }
 

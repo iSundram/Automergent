@@ -46,6 +46,9 @@ func (f *FileTree) SetSize(w, h int) { f.width = w; f.height = h }
 // SetItems populates the tree.
 func (f *FileTree) SetItems(items []FileTreeItem) { f.items = items }
 
+// Items returns the current tree items.
+func (f *FileTree) Items() []FileTreeItem { return f.items }
+
 // Load returns a Cmd that loads the file tree from the given directory.
 func (f *FileTree) Load(dir string) tea.Cmd {
 	f.rootDir = dir

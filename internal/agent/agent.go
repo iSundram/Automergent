@@ -52,6 +52,9 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 // Events returns the channel of agent events.
 func (a *Agent) Events() <-chan Event { return a.events }
 
+// Provider returns the AI provider.
+func (a *Agent) Provider() ai.Provider { return a.provider }
+
 // Session returns the current session.
 func (a *Agent) Session() *session.Session { return a.sess }
 

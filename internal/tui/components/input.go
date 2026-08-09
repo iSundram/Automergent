@@ -1,6 +1,8 @@
 package components
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -20,7 +22,7 @@ type Input struct {
 // NewInput creates a new Input component.
 func NewInput(styles *themes.Styles) Input {
 	ta := textarea.New()
-	ta.Placeholder = "Message Automergent... (Enter to send, Alt+Enter for newline, / for commands)"
+	ta.Placeholder = "Message Automergent... (Enter to send, / for commands, @ for files, ? for help)"
 	ta.ShowLineNumbers = false
 	ta.SetHeight(1)
 	ta.MaxHeight = 8
@@ -42,6 +44,12 @@ func (i *Input) SetWidth(w int) {
 
 // Value returns the current input text.
 func (i Input) Value() string { return i.ta.Value() }
+
+// SetValue updates the input text.
+func (i *Input) SetValue(v string) {
+	i.ta.SetValue(v)
+	i.ta.SetCursor(len(v))
+}
 
 // Reset clears the input.
 func (i *Input) Reset() {
@@ -72,6 +80,69 @@ func (i *Input) Blur() {
 // LineCount returns the number of lines in the input.
 func (i Input) LineCount() int {
 	return i.ta.LineCount()
+}
+
+// TriggerType returns the current palette trigger if any.
+func (i Input) TriggerType() string {
+	val := i.ta.Value()
+	if val == "?" {
+		return "help"
+	}
+	if strings.HasPrefix(val, "/") {
+		if strings.HasPrefix(val, "/model") {
+			return "model"
+		}
+		return "command"
+	}
+	if strings.Contains(val, "@") {
+		parts := strings.Fields(val)
+		if len(parts) > 0 && strings.HasPrefix(parts[len(parts)-1], "@") {
+			return "file"
+		}
+		if strings.HasSuffix(val, "@") {
+			return "file"
+		}
+	}
+	return ""
+}
+
+// TriggerValue returns the text after the trigger for filtering.
+func (i Input) TriggerValue() string {
+	val := i.ta.Value()
+	trigger := i.TriggerType()
+	switch trigger {
+	case "help":
+		return ""
+	case "command":
+		return strings.TrimPrefix(val, "/")
+	case "model":
+		v := strings.TrimPrefix(val, "/model")
+		return strings.TrimSpace(v)
+	case "file":
+		idx := strings.LastIndex(val, "@")
+		if idx != -1 {
+			return val[idx+1:]
+		}
+	}
+	return ""
+}
+
+// InsertValue completes the current trigger with the selected value.
+func (i *Input) InsertValue(v string) {
+	val := i.ta.Value()
+	trigger := i.TriggerType()
+	switch trigger {
+	case "help", "command":
+		i.ta.SetValue("/" + v + " ")
+	case "model":
+		i.ta.SetValue("/model " + v + " ")
+	case "file":
+		idx := strings.LastIndex(val, "@")
+		if idx != -1 {
+			i.ta.SetValue(val[:idx] + "@" + v + " ")
+		}
+	}
+	i.ta.SetCursor(len(i.ta.Value()))
 }
 
 // Update handles key events and auto-resizing.
