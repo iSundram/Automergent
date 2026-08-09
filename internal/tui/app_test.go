@@ -2,9 +2,10 @@ package tui
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/iSundram/Automergent/internal/agent"
@@ -83,20 +84,6 @@ func TestSlashProviderScopedConfigCommands(t *testing.T) {
 	}
 }
 
-func TestSlashModelAPIKeyCommands(t *testing.T) {
-	app := newTestApp(t)
-	app.handleSlashCommand("/model-api-key model-secret")
-	pc := app.cfg.Providers[app.cfg.Provider]
-	mc, ok := pc.Models[app.cfg.Model]
-	if !ok {
-		t.Fatalf("expected model config to exist")
-	}
-	if mc.APIKey != "model-secret" {
-		t.Fatalf("expected model api key update, got %q", mc.APIKey)
-	}
-
-}
-
 func TestHandleAgentEventDoneSkipsDuplicateAfterStreaming(t *testing.T) {
 	app := newTestApp(t)
 	app.handleAgentEvent(agent.Event{Type: agent.EventToken, Payload: "hello"})
@@ -122,7 +109,15 @@ func TestHandleAgentEventDoneAddsMessageWhenNoStreaming(t *testing.T) {
 
 func TestHandleAgentEventToolDoneRendersResult(t *testing.T) {
 	app := newTestApp(t)
-	app.handleAgentEvent(agent.Event{Type: agent.EventToolDone, Payload: tools.Result{Content: "tool output", IsError: false}})
+	app.handleAgentEvent(agent.Event{
+		Type: agent.EventToolDone,
+		Payload: agent.ToolDoneEvent{
+			ID:       "t1",
+			Name:     "read_file",
+			Duration: 10,
+			Result:   tools.Result{Content: "tool output", IsError: false},
+		},
+	})
 	last, ok := app.conversation.LastMessage()
 	if !ok {
 		t.Fatalf("expected a tool result message")
@@ -134,13 +129,21 @@ func TestHandleAgentEventToolDoneRendersResult(t *testing.T) {
 
 func TestHandleAgentEventToolDoneRendersError(t *testing.T) {
 	app := newTestApp(t)
-	app.handleAgentEvent(agent.Event{Type: agent.EventToolDone, Payload: tools.Result{Content: "boom", IsError: true}})
+	app.handleAgentEvent(agent.Event{
+		Type: agent.EventToolDone,
+		Payload: agent.ToolDoneEvent{
+			ID:       "t2",
+			Name:     "run_command",
+			Duration: 20,
+			Result:   tools.Result{Content: "boom", IsError: true},
+		},
+	})
 	last, ok := app.conversation.LastMessage()
 	if !ok {
 		t.Fatalf("expected an error message")
 	}
-	if last.Role != "assistant" || !last.IsError {
-		t.Fatalf("expected assistant error message, got role=%s isError=%v", last.Role, last.IsError)
+	if last.Role != "tool_result" || !last.IsError {
+		t.Fatalf("expected tool_result error message, got role=%s isError=%v", last.Role, last.IsError)
 	}
 }
 
@@ -192,17 +195,19 @@ func TestCtrlRTogglesReviewMode(t *testing.T) {
 	}
 }
 
-func TestPersistProjectConfigWritesRepoAutomergentConfig(t *testing.T) {
+func TestPersistProjectConfigWritesHomeAutomergentConfig(t *testing.T) {
 	app := newTestApp(t)
-	repo := t.TempDir()
+	home := t.TempDir()
 
 	origWD, _ := os.Getwd()
+	origHome := os.Getenv("HOME")
 	defer func() { _ = os.Chdir(origWD) }()
-	if err := os.Chdir(repo); err != nil {
+	defer func() { _ = os.Setenv("HOME", origHome) }()
+	if err := os.Chdir(home); err != nil {
 		t.Fatalf("chdir: %v", err)
 	}
-	if err := exec.Command("git", "init").Run(); err != nil {
-		t.Fatalf("git init: %v", err)
+	if err := os.Setenv("HOME", home); err != nil {
+		t.Fatalf("set HOME: %v", err)
 	}
 
 	app.cfg.Provider = "google"
@@ -216,12 +221,123 @@ func TestPersistProjectConfigWritesRepoAutomergentConfig(t *testing.T) {
 		t.Fatalf("persistProjectConfig: %v", err)
 	}
 
-	path := filepath.Join(repo, ".automergent", "config.yaml")
+	path := filepath.Join(home, ".automergent", "config.yaml")
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read persisted config: %v", err)
 	}
 	if len(data) == 0 {
 		t.Fatalf("persisted config is empty")
+	}
+}
+
+func TestLayoutThinkingReservesHeightWithoutPaletteShift(t *testing.T) {
+	app := newTestApp(t)
+	app.width = 120
+	app.height = 40
+	app.input.SetValue("x")
+	app.thinking = false
+	app.layout()
+	withoutThinking := app.conversation.View()
+	withoutThinkingLines := strings.Count(withoutThinking, "\n")
+
+	app.thinking = true
+	app.layout()
+	withThinking := app.conversation.View()
+	withThinkingLines := strings.Count(withThinking, "\n")
+
+	if withThinkingLines >= withoutThinkingLines {
+		t.Fatalf("expected thinking layout to reserve space; got without=%d with=%d", withoutThinkingLines, withThinkingLines)
+	}
+}
+
+func TestPaletteVisibilityDoesNotResizeConversation(t *testing.T) {
+	app := newTestApp(t)
+	app.width = 120
+	app.height = 40
+	app.layout()
+	baseView := app.conversation.View()
+	baseLines := strings.Count(baseView, "\n")
+
+	app.palette.Show()
+	app.layout()
+	withPaletteView := app.conversation.View()
+	withPaletteLines := strings.Count(withPaletteView, "\n")
+
+	if withPaletteLines != baseLines {
+		t.Fatalf("expected palette to avoid resizing conversation; base=%d with_palette=%d", baseLines, withPaletteLines)
+	}
+}
+
+func TestThinkingLineNotDuplicatedInView(t *testing.T) {
+	app := newTestApp(t)
+	app.width = 120
+	app.height = 40
+	app.thinking = true
+	app.spin.Start()
+	app.layout()
+	view := app.View()
+	if strings.Contains(view, "Thinking...") {
+		t.Fatalf("expected no duplicate hardcoded Thinking label in view")
+	}
+}
+
+func TestIgnoresStaleTransientStatusAfterDone(t *testing.T) {
+	app := newTestApp(t)
+	app.thinking = true
+	app.spin.Start()
+	app.handleAgentEvent(agent.Event{Type: agent.EventDone, Payload: ""})
+	if app.thinking {
+		t.Fatalf("expected thinking false after done")
+	}
+	before := app.statusBar.View()
+	app.handleAgentEvent(agent.Event{Type: agent.EventStatus, Payload: "thinking"})
+	after := app.statusBar.View()
+	if after != before {
+		t.Fatalf("expected stale transient status to be ignored after done")
+	}
+}
+
+func TestEscInterruptsActiveRun(t *testing.T) {
+	app := newTestApp(t)
+	app.thinking = true
+	app.spin.Start()
+	app.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	if app.thinking {
+		t.Fatalf("expected esc to interrupt active run")
+	}
+}
+
+func TestCtrlCSingleInterruptsAndDoubleExits(t *testing.T) {
+	app := newTestApp(t)
+	app.thinking = true
+	app.spin.Start()
+	cmd := app.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd != nil {
+		t.Fatalf("expected first ctrl+c to interrupt but not quit")
+	}
+	if app.thinking {
+		t.Fatalf("expected interrupted run after first ctrl+c")
+	}
+	app.lastCtrlCAt = time.Now()
+	cmd = app.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	if cmd == nil {
+		t.Fatalf("expected second ctrl+c to quit")
+	}
+}
+
+func TestMouseMsgIsIgnoredForKeyboardOnlyScrolling(t *testing.T) {
+	app := newTestApp(t)
+	app.width = 120
+	app.height = 40
+	app.layout()
+	before := app.conversation.View()
+	_, cmd := app.Update(tea.MouseMsg{})
+	after := app.conversation.View()
+	if cmd != nil {
+		t.Fatalf("expected no command from mouse msg")
+	}
+	if after != before {
+		t.Fatalf("expected mouse msg to be ignored")
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/iSundram/Automergent/internal/tools"
+	tools "github.com/iSundram/Automergent/internal/tools"
 )
 
 // SearchTool performs a web search via DuckDuckGo HTML.
@@ -37,8 +37,8 @@ func (t *SearchTool) Schema() map[string]any {
 }
 
 func (t *SearchTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
-	query, _ := args["query"].(string)
-	if query == "" {
+	query, ok := tools.StringArg(args, "query")
+	if !ok || query == "" {
 		return tools.Result{IsError: true, Content: "query is required"}, nil
 	}
 	searchURL := "https://html.duckduckgo.com/html/?q=" + url.QueryEscape(query)
@@ -55,7 +55,10 @@ func (t *SearchTool) Execute(ctx context.Context, args map[string]any) (tools.Re
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("search HTTP error: %s", resp.Status)}, nil
 	}
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 128*1024))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 128*1024))
+	if err != nil {
+		return tools.Result{IsError: true, Content: fmt.Sprintf("read error: %v", err)}, nil
+	}
 	return tools.Result{Content: summarizeDuckDuckGoHTML(query, string(body))}, nil
 }
 

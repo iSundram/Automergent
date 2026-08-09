@@ -44,7 +44,7 @@ func (t *DiffTool) Schema() map[string]any {
 }
 
 func (t *DiffTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
-	file, _ := args["file"].(string)
+	file, _ := tools.StringArg(args, "file")
 	if file != "" {
 		return runGit(ctx, "diff", "--", file)
 	}
@@ -69,8 +69,8 @@ func (t *LogTool) Schema() map[string]any {
 
 func (t *LogTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
 	n := 10
-	if nf, ok := args["n"].(float64); ok {
-		n = int(nf)
+	if ni, ok := tools.ArgInt(args, "n"); ok && ni > 0 {
+		n = ni
 	}
 	return runGit(ctx, "log", fmt.Sprintf("--max-count=%d", n), "--oneline")
 }

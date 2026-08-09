@@ -4,22 +4,16 @@ package agent
 type Mode string
 
 const (
-	ModeSuggest  Mode = "suggest"
-	ModeAutoEdit Mode = "auto-edit"
-	ModeFullAuto Mode = "full-auto"
-	ModePlan     Mode = "plan"
+	ModeEdit Mode = "edit"
+	ModePlan Mode = "plan"
 )
 
 // RequiresConfirmation reports whether the mode requires user confirmation
 // for the given operation type.
 func (m Mode) RequiresConfirmation(op string) bool {
 	switch m {
-	case ModeSuggest:
-		return true
-	case ModeAutoEdit:
-		return op == "shell"
-	case ModeFullAuto:
-		return false
+	case ModeEdit:
+		return op == "shell" || op == "write"
 	case ModePlan:
 		return true
 	default:
@@ -30,7 +24,7 @@ func (m Mode) RequiresConfirmation(op string) bool {
 // IsValid reports whether the mode string is recognized.
 func IsValid(mode string) bool {
 	switch Mode(mode) {
-	case ModeSuggest, ModeAutoEdit, ModeFullAuto, ModePlan:
+	case ModeEdit, ModePlan:
 		return true
 	default:
 		return false
@@ -40,9 +34,7 @@ func IsValid(mode string) bool {
 // AllModes returns all valid mode strings.
 func AllModes() []string {
 	return []string{
-		string(ModeSuggest),
-		string(ModeAutoEdit),
-		string(ModeFullAuto),
+		string(ModeEdit),
 		string(ModePlan),
 	}
 }

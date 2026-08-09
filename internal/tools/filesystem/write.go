@@ -50,7 +50,7 @@ func (t *WriteFileTool) Description() string {
 	return "Write content to a file, creating it if needed."
 }
 func (t *WriteFileTool) RequiresConfirmation(mode string) bool {
-	return mode == "suggest"
+	return mode == "edit" || mode == "plan"
 }
 
 func (t *WriteFileTool) Schema() map[string]any {
@@ -65,10 +65,13 @@ func (t *WriteFileTool) Schema() map[string]any {
 }
 
 func (t *WriteFileTool) Execute(_ context.Context, args map[string]any) (tools.Result, error) {
-	path, _ := args["path"].(string)
-	content, _ := args["content"].(string)
-	if path == "" {
+	path, ok := tools.StringArg(args, "path")
+	if !ok || path == "" {
 		return tools.Result{IsError: true, Content: "path is required"}, nil
+	}
+	content, ok := tools.StringArg(args, "content")
+	if !ok {
+		return tools.Result{IsError: true, Content: "content is required (string)"}, nil
 	}
 	if err := atomicWriteFile(path, []byte(content), 0o644); err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("write: %v", err)}, nil
@@ -82,7 +85,7 @@ type PatchFileTool struct{}
 func (t *PatchFileTool) Name() string        { return "patch_file" }
 func (t *PatchFileTool) Description() string { return "Replace a substring in a file." }
 func (t *PatchFileTool) RequiresConfirmation(mode string) bool {
-	return mode == "suggest"
+	return mode == "edit" || mode == "plan"
 }
 
 func (t *PatchFileTool) Schema() map[string]any {
@@ -108,12 +111,15 @@ func (t *PatchFileTool) Schema() map[string]any {
 }
 
 func (t *PatchFileTool) Execute(_ context.Context, args map[string]any) (tools.Result, error) {
-	path, _ := args["path"].(string)
-	oldStr, _ := args["old_str"].(string)
-	newStr, _ := args["new_str"].(string)
-	replaceAll, _ := args["replace_all"].(bool)
-	if path == "" || oldStr == "" {
-		return tools.Result{IsError: true, Content: "path and old_str are required"}, nil
+	path, pathOk := tools.StringArg(args, "path")
+	oldStr, oldOk := tools.StringArg(args, "old_str")
+	newStr, newOk := tools.StringArg(args, "new_str")
+	replaceAll := false
+	if v, set := tools.ArgBool(args, "replace_all"); set {
+		replaceAll = v
+	}
+	if !pathOk || path == "" || !oldOk || oldStr == "" || !newOk {
+		return tools.Result{IsError: true, Content: "path, old_str, and new_str are required"}, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {

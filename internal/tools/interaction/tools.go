@@ -31,8 +31,8 @@ func (t *AskUserTool) Schema() map[string]any {
 }
 
 func (t *AskUserTool) Execute(_ context.Context, args map[string]any) (tools.Result, error) {
-	question, _ := args["question"].(string)
-	if question == "" {
+	question, ok := tools.StringArg(args, "question")
+	if !ok || question == "" {
 		return tools.Result{IsError: true, Content: "question is required"}, nil
 	}
 	if t.responder == nil {
@@ -64,6 +64,9 @@ func (t *NotifyTool) Schema() map[string]any {
 }
 
 func (t *NotifyTool) Execute(_ context.Context, args map[string]any) (tools.Result, error) {
-	message, _ := args["message"].(string)
+	message, ok := tools.StringArg(args, "message")
+	if !ok || message == "" {
+		return tools.Result{IsError: true, Content: "message is required"}, nil
+	}
 	return tools.Result{Content: fmt.Sprintf("notification: %s", message)}, nil
 }

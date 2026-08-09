@@ -74,7 +74,7 @@ func (t *ReadFileTool) Schema() map[string]any {
 }
 
 func (t *ReadFileTool) Execute(_ context.Context, args map[string]any) (tools.Result, error) {
-	path, ok := args["path"].(string)
+	path, ok := tools.StringArg(args, "path")
 	if !ok || path == "" {
 		return tools.Result{IsError: true, Content: "path is required"}, nil
 	}
@@ -100,18 +100,26 @@ func (t *ReadFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 
 	content := string(data)
 
-	// Optional line range filtering
-	startLine, hasStart := args["start_line"].(float64)
-	endLine, hasEnd := args["end_line"].(float64)
+	// Optional line range filtering (accepts JSON int or float)
+	var hasStart, hasEnd bool
+	var startLine, endLine int
+	if n, ok := tools.ArgInt(args, "start_line"); ok {
+		startLine = n
+		hasStart = true
+	}
+	if n, ok := tools.ArgInt(args, "end_line"); ok {
+		endLine = n
+		hasEnd = true
+	}
 	if hasStart || hasEnd {
 		lines := strings.Split(content, "\n")
 		start := 1
 		end := len(lines)
-		if hasStart && int(startLine) >= 1 {
-			start = int(startLine)
+		if hasStart && startLine >= 1 {
+			start = startLine
 		}
-		if hasEnd && int(endLine) >= 1 && int(endLine) < end {
-			end = int(endLine)
+		if hasEnd && endLine >= 1 && endLine < end {
+			end = endLine
 		}
 		if start > end {
 			start = end
@@ -149,7 +157,7 @@ func (t *ListDirectoryTool) Schema() map[string]any {
 }
 
 func (t *ListDirectoryTool) Execute(_ context.Context, args map[string]any) (tools.Result, error) {
-	path, ok := args["path"].(string)
+	path, ok := tools.StringArg(args, "path")
 	if !ok || path == "" {
 		path = "."
 	}

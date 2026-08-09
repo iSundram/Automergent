@@ -1,10 +1,13 @@
 package lsp
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestDiagnosticsRequiresFile(t *testing.T) {
 	tool := &DiagnosticsTool{}
-	res, err := tool.Execute(nil, map[string]any{})
+	res, err := tool.Execute(context.Background(), map[string]any{})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/spinner"
@@ -21,7 +22,6 @@ import (
 	"github.com/iSundram/Automergent/internal/ai"
 	googleProvider "github.com/iSundram/Automergent/internal/ai/google"
 	"github.com/iSundram/Automergent/internal/config"
-	gitutil "github.com/iSundram/Automergent/internal/git"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
 	"github.com/iSundram/Automergent/internal/tui/components"
@@ -67,6 +67,7 @@ type App struct {
 	fetchingModels     bool
 	availableProviders []string
 	streamedReply      bool
+	lastCtrlCAt        time.Time
 }
 
 func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialPrompt string) *App {
@@ -186,6 +187,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds []tea.Cmd
 	)
 	switch m := msg.(type) {
+	case tea.MouseMsg:
+		// Enforce keyboard-only navigation/scrolling.
+		return a, nil
 	case tea.WindowSizeMsg:
 		a.width, a.height = m.Width, m.Height
 		a.layout()
@@ -244,6 +248,10 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 	key := m.String()
+	if key == "esc" && a.thinking {
+		a.cancelActiveRun("Interrupted")
+		return nil
+	}
 	if a.palette.Visible() {
 		switch key {
 		case "enter":
@@ -277,7 +285,20 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		}
 	}
 	switch key {
-	case "ctrl+c", "ctrl+q":
+	case "ctrl+c":
+		now := time.Now()
+		if now.Sub(a.lastCtrlCAt) <= time.Second {
+			a.cancel()
+			return tea.Quit
+		}
+		a.lastCtrlCAt = now
+		if a.thinking {
+			a.cancelActiveRun("Interrupted")
+		} else {
+			a.statusBar.SetStatus("Press Ctrl+C again to exit")
+		}
+		return nil
+	case "ctrl+q":
 		a.cancel()
 		return tea.Quit
 	case "ctrl+d":
@@ -401,10 +422,8 @@ func (a *App) updatePalette() {
 			{Name: "provider", Description: "Switch provider", Value: "provider", Icon: "🔌"},
 			{Name: "mode", Description: "Change approval mode", Value: "mode", Icon: "⚙️"},
 			{Name: "api-key", Description: "Set API key for active provider", Value: "api-key", Icon: "🔑"},
-			{Name: "model-api-key", Description: "Set API key for active model", Value: "model-api-key", Icon: "🧠"},
 			{Name: "base-url", Description: "Set base URL for active provider", Value: "base-url", Icon: "🌐"},
 			{Name: "provider-api-key", Description: "Set API key for a provider", Value: "provider-api-key", Icon: "🔐"},
-			{Name: "provider-model-api-key", Description: "Set API key for provider+model", Value: "provider-model-api-key", Icon: "🧩"},
 			{Name: "provider-base-url", Description: "Set base URL for a provider", Value: "provider-base-url", Icon: "🔗"},
 			{Name: "clear", Description: "Clear screen", Value: "clear", Icon: "🧹"},
 			{Name: "reset", Description: "Reset history", Value: "reset", Icon: "🔄"},
@@ -486,20 +505,34 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		}
 		return a.waitForAgentEvent()
 	case agent.EventToolCall:
-		if tc, ok := ev.Payload.(ai.ToolCall); ok {
+		if te, ok := ev.Payload.(agent.ToolCallEvent); ok {
+			argText := ""
+			if len(te.Args) > 0 {
+				if b, err := json.Marshal(te.Args); err == nil {
+					argText = string(b)
+				}
+			}
+			ctx := extractToolContext(te.Name, te.Args)
+			a.conversation.AddToolLifecycleStart(te.Name, argText, ctx)
+			a.stats.ToolCallCount++
+			a.statusBar.SetStatus(fmt.Sprintf("⚙ %s…", te.Name))
+		} else if tc, ok := ev.Payload.(ai.ToolCall); ok {
 			argText := ""
 			if len(tc.Args) > 0 {
 				if b, err := json.Marshal(tc.Args); err == nil {
 					argText = string(b)
 				}
 			}
-			a.conversation.AddToolCall(tc.Name, argText)
+			ctx := extractToolContext(tc.Name, tc.Args)
+			a.conversation.AddToolCall(tc.Name, argText, ctx)
 			a.stats.ToolCallCount++
 			a.statusBar.SetStatus(fmt.Sprintf("⚙ %s…", tc.Name))
 		}
 		return a.waitForAgentEvent()
 	case agent.EventToolDone:
-		if r, ok := ev.Payload.(tools.Result); ok {
+		if td, ok := ev.Payload.(agent.ToolDoneEvent); ok {
+			a.conversation.AddToolLifecycleDone(td.Name, td.Duration, td.Result, a.conversation.ReviewMode())
+		} else if r, ok := ev.Payload.(tools.Result); ok {
 			if r.IsError {
 				a.conversation.AddMessage("assistant", "Tool error: "+r.Content, true)
 			} else if strings.TrimSpace(r.Content) != "" {
@@ -510,6 +543,10 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		return a.waitForAgentEvent()
 	case agent.EventStatus:
 		if s, ok := ev.Payload.(string); ok {
+			// Ignore stale transient statuses that can arrive after completion.
+			if !a.thinking && isTransientStatus(s) {
+				return nil
+			}
 			a.statusBar.SetStatus(s)
 		}
 		return a.waitForAgentEvent()
@@ -528,7 +565,12 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		a.thinking = false
 		a.spin.Stop()
 		if err, ok := ev.Payload.(error); ok {
-			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
+			errStr := err.Error()
+			msg := formatErrorMessage(errStr)
+			a.conversation.AddMessage("assistant", msg, true)
+			if strings.Contains(errStr, "401") || strings.Contains(errStr, "authentication_error") {
+				a.conversation.AddMessage("system", "Tip: You can set the API key using: /api-key <key>", false)
+			}
 		}
 		a.statusBar.SetStatus("Error")
 		return nil
@@ -536,7 +578,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		if payload, ok := ev.Payload.(map[string]any); ok {
 			if tc, ok := payload["tool_call"].(ai.ToolCall); ok {
 				a.confirm.Show(fmt.Sprintf("Allow %s?", tc.Name))
-				if replyCh, ok := payload["reply"].(chan bool); ok {
+				if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
 					a.confirm.SetReply(replyCh)
 				}
 			}
@@ -598,7 +640,7 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 			a.conversation.AddMessage("system", fmt.Sprintf("Mode switched to %s", args[0]), false)
 			_ = a.persistProjectConfig()
 		} else {
-			a.conversation.AddMessage("assistant", "Error: usage /mode <suggest|auto-edit|full-auto|plan>", true)
+			a.conversation.AddMessage("assistant", "Error: usage /mode <edit|plan>", true)
 		}
 	case "/api-key":
 		if len(args) == 0 {
@@ -615,27 +657,6 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		}
 		a.conversation.AddMessage("system", fmt.Sprintf("API key updated for %s", a.cfg.Provider), false)
 		a.statusBar.SetStatus("API key updated")
-		_ = a.persistProjectConfig()
-	case "/model-api-key":
-		if len(args) == 0 {
-			a.conversation.AddMessage("assistant", "Error: usage /model-api-key <value>", true)
-			return nil
-		}
-		a.ensureProviderConfig(a.cfg.Provider)
-		pc := a.cfg.Providers[a.cfg.Provider]
-		if pc.Models == nil {
-			pc.Models = map[string]config.ModelConfig{}
-		}
-		mc := pc.Models[a.cfg.Model]
-		mc.APIKey = strings.Join(args, " ")
-		pc.Models[a.cfg.Model] = mc
-		a.cfg.Providers[a.cfg.Provider] = pc
-		if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
-			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
-			return nil
-		}
-		a.conversation.AddMessage("system", fmt.Sprintf("API key updated for %s/%s", a.cfg.Provider, a.cfg.Model), false)
-		a.statusBar.SetStatus("Model API key updated")
 		_ = a.persistProjectConfig()
 	case "/base-url":
 		if len(args) == 0 {
@@ -689,35 +710,6 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		}
 		a.conversation.AddMessage("system", fmt.Sprintf("Base URL updated for %s", provider), false)
 		_ = a.persistProjectConfig()
-	case "/provider-model-api-key":
-		if len(args) < 3 {
-			a.conversation.AddMessage("assistant", "Error: usage /provider-model-api-key <provider> <model> <value>", true)
-			return nil
-		}
-		provider := args[0]
-		model := args[1]
-		if !isSupportedProvider(provider) {
-			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: unknown provider %q", provider), true)
-			return nil
-		}
-		a.ensureProviderConfig(provider)
-		pc := a.cfg.Providers[provider]
-		if pc.Models == nil {
-			pc.Models = map[string]config.ModelConfig{}
-		}
-		mc := pc.Models[model]
-		mc.APIKey = strings.Join(args[2:], " ")
-		pc.Models[model] = mc
-		a.cfg.Providers[provider] = pc
-		if provider == a.cfg.Provider && model == a.cfg.Model {
-			if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
-				a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
-				return nil
-			}
-		}
-		a.conversation.AddMessage("system", fmt.Sprintf("API key updated for %s/%s", provider, model), false)
-		a.statusBar.SetStatus("Provider/model API key updated")
-		_ = a.persistProjectConfig()
 	case "/sessions":
 		a.sessionBrowser.SetSessions([]*session.Session{a.sess})
 		a.sessionBrowser.Show()
@@ -752,12 +744,12 @@ func (a *App) layout() {
 		inputH = 3
 	}
 
-	paletteH := 0
-	if a.palette.Visible() {
-		paletteH = 9
+	thinkingH := 0
+	if a.thinking && !a.confirm.Visible() {
+		thinkingH = 1
 	}
 
-	mainH := a.height - headerH - statusH - inputH - paletteH
+	mainH := a.height - headerH - statusH - inputH - thinkingH
 	if mainH < 1 {
 		mainH = 1
 	}
@@ -836,22 +828,59 @@ func (a *App) View() string {
 		if a.lspPanel.Visible() {
 			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", a.lspPanel.View())
 		}
+		if a.palette.Visible() {
+			paletteView := lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.palette.View())
+			mainRow = overlayBottom(mainRow, paletteView)
+		}
 		sb.WriteString(mainRow)
 	}
 	sb.WriteByte('\n')
-	if a.palette.Visible() {
-		sb.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.palette.View()) + "\n")
-	}
 	if a.confirm.Visible() {
 		sb.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
-	} else if a.thinking {
-		sb.WriteString("  " + a.spin.View() + " Thinking...")
 	} else {
+		if a.thinking {
+			sb.WriteString("  " + a.spin.View() + "\n")
+		}
 		sb.WriteString(a.input.View())
 	}
 	sb.WriteByte('\n')
 	sb.WriteString(a.statusBar.View())
 	return sb.String()
+}
+
+func overlayBottom(base, overlay string) string {
+	if strings.TrimSpace(overlay) == "" {
+		return base
+	}
+	baseLines := strings.Split(base, "\n")
+	overlayLines := strings.Split(overlay, "\n")
+	if len(baseLines) < len(overlayLines) {
+		return overlay
+	}
+	start := len(baseLines) - len(overlayLines)
+	copy(baseLines[start:], overlayLines)
+	return strings.Join(baseLines, "\n")
+}
+
+func formatErrorMessage(errStr string) string {
+	if strings.Contains(errStr, "401") || strings.Contains(errStr, "authentication_error") {
+		return "API Key missing or invalid. Use /api-key <value> to set it, or export the appropriate environment variable (e.g., GEMINI_API_KEY)."
+	}
+	if strings.Contains(errStr, "403") {
+		return "API access forbidden. Check your account permissions or billing status."
+	}
+	if strings.Contains(errStr, "429") {
+		return "Rate limit exceeded. Please wait a moment before trying again."
+	}
+	return "Error: " + errStr
+}
+
+func isTransientStatus(s string) bool {
+	n := strings.ToLower(strings.TrimSpace(s))
+	if n == "thinking" || n == "thinking…" || n == "thinking..." {
+		return true
+	}
+	return strings.HasPrefix(n, "running ")
 }
 
 func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialPrompt string) error {
@@ -861,70 +890,66 @@ func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialProm
 	return err
 }
 
+func (a *App) cancelActiveRun(status string) {
+	a.cancel()
+	a.ctx, a.cancel = context.WithCancel(context.Background())
+	a.thinking = false
+	a.spin.Stop()
+	if status != "" {
+		a.statusBar.SetStatus(status)
+	}
+}
+
 func (a *App) persistProjectConfig() error {
-	cwd, err := os.Getwd()
+	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
-	root, err := gitutil.RootDir(a.ctx, cwd)
-	if err != nil || root == "" {
-		return nil
-	}
-	automergentDir := filepath.Join(root, ".automergent")
+	automergentDir := filepath.Join(home, ".automergent")
 	if err := os.MkdirAll(automergentDir, 0o700); err != nil {
 		return err
 	}
 
-	doc := map[string]any{
-		"provider": a.cfg.Provider,
-		"model":    a.cfg.Model,
-		"mode":     a.cfg.Mode,
-	}
-	if len(a.cfg.Providers) > 0 {
-		providers := map[string]map[string]any{}
-		for name, p := range a.cfg.Providers {
-			entry := map[string]any{}
-			if p.APIKey != "" {
-				entry["apiKey"] = p.APIKey
-			}
-			if p.BaseURL != "" {
-				entry["baseUrl"] = p.BaseURL
-			}
-			if p.OrgID != "" {
-				entry["orgId"] = p.OrgID
-			}
-			if len(p.Models) > 0 {
-				models := map[string]map[string]any{}
-				for model, mc := range p.Models {
-					modelEntry := map[string]any{}
-					if mc.APIKey != "" {
-						modelEntry["apiKey"] = mc.APIKey
-					}
-					if mc.BaseURL != "" {
-						modelEntry["baseUrl"] = mc.BaseURL
-					}
-					if len(modelEntry) > 0 {
-						models[model] = modelEntry
-					}
-				}
-				if len(models) > 0 {
-					entry["models"] = models
-				}
-			}
-			if len(entry) > 0 {
-				providers[name] = entry
-			}
-		}
-		if len(providers) > 0 {
-			doc["providers"] = providers
-		}
-	}
-
-	data, err := yaml.Marshal(doc)
+	data, err := yaml.Marshal(a.cfg)
 	if err != nil {
 		return err
 	}
 	return atomicWriteFile(filepath.Join(automergentDir, "config.yaml"), data, 0o600)
+}
+
+func extractToolContext(name string, args map[string]any) string {
+	if args == nil {
+		return ""
+	}
+	switch name {
+	case "read_file", "write_file", "patch_file", "list_directory", "lsp_diagnostics":
+		if path, ok := args["path"].(string); ok {
+			return filepath.Base(path)
+		}
+		if path, ok := args["file"].(string); ok {
+			return filepath.Base(path)
+		}
+	case "run_command":
+		if cmd, ok := args["command"].(string); ok {
+			if len(cmd) > 30 {
+				return cmd[:27] + "..."
+			}
+			return cmd
+		}
+	case "grep":
+		if pattern, ok := args["pattern"].(string); ok {
+			return pattern
+		}
+	case "web_fetch":
+		if u, ok := args["url"].(string); ok {
+			return u
+		}
+	case "web_search":
+		if q, ok := args["query"].(string); ok {
+			return q
+		}
+	}
+	return ""
 }
 
 func truncateUIContent(s string, reviewMode bool) string {
@@ -1026,14 +1051,6 @@ func defaultModelForProvider(provider string) string {
 
 func buildProviderFromConfig(cfg *config.Config) (ai.Provider, error) {
 	pc := cfg.Providers[cfg.Provider]
-	if mc, ok := pc.Models[cfg.Model]; ok {
-		if mc.APIKey != "" {
-			pc.APIKey = mc.APIKey
-		}
-		if mc.BaseURL != "" {
-			pc.BaseURL = mc.BaseURL
-		}
-	}
 	aiCfg := ai.ProviderConfig{
 		APIKey:       pc.APIKey,
 		BaseURL:      pc.BaseURL,

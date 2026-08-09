@@ -39,18 +39,21 @@ func (t *GrepTool) Schema() map[string]any {
 }
 
 func (t *GrepTool) Execute(_ context.Context, args map[string]any) (tools.Result, error) {
-	pattern, _ := args["pattern"].(string)
-	root, _ := args["path"].(string)
-	glob, _ := args["glob"].(string)
-	ignoreCase, _ := args["ignore_case"].(bool)
+	pattern, patOk := tools.StringArg(args, "pattern")
+	root, _ := tools.StringArg(args, "path")
+	glob, _ := tools.StringArg(args, "glob")
+	ignoreCase := false
+	if v, set := tools.ArgBool(args, "ignore_case"); set {
+		ignoreCase = v
+	}
 	maxResults := 100
-	if n, ok := args["max_results"].(float64); ok && int(n) > 0 {
-		maxResults = int(n)
+	if n, ok := tools.ArgInt(args, "max_results"); ok && n > 0 {
+		maxResults = n
 	}
 	if root == "" {
 		root = "."
 	}
-	if pattern == "" {
+	if !patOk || pattern == "" {
 		return tools.Result{IsError: true, Content: "pattern is required"}, nil
 	}
 	if ignoreCase {
@@ -65,6 +68,9 @@ func (t *GrepTool) Execute(_ context.Context, args map[string]any) (tools.Result
 	limitErr := fmt.Errorf("limit reached")
 	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
+			if path == root {
+				return err
+			}
 			return nil
 		}
 		if d.IsDir() {

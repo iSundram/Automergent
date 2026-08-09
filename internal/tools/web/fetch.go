@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/iSundram/Automergent/internal/tools"
+	tools "github.com/iSundram/Automergent/internal/tools"
 )
 
 // blockedHostnames are cloud-metadata and other dangerous endpoints that must
@@ -77,8 +77,8 @@ func (t *FetchTool) Schema() map[string]any {
 }
 
 func (t *FetchTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
-	rawURL, _ := args["url"].(string)
-	if rawURL == "" {
+	rawURL, ok := tools.StringArg(args, "url")
+	if !ok || rawURL == "" {
 		return tools.Result{IsError: true, Content: "url is required"}, nil
 	}
 	if err := validateURL(rawURL); err != nil {
@@ -97,6 +97,12 @@ func (t *FetchTool) Execute(ctx context.Context, args map[string]any) (tools.Res
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 512*1024))
 	if err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("read error: %v", err)}, nil
+	}
+	if resp.StatusCode < 200 || resp.StatusCode > 299 {
+		return tools.Result{
+			IsError: true,
+			Content: fmt.Sprintf("HTTP %s\n%s", resp.Status, string(body)),
+		}, nil
 	}
 	return tools.Result{Content: string(body)}, nil
 }

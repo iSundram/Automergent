@@ -56,8 +56,10 @@ func (h HelpOverlay) View() string {
 		{
 			"Session",
 			[][2]string{
+				{"Esc", "Interrupt active run"},
 				{"Ctrl+U", "Clear input"},
-				{"Ctrl+C / Ctrl+Q", "Quit"},
+				{"Ctrl+C", "Interrupt (double press to quit)"},
+				{"Ctrl+Q", "Quit"},
 			},
 		},
 		{
@@ -67,12 +69,10 @@ func (h HelpOverlay) View() string {
 				{"/clear", "Clear conversation"},
 				{"/provider <name> [model]", "Switch provider and optional model"},
 				{"/model <name>", "Switch AI model"},
-				{"/mode <mode>", "Switch approval mode (suggest/auto-edit/full-auto/plan)"},
+				{"/mode <mode>", "Switch approval mode (edit/plan)"},
 				{"/api-key <value>", "Set API key for active provider"},
-				{"/model-api-key <value>", "Set API key for active provider+model"},
 				{"/base-url <url>", "Set base URL for active provider"},
 				{"/provider-api-key <provider> <value>", "Set API key for a specific provider"},
-				{"/provider-model-api-key <provider> <model> <value>", "Set API key for specific provider+model"},
 				{"/provider-base-url <provider> <url>", "Set base URL for a specific provider"},
 				{"/sessions", "Open session browser"},
 				{"/diff", "Toggle diff pane"},

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
@@ -15,18 +16,42 @@ import (
 
 // Agent is the core AI coding agent.
 type Agent struct {
-	cfg      *config.Config
-	provider ai.Provider
-	sess     *session.Session
-	tools    *tools.Registry
-	events   chan Event
-	mu       sync.RWMutex
+	cfg                 *config.Config
+	provider            ai.Provider
+	sess                *session.Session
+	tools               *tools.Registry
+	events              chan Event
+	sessionPersist      func()
+	mu                  sync.RWMutex
+	sessionAllowedTools map[string]bool
+}
+
+type ConfirmationResponse struct {
+	Allow    bool
+	Always   bool
+	Feedback string
 }
 
 // Event is an agent lifecycle event.
 type Event struct {
 	Type    string
 	Payload any
+}
+
+type ToolCallEvent struct {
+	ID        string
+	Name      string
+	Args      map[string]any
+	StartedAt time.Time
+}
+
+type ToolDoneEvent struct {
+	ID         string
+	Name       string
+	StartedAt  time.Time
+	FinishedAt time.Time
+	Duration   time.Duration
+	Result     tools.Result
 }
 
 const (
@@ -43,11 +68,29 @@ const (
 // New creates a new Agent.
 func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *tools.Registry) *Agent {
 	return &Agent{
-		cfg:      cfg,
-		provider: provider,
-		sess:     sess,
-		tools:    reg,
-		events:   make(chan Event, 512),
+		cfg:                 cfg,
+		provider:            provider,
+		sess:                sess,
+		tools:               reg,
+		events:              make(chan Event, 8192),
+		sessionAllowedTools: make(map[string]bool),
+	}
+}
+
+// SetSessionPersist registers a callback invoked after meaningful session updates
+// (e.g. completed turns). Used to save conversations without waiting for process exit.
+func (a *Agent) SetSessionPersist(fn func()) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sessionPersist = fn
+}
+
+func (a *Agent) tryPersist() {
+	a.mu.RLock()
+	fn := a.sessionPersist
+	a.mu.RUnlock()
+	if fn != nil {
+		fn()
 	}
 }
 
@@ -73,11 +116,11 @@ func (a *Agent) Session() *session.Session { return a.sess }
 
 // Run executes the agent loop for the given user prompt.
 func (a *Agent) Run(ctx context.Context, prompt string) error {
-	// In full-auto mode, check that we are inside a git repository when required.
-	if a.cfg.Mode == "full-auto" && a.cfg.Security.RequireGitForAutoModes {
+	// In edit mode, check that we are inside a git repository when required.
+	if a.cfg.Mode == "edit" && a.cfg.Security.RequireGitForAutoModes {
 		cwd, _ := os.Getwd()
 		if !gitIsRepo(ctx, cwd) {
-			a.emit(EventStatus, "⚠ Not a git repository — full-auto mode requires git for safe rollback")
+			a.emit(EventStatus, "⚠ Not a git repository — edit mode requires git for safe rollback")
 		}
 	}
 
@@ -105,43 +148,65 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		resp, err := provider.Complete(ctx, req)
 		if err != nil {
 			a.emit(EventError, err)
+			a.tryPersist()
 			return fmt.Errorf("agent: complete: %w", err)
 		}
 
-		// Stream tokens as they arrive
-		text, usage := a.drainStream(resp)
+		text, usage, err := a.drainStream(resp)
+		if err != nil {
+			a.emit(EventError, err)
+			a.tryPersist()
+			return fmt.Errorf("agent: stream: %w", err)
+		}
 		toolCalls := resp.ToolCalls()
 		stop := resp.StopReason()
 		a.sess.AddUsage(usage)
 
-		if text != "" {
-			msg := ai.NewTextMessage(ai.RoleAssistant, text)
+		if len(toolCalls) > 0 {
+			msg := ai.Message{Role: ai.RoleAssistant}
+			if text != "" {
+				msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeText, Text: text})
+			}
+			for _, tc := range toolCalls {
+				tcCopy := tc
+				msg.Content = append(msg.Content, ai.ContentPart{
+					Type:     ai.ContentTypeToolCall,
+					ToolCall: &tcCopy,
+				})
+			}
 			a.sess.AddMessage(msg)
+		} else if text != "" {
+			a.sess.AddMessage(ai.NewTextMessage(ai.RoleAssistant, text))
 		}
 
 		if stop != ai.StopReasonTools || len(toolCalls) == 0 {
 			a.emit(EventDone, text)
+			a.tryPersist()
 			return nil
 		}
 
-		// Handle tool calls
-		assistantMsg := ai.Message{Role: ai.RoleAssistant}
 		for _, tc := range toolCalls {
-			assistantMsg.Content = append(assistantMsg.Content, ai.ContentPart{
-				Type:     ai.ContentTypeToolCall,
-				ToolCall: &tc,
+			startedAt := time.Now()
+			a.emit(EventToolCall, ToolCallEvent{
+				ID:        tc.ID,
+				Name:      tc.Name,
+				Args:      tc.Args,
+				StartedAt: startedAt,
 			})
-		}
-		a.sess.AddMessage(assistantMsg)
-
-		for _, tc := range toolCalls {
-			a.emit(EventToolCall, tc)
 			a.emit(EventStatus, fmt.Sprintf("running %s", tc.Name))
 			result, err := a.executeTool(ctx, tc)
 			if err != nil {
 				result = tools.Result{IsError: true, Content: err.Error()}
 			}
-			a.emit(EventToolDone, result)
+			finishedAt := time.Now()
+			a.emit(EventToolDone, ToolDoneEvent{
+				ID:         tc.ID,
+				Name:       tc.Name,
+				StartedAt:  startedAt,
+				FinishedAt: finishedAt,
+				Duration:   finishedAt.Sub(startedAt),
+				Result:     result,
+			})
 
 			toolMsg := ai.Message{Role: ai.RoleTool}
 			toolMsg.Content = append(toolMsg.Content, ai.ContentPart{
@@ -154,17 +219,18 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			})
 			a.sess.AddMessage(toolMsg)
 		}
+		a.tryPersist()
 	}
 }
 
 // drainStream reads all chunks from the response, emitting EventToken for each text chunk.
-func (a *Agent) drainStream(resp ai.CompletionResponse) (string, ai.Usage) {
+func (a *Agent) drainStream(resp ai.CompletionResponse) (string, ai.Usage, error) {
 	var text string
 	ch := resp.Stream()
 	for chunk := range ch {
 		if chunk.Error != nil {
 			a.emit(EventError, chunk.Error)
-			break
+			return text, resp.Usage(), fmt.Errorf("stream chunk: %w", chunk.Error)
 		}
 		if chunk.Done {
 			break
@@ -174,7 +240,7 @@ func (a *Agent) drainStream(resp ai.CompletionResponse) (string, ai.Usage) {
 			text += chunk.Text
 		}
 	}
-	return text, resp.Usage()
+	return text, resp.Usage(), nil
 }
 
 func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, error) {
@@ -183,32 +249,42 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 		return tools.Result{IsError: true, Content: fmt.Sprintf("unknown tool: %s", tc.Name)}, nil
 	}
 
-	if t.RequiresConfirmation(a.cfg.Mode) {
-		confirmed := a.requestConfirmation(tc)
-		if !confirmed {
-			return tools.Result{Content: "user declined tool execution"}, nil
+	a.mu.RLock()
+	allowed := a.sessionAllowedTools[tc.Name]
+	a.mu.RUnlock()
+
+	if !allowed && t.RequiresConfirmation(a.cfg.Mode) {
+		res := a.requestConfirmation(tc)
+		if !res.Allow {
+			msg := "user declined tool execution"
+			if res.Feedback != "" {
+				msg = fmt.Sprintf("user declined: %s", res.Feedback)
+			}
+			return tools.Result{IsError: true, Content: msg}, nil
+		}
+		if res.Always {
+			a.mu.Lock()
+			a.sessionAllowedTools[tc.Name] = true
+			a.mu.Unlock()
 		}
 	}
 
 	return t.Execute(ctx, tc.Args)
 }
 
-func (a *Agent) requestConfirmation(tc ai.ToolCall) bool {
-	ch := make(chan bool, 1)
+func (a *Agent) requestConfirmation(tc ai.ToolCall) ConfirmationResponse {
+	ch := make(chan ConfirmationResponse, 1)
 	a.emit(EventConfirm, map[string]any{"tool_call": tc, "reply": ch})
 	select {
-	case confirmed := <-ch:
-		return confirmed
-	default:
-		return false
+	case res := <-ch:
+		return res
+	case <-time.After(time.Hour): // Safety timeout
+		return ConfirmationResponse{Allow: false}
 	}
 }
 
 func (a *Agent) emit(eventType string, payload any) {
-	select {
-	case a.events <- Event{Type: eventType, Payload: payload}:
-	default:
-	}
+	a.events <- Event{Type: eventType, Payload: payload}
 }
 
 func buildToolSchemas(reg *tools.Registry) []ai.ToolSchema {

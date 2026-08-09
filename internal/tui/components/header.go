@@ -45,9 +45,7 @@ func (h *Header) SetCost(c float64) { h.cost = c }
 // modeColor returns a color indicator for the mode.
 func (h *Header) modeIcon() string {
 	switch h.mode {
-	case "full-auto":
-		return "🤖"
-	case "auto-edit":
+	case "edit":
 		return "✏️ "
 	case "plan":
 		return "📋"
@@ -71,7 +69,7 @@ func (h Header) View() string {
 	}
 	modeStr := h.mode
 	if modeStr == "" {
-		modeStr = "suggest"
+		modeStr = "edit"
 	}
 
 	brand := h.styles.HeaderBrand.Render(" ◈ Automergent ")

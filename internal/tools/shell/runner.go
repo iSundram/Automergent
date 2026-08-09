@@ -94,7 +94,7 @@ func NewRunnerTool(timeout time.Duration) *RunnerTool {
 func (t *RunnerTool) Name() string        { return "run_command" }
 func (t *RunnerTool) Description() string { return "Execute a shell command and return its output." }
 func (t *RunnerTool) RequiresConfirmation(mode string) bool {
-	return mode == "suggest" || mode == "auto-edit"
+	return mode == "plan" || mode == "edit"
 }
 
 func (t *RunnerTool) Schema() map[string]any {
@@ -119,10 +119,10 @@ func (t *RunnerTool) Schema() map[string]any {
 }
 
 func (t *RunnerTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
-	command, _ := args["command"].(string)
-	cwd, _ := args["cwd"].(string)
-	timeoutStr, _ := args["timeout"].(string)
-	if command == "" {
+	command, cmdOk := tools.StringArg(args, "command")
+	cwd, _ := tools.StringArg(args, "cwd")
+	timeoutStr, _ := tools.StringArg(args, "timeout")
+	if !cmdOk || command == "" {
 		return tools.Result{IsError: true, Content: "command is required"}, nil
 	}
 

@@ -87,12 +87,8 @@ func buildSystemPrompt(cfg *config.Config, reg *tools.Registry) string {
 
 func modeDescription(mode string) string {
 	switch mode {
-	case "suggest":
-		return "In suggest mode, propose changes but ask for confirmation before writing files or running commands."
-	case "auto-edit":
-		return "In auto-edit mode, automatically read and write files, but ask for confirmation before running shell commands."
-	case "full-auto":
-		return "In full-auto mode, automatically perform all actions without asking for confirmation."
+	case "edit":
+		return "In edit mode, automatically read files, but ask for confirmation before writing files or running shell commands."
 	case "plan":
 		return "In plan mode, create a detailed plan of the changes to be made, then ask for approval before executing."
 	default:

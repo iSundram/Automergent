@@ -30,6 +30,7 @@ type Diff struct {
 // NewDiff creates a new Diff component.
 func NewDiff(styles *themes.Styles) Diff {
 	vp := viewport.New(40, 20)
+	vp.MouseWheelEnabled = false // Enforce keyboard-only scrolling
 	return Diff{viewport: vp, styles: styles}
 }
 

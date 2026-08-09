@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
@@ -46,6 +47,7 @@ func (s *SubAgent) Run(ctx context.Context) (string, error) {
 	systemPrompt := buildSystemPrompt(s.cfg, s.tools)
 	req := ai.CompletionRequest{
 		Messages:    s.sess.Messages,
+		Tools:       buildToolSchemas(s.tools),
 		System:      systemPrompt,
 		Temperature: 0.0,
 		MaxTokens:   8192,
@@ -55,10 +57,12 @@ func (s *SubAgent) Run(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Drain the stream and collect text
 	var text string
 	for chunk := range resp.Stream() {
-		if chunk.Done || chunk.Error != nil {
+		if chunk.Error != nil {
+			return text, fmt.Errorf("subagent stream: %w", chunk.Error)
+		}
+		if chunk.Done {
 			break
 		}
 		text += chunk.Text

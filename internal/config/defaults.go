@@ -14,7 +14,7 @@ func Default() *Config {
 	return &Config{
 		Provider:    "google",
 		Model:       "gemini-3.6-flash",
-		Mode:        "suggest",
+		Mode:        "edit",
 		Theme:       "catppuccin",
 		Keybindings: "default",
 		Layout:      "default",
