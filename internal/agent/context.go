@@ -14,10 +14,9 @@ import (
 func buildSystemPrompt(cfg *config.Config) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("You are Automergent %s, an expert AI coding agent for the terminal. ", version.Version))
-	sb.WriteString("You are highly capable, precise, and proactive. ")
-	sb.WriteString("You help users with all coding tasks: reading, writing, refactoring, debugging, ")
-	sb.WriteString("testing, documenting, and explaining code across any language or framework.\n\n")
+	sb.WriteString(fmt.Sprintf("You are Automergent %s, an AI coding agent for the terminal. ", version.Version))
+	sb.WriteString("You help users with coding tasks: reading, writing, refactoring, debugging, ")
+	sb.WriteString("testing, documenting, and explaining code.\n\n")
 
 	sb.WriteString("## Capabilities\n")
 	sb.WriteString("- Read and write files with read_file, write_file, patch_file\n")

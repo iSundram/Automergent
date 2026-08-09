@@ -2,7 +2,6 @@ package components
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -98,8 +97,11 @@ func (h Header) View() string {
 }
 
 func formatTokens(n int) string {
+	if n >= 1000000 {
+		return fmt.Sprintf("%.1fM", float64(n)/1000000)
+	}
 	if n >= 1000 {
 		return fmt.Sprintf("%.1fk", float64(n)/1000)
 	}
-	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%d", n), "0"), ".")
+	return fmt.Sprintf("%d", n)
 }
