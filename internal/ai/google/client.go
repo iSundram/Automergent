@@ -76,6 +76,7 @@ type geminiFunctionCall struct {
 
 type geminiPart struct {
 	Text             string              `json:"text,omitempty"`
+	ThoughtSignature string              `json:"thought_signature,omitempty"`
 	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionRes  `json:"functionResponse,omitempty"`
 }
@@ -110,9 +111,10 @@ type geminiRequest struct {
 }
 
 type geminiResponsePart struct {
-	Text         string `json:"text,omitempty"`
-	Thought      bool   `json:"thought,omitempty"`
-	FunctionCall *struct {
+	Text             string `json:"text,omitempty"`
+	Thought          bool   `json:"thought,omitempty"`
+	ThoughtSignature string `json:"thought_signature,omitempty"`
+	FunctionCall     *struct {
 		Name string          `json:"name"`
 		Args json.RawMessage `json:"args"`
 	} `json:"functionCall,omitempty"`
@@ -296,7 +298,8 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		for _, part := range gr2.Candidates[0].Content.Parts {
 			// Save for next turn
 			rawParts = append(rawParts, geminiPart{
-				Text: part.Text,
+				Text:             part.Text,
+				ThoughtSignature: part.ThoughtSignature,
 				FunctionCall: func() *geminiFunctionCall {
 					if part.FunctionCall == nil {
 						return nil
