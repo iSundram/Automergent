@@ -589,10 +589,51 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 				if ctx := extractToolContext(tc.Name, tc.Args); ctx != "" {
 					prompt = fmt.Sprintf("Allow %s: %s?", tc.Name, ctx)
 				}
+
+				// Special handling for file edits: show diff
+				if tc.Name == "write_file" || tc.Name == "patch_file" {
+					path, _ := tc.Args["path"].(string)
+					newContent := ""
+					if tc.Name == "write_file" {
+						newContent, _ = tc.Args["content"].(string)
+					} else {
+						// Patch: read file and apply patch
+						oldStr, _ := tc.Args["old_str"].(string)
+						replaceWith, _ := tc.Args["new_str"].(string)
+						replaceAll, _ := tc.Args["replace_all"].(bool)
+						data, _ := os.ReadFile(path)
+						original := string(data)
+						if replaceAll {
+							newContent = strings.ReplaceAll(original, oldStr, replaceWith)
+						} else {
+							newContent = strings.Replace(original, oldStr, replaceWith, 1)
+						}
+					}
+
+					oldData, _ := os.ReadFile(path)
+					diff := computeSimpleDiff(path, string(oldData), newContent)
+					a.diffPane.SetContent(diff)
+					if !a.diffPane.Visible() {
+						a.diffPane.Toggle()
+					}
+				}
+
 				a.confirm.Show(prompt)
 				a.layout() // Adjust layout for confirm box
 				if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
-					a.confirm.SetReply(replyCh)
+					// Wrap reply channel to hide diff on response
+					wrapped := make(chan agent.ConfirmationResponse, 1)
+					a.confirm.SetReply(wrapped)
+					go func() {
+						res := <-wrapped
+						// If we showed diff for this, hide it
+						if tc.Name == "write_file" || tc.Name == "patch_file" {
+							if a.diffPane.Visible() {
+								a.diffPane.Toggle()
+							}
+						}
+						replyCh <- res
+					}()
 				}
 			}
 		}
@@ -873,6 +914,39 @@ func overlayBottom(base, overlay string) string {
 	start := len(baseLines) - len(overlayLines)
 	copy(baseLines[start:], overlayLines)
 	return strings.Join(baseLines, "\n")
+}
+
+func computeSimpleDiff(filename, old, new string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("--- %s (current)\n", filename))
+	sb.WriteString(fmt.Sprintf("+++ %s (proposed)\n", filename))
+
+	oldLines := strings.Split(old, "\n")
+	newLines := strings.Split(new, "\n")
+
+	// Very simple line-based diff
+	max := len(oldLines)
+	if len(newLines) > max {
+		max = len(newLines)
+	}
+
+	for i := 0; i < max; i++ {
+		if i < len(oldLines) && i < len(newLines) {
+			if oldLines[i] == newLines[i] {
+				// Context line (only show around changes?)
+				// For now just show all for simplicity
+				sb.WriteString(" " + oldLines[i] + "\n")
+			} else {
+				sb.WriteString("-" + oldLines[i] + "\n")
+				sb.WriteString("+" + newLines[i] + "\n")
+			}
+		} else if i < len(oldLines) {
+			sb.WriteString("-" + oldLines[i] + "\n")
+		} else if i < len(newLines) {
+			sb.WriteString("+" + newLines[i] + "\n")
+		}
+	}
+	return sb.String()
 }
 
 func formatErrorMessage(errStr string) string {
