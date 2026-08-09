@@ -4,14 +4,16 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/iSundram/Automergent/internal/config"
+	"github.com/iSundram/Automergent/internal/tools"
 	"github.com/iSundram/Automergent/internal/version"
 )
 
 // buildSystemPrompt constructs the system prompt for the AI.
-func buildSystemPrompt(cfg *config.Config) string {
+func buildSystemPrompt(cfg *config.Config, reg *tools.Registry) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("You are Automergent %s, an AI coding agent for the terminal. ", version.Version))
@@ -33,6 +35,21 @@ func buildSystemPrompt(cfg *config.Config) string {
 	sb.WriteString("- Run tests after making changes when a test suite exists\n")
 	sb.WriteString("- Prefer using existing tools/libraries over introducing new dependencies\n")
 	sb.WriteString("- If you encounter an error, diagnose it carefully before trying again\n\n")
+
+	sb.WriteString("## Tool Calling Guidelines\n")
+	sb.WriteString("- Use tools for every external action instead of claiming you did something\n")
+	sb.WriteString("- For tool calls, first reason briefly, then call the most relevant tool\n")
+	sb.WriteString("- After a tool result returns, incorporate the actual output before next steps\n")
+	sb.WriteString("- If a tool fails, surface the error and either retry with a fix or ask user guidance\n")
+	sb.WriteString("- Do not invent tool outputs or pretend a command succeeded\n\n")
+
+	if reg != nil {
+		sb.WriteString("## Available Tools\n")
+		for _, line := range toolLines(reg) {
+			sb.WriteString("- " + line + "\n")
+		}
+		sb.WriteString("\n")
+	}
 
 	sb.WriteString(fmt.Sprintf("## Approval Mode: %s\n", cfg.Mode))
 	modeDesc := modeDescription(cfg.Mode)
@@ -100,4 +117,14 @@ func loadContextFile(dir string) string {
 		}
 	}
 	return ""
+}
+
+func toolLines(reg *tools.Registry) []string {
+	toolsList := reg.All()
+	lines := make([]string, 0, len(toolsList))
+	for _, t := range toolsList {
+		lines = append(lines, fmt.Sprintf("%s: %s", t.Name(), t.Description()))
+	}
+	sort.Strings(lines)
+	return lines
 }

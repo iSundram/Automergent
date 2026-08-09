@@ -130,12 +130,19 @@ type LogConfig struct {
 
 // ProviderConfig holds per-provider settings.
 type ProviderConfig struct {
-	APIKey       string
-	BaseURL      string
-	DefaultModel string
-	OrgID        string
-	Project      string
-	Location     string
+	APIKey       string                 `mapstructure:"apiKey" yaml:"apiKey,omitempty"`
+	BaseURL      string                 `mapstructure:"baseUrl" yaml:"baseUrl,omitempty"`
+	DefaultModel string                 `mapstructure:"defaultModel" yaml:"defaultModel,omitempty"`
+	OrgID        string                 `mapstructure:"orgId" yaml:"orgId,omitempty"`
+	Project      string                 `mapstructure:"project" yaml:"project,omitempty"`
+	Location     string                 `mapstructure:"location" yaml:"location,omitempty"`
+	Models       map[string]ModelConfig `mapstructure:"models" yaml:"models,omitempty"`
+}
+
+// ModelConfig holds model-scoped provider settings.
+type ModelConfig struct {
+	APIKey  string `mapstructure:"apiKey" yaml:"apiKey,omitempty"`
+	BaseURL string `mapstructure:"baseUrl" yaml:"baseUrl,omitempty"`
 }
 
 // FallbackProvider defines a fallback AI provider/model.

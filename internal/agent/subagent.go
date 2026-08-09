@@ -43,7 +43,7 @@ func (s *SubAgent) Run(ctx context.Context) (string, error) {
 
 	// Run with the already-added user message (no new prompt needed)
 	// by directly completing
-	systemPrompt := buildSystemPrompt(s.cfg)
+	systemPrompt := buildSystemPrompt(s.cfg, s.tools)
 	req := ai.CompletionRequest{
 		Messages:    s.sess.Messages,
 		System:      systemPrompt,

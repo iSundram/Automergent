@@ -47,6 +47,7 @@ func (h HelpOverlay) View() string {
 			[][2]string{
 				{"Ctrl+D", "Toggle diff pane"},
 				{"Ctrl+L", "Toggle LSP panel"},
+				{"Ctrl+R", "Toggle review mode (full tool output)"},
 				{"Ctrl+S", "Open session browser"},
 				{"Ctrl+T", "Toggle file tree"},
 				{"?", "Show this help"},
@@ -64,8 +65,15 @@ func (h HelpOverlay) View() string {
 			[][2]string{
 				{"/help", "Show this help"},
 				{"/clear", "Clear conversation"},
+				{"/provider <name> [model]", "Switch provider and optional model"},
 				{"/model <name>", "Switch AI model"},
 				{"/mode <mode>", "Switch approval mode (suggest/auto-edit/full-auto/plan)"},
+				{"/api-key <value>", "Set API key for active provider"},
+				{"/model-api-key <value>", "Set API key for active provider+model"},
+				{"/base-url <url>", "Set base URL for active provider"},
+				{"/provider-api-key <provider> <value>", "Set API key for a specific provider"},
+				{"/provider-model-api-key <provider> <model> <value>", "Set API key for specific provider+model"},
+				{"/provider-base-url <provider> <url>", "Set base URL for a specific provider"},
 				{"/sessions", "Open session browser"},
 				{"/diff", "Toggle diff pane"},
 				{"/tree", "Toggle file tree"},

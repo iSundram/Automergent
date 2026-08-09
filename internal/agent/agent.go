@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sync"
 
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
@@ -19,6 +20,7 @@ type Agent struct {
 	sess     *session.Session
 	tools    *tools.Registry
 	events   chan Event
+	mu       sync.RWMutex
 }
 
 // Event is an agent lifecycle event.
@@ -53,7 +55,18 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 func (a *Agent) Events() <-chan Event { return a.events }
 
 // Provider returns the AI provider.
-func (a *Agent) Provider() ai.Provider { return a.provider }
+func (a *Agent) Provider() ai.Provider {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.provider
+}
+
+// SetProvider swaps the runtime provider used for subsequent completions.
+func (a *Agent) SetProvider(p ai.Provider) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.provider = p
+}
 
 // Session returns the current session.
 func (a *Agent) Session() *session.Session { return a.sess }
@@ -71,10 +84,12 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	a.sess.AddMessage(ai.NewTextMessage(ai.RoleUser, prompt))
 
 	for {
-		// Check context window usage and emit warnings.
-		a.checkContextLimit(a.sess.Messages)
+		provider := a.Provider()
 
-		systemPrompt := buildSystemPrompt(a.cfg)
+		// Check context window usage and emit warnings.
+		a.checkContextLimit(provider, a.sess.Messages)
+
+		systemPrompt := buildSystemPrompt(a.cfg, a.tools)
 		toolSchemas := buildToolSchemas(a.tools)
 
 		req := ai.CompletionRequest{
@@ -87,7 +102,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		}
 
 		a.emit(EventStatus, "thinking")
-		resp, err := a.provider.Complete(ctx, req)
+		resp, err := provider.Complete(ctx, req)
 		if err != nil {
 			a.emit(EventError, err)
 			return fmt.Errorf("agent: complete: %w", err)
@@ -210,15 +225,15 @@ func buildToolSchemas(reg *tools.Registry) []ai.ToolSchema {
 
 // checkContextLimit emits warning/critical events when context usage is high.
 // It uses the approximate token count so no provider API call is needed.
-func (a *Agent) checkContextLimit(messages []ai.Message) {
-	tokens, err := a.provider.TokenCount(messages)
+func (a *Agent) checkContextLimit(provider ai.Provider, messages []ai.Message) {
+	tokens, err := provider.TokenCount(messages)
 	if err != nil {
 		return
 	}
 
 	limit := a.cfg.MaxContextTokens
 	if limit <= 0 {
-		limit = a.provider.ContextLimit()
+		limit = provider.ContextLimit()
 	}
 	if limit <= 0 {
 		return

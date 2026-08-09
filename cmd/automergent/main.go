@@ -1,27 +1,32 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
+	"gopkg.in/yaml.v3"
 
 	"github.com/iSundram/Automergent/internal/agent"
 	aiPkg "github.com/iSundram/Automergent/internal/ai"
 	googleProvider "github.com/iSundram/Automergent/internal/ai/google"
 	"github.com/iSundram/Automergent/internal/config"
+	gitutil "github.com/iSundram/Automergent/internal/git"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
 	toolsFS "github.com/iSundram/Automergent/internal/tools/filesystem"
 	toolsGit "github.com/iSundram/Automergent/internal/tools/git"
 	toolsInteraction "github.com/iSundram/Automergent/internal/tools/interaction"
+	toolsLSP "github.com/iSundram/Automergent/internal/tools/lsp"
 	toolsShell "github.com/iSundram/Automergent/internal/tools/shell"
 	toolsWeb "github.com/iSundram/Automergent/internal/tools/web"
 	"github.com/iSundram/Automergent/internal/tui"
@@ -91,7 +96,14 @@ func initConfig() {
 	} else {
 		home, _ := os.UserHomeDir()
 		viper.AddConfigPath(home + "/.automergent")
+		viper.AddConfigPath(".automergent")
 		viper.AddConfigPath(".")
+		if wd, err := os.Getwd(); err == nil {
+			if root, err := gitutil.RootDir(context.Background(), wd); err == nil {
+				viper.AddConfigPath(filepath.Join(root, ".automergent"))
+				viper.AddConfigPath(root)
+			}
+		}
 	}
 	viper.SetEnvPrefix("AUTOMERGENT")
 	viper.AutomaticEnv()
@@ -100,7 +112,11 @@ func initConfig() {
 
 func run(cmd *cobra.Command, args []string) error {
 	cfg := config.Default()
+	if err := decodeConfigFromViper(cfg); err != nil {
+		return fmt.Errorf("decode config: %w", err)
+	}
 	cfg.ApplyFlags(&flags)
+	applyProjectDefaults(cfg, cmd)
 
 	// Resolve API keys from environment if not set
 	resolveAPIKeysFromEnv(cfg)
@@ -166,7 +182,16 @@ func run(cmd *cobra.Command, args []string) error {
 	reg.Register(&toolsGit.LogTool{})
 	reg.Register(toolsWeb.NewFetchTool())
 	reg.Register(toolsWeb.NewSearchTool())
-	reg.Register(toolsInteraction.NewAskUserTool(nil))
+	reg.Register(&toolsLSP.DiagnosticsTool{})
+	reg.Register(toolsInteraction.NewAskUserTool(func(question string) (string, error) {
+		fmt.Fprintf(os.Stdout, "\n[ask_user] %s\n> ", question)
+		reader := bufio.NewReader(os.Stdin)
+		answer, err := reader.ReadString('\n')
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(answer), nil
+	}))
 	reg.Register(&toolsInteraction.NotifyTool{})
 
 	// Get AI provider
@@ -187,6 +212,23 @@ func run(cmd *cobra.Command, args []string) error {
 		return runHeadless(cmd.Context(), ag, sess, prompt)
 	}
 	return tui.Run(cfg, ag, sess, prompt)
+}
+
+func applyProjectDefaults(cfg *config.Config, cmd *cobra.Command) {
+	wd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	root, err := gitutil.RootDir(context.Background(), wd)
+	if err != nil || root == "" {
+		return
+	}
+
+	// Prefer per-project session persistence unless explicitly overridden.
+	if !cmd.Flags().Changed("session-dir") {
+		cfg.SessionDir = filepath.Join(root, ".automergent", "sessions")
+	}
+	_ = os.MkdirAll(filepath.Join(root, ".automergent"), 0o700)
 }
 
 func runHeadless(ctx context.Context, ag *agent.Agent, sess *session.Session, prompt string) error {
@@ -219,6 +261,14 @@ func runHeadless(ctx context.Context, ag *agent.Agent, sess *session.Session, pr
 
 func resolveProvider(cfg *config.Config) (aiPkg.Provider, error) {
 	pc := cfg.Providers[cfg.Provider]
+	if mc, ok := pc.Models[cfg.Model]; ok {
+		if mc.APIKey != "" {
+			pc.APIKey = mc.APIKey
+		}
+		if mc.BaseURL != "" {
+			pc.BaseURL = mc.BaseURL
+		}
+	}
 	aiCfg := aiPkg.ProviderConfig{
 		APIKey:       pc.APIKey,
 		BaseURL:      pc.BaseURL,
@@ -254,4 +304,29 @@ func resolveAPIKeysFromEnv(cfg *config.Config) {
 			}
 		}
 	}
+}
+
+func decodeConfigFromViper(cfg *config.Config) error {
+	if !viper.IsSet("provider") &&
+		!viper.IsSet("model") &&
+		!viper.IsSet("providers") &&
+		!viper.IsSet("mode") &&
+		!viper.IsSet("sessionDir") {
+		return nil
+	}
+
+	raw := map[string]any{}
+	for _, k := range []string{"provider", "model", "mode", "sessionDir", "providers"} {
+		if viper.IsSet(k) {
+			raw[k] = viper.Get(k)
+		}
+	}
+	data, err := yaml.Marshal(raw)
+	if err != nil {
+		return err
+	}
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return err
+	}
+	return nil
 }

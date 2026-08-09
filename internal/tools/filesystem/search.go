@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/iSundram/Automergent/internal/tools"
@@ -21,9 +22,17 @@ func (t *GrepTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"pattern": map[string]any{"type": "string", "description": "String to search for."},
+			"pattern": map[string]any{"type": "string", "description": "Regex pattern to search for."},
 			"path":    map[string]any{"type": "string", "description": "Directory or file to search."},
 			"glob":    map[string]any{"type": "string", "description": "File glob pattern, e.g. *.go"},
+			"ignore_case": map[string]any{
+				"type":        "boolean",
+				"description": "Case-insensitive regex search.",
+			},
+			"max_results": map[string]any{
+				"type":        "integer",
+				"description": "Maximum number of matching lines to return (default 100).",
+			},
 		},
 		"required": []string{"pattern"},
 	}
@@ -33,15 +42,28 @@ func (t *GrepTool) Execute(_ context.Context, args map[string]any) (tools.Result
 	pattern, _ := args["pattern"].(string)
 	root, _ := args["path"].(string)
 	glob, _ := args["glob"].(string)
+	ignoreCase, _ := args["ignore_case"].(bool)
+	maxResults := 100
+	if n, ok := args["max_results"].(float64); ok && int(n) > 0 {
+		maxResults = int(n)
+	}
 	if root == "" {
 		root = "."
 	}
 	if pattern == "" {
 		return tools.Result{IsError: true, Content: "pattern is required"}, nil
 	}
+	if ignoreCase {
+		pattern = "(?i)" + pattern
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return tools.Result{IsError: true, Content: fmt.Sprintf("invalid regex pattern: %v", err)}, nil
+	}
 
 	var matches []string
-	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+	limitErr := fmt.Errorf("limit reached")
+	err = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -61,18 +83,21 @@ func (t *GrepTool) Execute(_ context.Context, args map[string]any) (tools.Result
 		if err != nil {
 			return nil
 		}
+		if isBinary(data) {
+			return nil
+		}
 		lines := strings.Split(string(data), "\n")
 		for i, line := range lines {
-			if strings.Contains(line, pattern) {
+			if re.MatchString(line) {
 				matches = append(matches, fmt.Sprintf("%s:%d: %s", path, i+1, line))
-				if len(matches) >= 100 {
-					return fmt.Errorf("limit reached")
+				if len(matches) >= maxResults {
+					return limitErr
 				}
 			}
 		}
 		return nil
 	})
-	if err != nil && err.Error() != "limit reached" {
+	if err != nil && err != limitErr {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("walk error: %v", err)}, nil
 	}
 
@@ -80,4 +105,17 @@ func (t *GrepTool) Execute(_ context.Context, args map[string]any) (tools.Result
 		return tools.Result{Content: "no matches found"}, nil
 	}
 	return tools.Result{Content: strings.Join(matches, "\n")}, nil
+}
+
+func isBinary(data []byte) bool {
+	check := data
+	if len(check) > 8192 {
+		check = check[:8192]
+	}
+	for _, b := range check {
+		if b == 0 {
+			return true
+		}
+	}
+	return false
 }

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -21,12 +22,13 @@ type ConversationMsg struct {
 }
 
 type Conversation struct {
-	viewport  viewport.Model
-	messages  []ConversationMsg
-	styles    *themes.Styles
-	width     int
-	height    int
-	streaming bool
+	viewport   viewport.Model
+	messages   []ConversationMsg
+	styles     *themes.Styles
+	width      int
+	height     int
+	streaming  bool
+	reviewMode bool
 }
 
 func NewConversation(styles *themes.Styles) Conversation {
@@ -64,6 +66,7 @@ func (c *Conversation) AddMessage(role, content string, isError bool) {
 
 func (c *Conversation) AddToolCall(name, args string) {
 	c.streaming = false
+	args = truncateContent(args, c.reviewMode)
 	c.messages = append(c.messages, ConversationMsg{
 		Role:      "tool_call",
 		Content:   fmt.Sprintf("▸ ⚙  %s %s", name, args),
@@ -98,6 +101,17 @@ func (c *Conversation) Clear() {
 	c.messages = nil
 	c.streaming = false
 	c.refresh()
+}
+
+// SetReviewMode toggles detailed tool output rendering.
+func (c *Conversation) SetReviewMode(enabled bool) {
+	c.reviewMode = enabled
+	c.refresh()
+}
+
+// ReviewMode reports whether detailed tool output is enabled.
+func (c Conversation) ReviewMode() bool {
+	return c.reviewMode
 }
 
 func (c *Conversation) refresh() {
@@ -179,4 +193,29 @@ func (c Conversation) Update(msg tea.Msg) (Conversation, tea.Cmd) {
 
 func (c Conversation) View() string {
 	return c.viewport.View()
+}
+
+// MessageCount returns the number of conversation entries.
+func (c Conversation) MessageCount() int {
+	return len(c.messages)
+}
+
+// LastMessage returns the most recent conversation entry.
+func (c Conversation) LastMessage() (ConversationMsg, bool) {
+	if len(c.messages) == 0 {
+		return ConversationMsg{}, false
+	}
+	return c.messages[len(c.messages)-1], true
+}
+
+func truncateContent(s string, reviewMode bool) string {
+	if reviewMode {
+		return s
+	}
+	const maxRunes = 220
+	if utf8.RuneCountInString(s) <= maxRunes {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:maxRunes]) + " … [truncated, press Ctrl+R for full review mode]"
 }

@@ -89,9 +89,19 @@ func (t *PatchFileTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"path":    map[string]any{"type": "string"},
-			"old_str": map[string]any{"type": "string", "description": "Exact string to replace."},
-			"new_str": map[string]any{"type": "string", "description": "Replacement string."},
+			"path": map[string]any{"type": "string"},
+			"old_str": map[string]any{
+				"type":        "string",
+				"description": "Exact string to replace.",
+			},
+			"new_str": map[string]any{
+				"type":        "string",
+				"description": "Replacement string.",
+			},
+			"replace_all": map[string]any{
+				"type":        "boolean",
+				"description": "Replace all occurrences instead of the first occurrence.",
+			},
 		},
 		"required": []string{"path", "old_str", "new_str"},
 	}
@@ -101,6 +111,7 @@ func (t *PatchFileTool) Execute(_ context.Context, args map[string]any) (tools.R
 	path, _ := args["path"].(string)
 	oldStr, _ := args["old_str"].(string)
 	newStr, _ := args["new_str"].(string)
+	replaceAll, _ := args["replace_all"].(bool)
 	if path == "" || oldStr == "" {
 		return tools.Result{IsError: true, Content: "path and old_str are required"}, nil
 	}
@@ -109,13 +120,26 @@ func (t *PatchFileTool) Execute(_ context.Context, args map[string]any) (tools.R
 		return tools.Result{IsError: true, Content: fmt.Sprintf("read: %v", err)}, nil
 	}
 	original := string(data)
-	idx := strings.Index(original, oldStr)
-	if idx < 0 {
+	if !strings.Contains(original, oldStr) {
 		return tools.Result{IsError: true, Content: "old_str not found in file"}, nil
 	}
-	result := original[:idx] + newStr + original[idx+len(oldStr):]
+	var result string
+	replaced := 1
+	if replaceAll {
+		replaced = strings.Count(original, oldStr)
+		result = strings.ReplaceAll(original, oldStr, newStr)
+	} else {
+		result = strings.Replace(original, oldStr, newStr, 1)
+	}
 	if err := atomicWriteFile(path, []byte(result), 0o644); err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("write: %v", err)}, nil
 	}
-	return tools.Result{Content: fmt.Sprintf("patched %s", path)}, nil
+	return tools.Result{Content: fmt.Sprintf("patched %s (%d replacement%s)", path, replaced, pluralS(replaced))}, nil
+}
+
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }

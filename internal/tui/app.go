@@ -2,20 +2,28 @@ package tui
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sahilm/fuzzy"
+	"gopkg.in/yaml.v3"
 
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/ai"
+	googleProvider "github.com/iSundram/Automergent/internal/ai/google"
 	"github.com/iSundram/Automergent/internal/config"
+	gitutil "github.com/iSundram/Automergent/internal/git"
 	"github.com/iSundram/Automergent/internal/session"
+	"github.com/iSundram/Automergent/internal/tools"
 	"github.com/iSundram/Automergent/internal/tui/components"
 	"github.com/iSundram/Automergent/internal/tui/keys"
 	"github.com/iSundram/Automergent/internal/tui/themes"
@@ -55,8 +63,10 @@ type App struct {
 	initialPrompt  string
 	focus          string
 
-	availableModels []ai.Model
-	fetchingModels  bool
+	availableModels    []ai.Model
+	fetchingModels     bool
+	availableProviders []string
+	streamedReply      bool
 }
 
 func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialPrompt string) *App {
@@ -66,31 +76,33 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialP
 	ctx, cancel := context.WithCancel(context.Background())
 
 	app := &App{
-		cfg:            cfg,
-		ag:             ag,
-		sess:           sess,
-		keys:           kb,
-		styles:         styles,
-		theme:          theme,
-		conversation:   components.NewConversation(styles),
-		diffPane:       components.NewDiff(styles),
-		input:          components.NewInput(styles),
-		header:         components.NewHeader(styles),
-		statusBar:      components.NewStatusBar(styles),
-		spin:           components.NewSpinner(styles),
-		confirm:        components.NewConfirm(styles),
-		sessionBrowser: components.NewSessionBrowser(styles),
-		lspPanel:       components.NewLSPPanel(styles),
-		stats:          components.NewStats(styles),
-		helpOverlay:    components.NewHelpOverlay(styles),
-		fileTree:       components.NewFileTree(styles),
-		palette:        components.NewCommandPalette(styles),
-		ctx:            ctx,
-		cancel:         cancel,
-		initialPrompt:  initialPrompt,
-		statusMsg:      "Ready",
-		focus:          "input",
+		cfg:                cfg,
+		ag:                 ag,
+		sess:               sess,
+		keys:               kb,
+		styles:             styles,
+		theme:              theme,
+		conversation:       components.NewConversation(styles),
+		diffPane:           components.NewDiff(styles),
+		input:              components.NewInput(styles),
+		header:             components.NewHeader(styles),
+		statusBar:          components.NewStatusBar(styles),
+		spin:               components.NewSpinner(styles),
+		confirm:            components.NewConfirm(styles),
+		sessionBrowser:     components.NewSessionBrowser(styles),
+		lspPanel:           components.NewLSPPanel(styles),
+		stats:              components.NewStats(styles),
+		helpOverlay:        components.NewHelpOverlay(styles),
+		fileTree:           components.NewFileTree(styles),
+		palette:            components.NewCommandPalette(styles),
+		ctx:                ctx,
+		cancel:             cancel,
+		initialPrompt:      initialPrompt,
+		statusMsg:          "Ready",
+		focus:              "input",
+		availableProviders: []string{"google"},
 	}
+	sort.Strings(app.availableProviders)
 	app.header.SetModel(cfg.Model)
 	app.header.SetProvider(cfg.Provider)
 	app.header.SetMode(cfg.Mode)
@@ -115,6 +127,7 @@ func (a *App) startAgent(prompt string) tea.Cmd {
 		return a.runShellPassthrough(prompt[1:])
 	}
 	a.thinking = true
+	a.streamedReply = false
 	a.spin.Start()
 	a.conversation.AddMessage("user", prompt, false)
 	a.statusBar.SetStatus("Thinking…")
@@ -193,6 +206,18 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 	case components.FileTreeLoadedMsg:
 		a.fileTree.SetItems(m.Items)
+	case components.SessionSelectedMsg:
+		if m.Session != nil {
+			a.sess = m.Session
+			a.conversation.Clear()
+			for _, sm := range m.Session.Messages {
+				a.conversation.AddMessage(string(sm.Role), sm.TextContent(), false)
+			}
+			a.stats.InputTokens = m.Session.TotalInputTokens
+			a.stats.OutputTokens = m.Session.TotalOutputTokens
+			a.header.SetTokens(m.Session.TotalInputTokens + m.Session.TotalOutputTokens)
+			a.statusBar.SetStatus("Session loaded")
+		}
 	case modelsFetchedMsg:
 		a.availableModels = m
 		a.fetchingModels = false
@@ -223,6 +248,19 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		switch key {
 		case "enter":
 			if sel := a.palette.Selected(); sel != nil {
+				trigger := a.input.TriggerType()
+				if trigger == "command" || trigger == "help" {
+					execNoArg := map[string]bool{
+						"help": true, "clear": true, "reset": true, "stats": true,
+						"tree": true, "diff": true, "lsp": true, "sessions": true,
+						"quit": true, "exit": true,
+					}
+					if execNoArg[sel.Value] {
+						a.palette.Hide()
+						a.layout()
+						return a.handleSlashCommand("/" + sel.Value)
+					}
+				}
 				a.input.InsertValue(sel.Value)
 				a.palette.Hide()
 				a.layout()
@@ -239,11 +277,31 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		}
 	}
 	switch key {
-	case "ctrl+c", "ctrl+d":
+	case "ctrl+c", "ctrl+q":
 		a.cancel()
 		return tea.Quit
+	case "ctrl+d":
+		a.diffPane.Toggle()
+		a.layout()
+		return nil
 	case "ctrl+l":
-		a.conversation.Clear()
+		a.lspPanel.Toggle()
+		a.layout()
+		return nil
+	case "ctrl+s":
+		a.sessionBrowser.SetSessions([]*session.Session{a.sess})
+		a.sessionBrowser.Show()
+		return nil
+	case "ctrl+r":
+		a.conversation.SetReviewMode(!a.conversation.ReviewMode())
+		if a.conversation.ReviewMode() {
+			a.statusBar.SetStatus("Review mode enabled: full tool output")
+		} else {
+			a.statusBar.SetStatus("Review mode disabled: truncated tool output")
+		}
+		return nil
+	case "ctrl+u":
+		a.input.SetValue("")
 		return nil
 	case "ctrl+t":
 		a.showFileTree = !a.showFileTree
@@ -342,11 +400,18 @@ func (a *App) updatePalette() {
 			{Name: "model", Description: "Switch AI model", Value: "model", Icon: "🤖"},
 			{Name: "provider", Description: "Switch provider", Value: "provider", Icon: "🔌"},
 			{Name: "mode", Description: "Change approval mode", Value: "mode", Icon: "⚙️"},
+			{Name: "api-key", Description: "Set API key for active provider", Value: "api-key", Icon: "🔑"},
+			{Name: "model-api-key", Description: "Set API key for active model", Value: "model-api-key", Icon: "🧠"},
+			{Name: "base-url", Description: "Set base URL for active provider", Value: "base-url", Icon: "🌐"},
+			{Name: "provider-api-key", Description: "Set API key for a provider", Value: "provider-api-key", Icon: "🔐"},
+			{Name: "provider-model-api-key", Description: "Set API key for provider+model", Value: "provider-model-api-key", Icon: "🧩"},
+			{Name: "provider-base-url", Description: "Set base URL for a provider", Value: "provider-base-url", Icon: "🔗"},
 			{Name: "clear", Description: "Clear screen", Value: "clear", Icon: "🧹"},
 			{Name: "reset", Description: "Reset history", Value: "reset", Icon: "🔄"},
 			{Name: "sessions", Description: "Browse sessions", Value: "sessions", Icon: "📁"},
 			{Name: "diff", Description: "Toggle diff pane", Value: "diff", Icon: "🔍"},
 			{Name: "tree", Description: "Toggle file tree", Value: "tree", Icon: "🌳"},
+			{Name: "lsp", Description: "Toggle LSP pane", Value: "lsp", Icon: "📐"},
 			{Name: "stats", Description: "Show statistics", Value: "stats", Icon: "📈"},
 			{Name: "quit", Description: "Exit Automergent", Value: "quit", Icon: "🚪"},
 		}
@@ -367,6 +432,14 @@ func (a *App) updatePalette() {
 		} else {
 			items = a.fuzzyFilter(modelItems, filter)
 		}
+	case "provider":
+		var providerItems []components.PaletteItem
+		for _, p := range a.availableProviders {
+			providerItems = append(providerItems, components.PaletteItem{
+				Name: p, Description: "AI provider", Value: p, Icon: "🔌",
+			})
+		}
+		items = a.fuzzyFilter(providerItems, filter)
 
 	case "file":
 		var fileItems []components.PaletteItem
@@ -407,16 +480,32 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventToken:
 		if tok, ok := ev.Payload.(string); ok {
 			a.conversation.AppendToken(tok)
+			if strings.TrimSpace(tok) != "" {
+				a.streamedReply = true
+			}
 		}
 		return a.waitForAgentEvent()
 	case agent.EventToolCall:
 		if tc, ok := ev.Payload.(ai.ToolCall); ok {
-			a.conversation.AddToolCall(tc.Name, "")
+			argText := ""
+			if len(tc.Args) > 0 {
+				if b, err := json.Marshal(tc.Args); err == nil {
+					argText = string(b)
+				}
+			}
+			a.conversation.AddToolCall(tc.Name, argText)
 			a.stats.ToolCallCount++
 			a.statusBar.SetStatus(fmt.Sprintf("⚙ %s…", tc.Name))
 		}
 		return a.waitForAgentEvent()
 	case agent.EventToolDone:
+		if r, ok := ev.Payload.(tools.Result); ok {
+			if r.IsError {
+				a.conversation.AddMessage("assistant", "Tool error: "+r.Content, true)
+			} else if strings.TrimSpace(r.Content) != "" {
+				a.conversation.AddMessage("tool_result", truncateUIContent(r.Content, a.conversation.ReviewMode()), false)
+			}
+		}
 		a.statusBar.SetStatus("Thinking…")
 		return a.waitForAgentEvent()
 	case agent.EventStatus:
@@ -431,7 +520,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
 		a.header.SetTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
-		if text, ok := ev.Payload.(string); ok && text != "" {
+		if text, ok := ev.Payload.(string); ok && strings.TrimSpace(text) != "" && !a.streamedReply {
 			a.conversation.AddMessage("assistant", text, false)
 		}
 		return nil
@@ -474,20 +563,181 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		a.conversation.Clear()
 		a.sess.Messages = nil
 		a.statusBar.SetStatus("History reset")
+	case "/provider":
+		if len(args) == 0 {
+			a.conversation.AddMessage("system", fmt.Sprintf("Current provider: %s (model: %s)", a.cfg.Provider, a.cfg.Model), false)
+			return nil
+		}
+		model := ""
+		if len(args) > 1 {
+			model = args[1]
+		}
+		if err := a.switchProvider(args[0], model); err != nil {
+			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
+			a.statusBar.SetStatus("Error")
+			return nil
+		}
+		a.conversation.AddMessage("system", fmt.Sprintf("Provider switched to %s", args[0]), false)
+		a.statusBar.SetStatus("Provider updated")
+		_ = a.persistProjectConfig()
 	case "/model":
 		if len(args) > 0 {
-			a.cfg.Model = args[0]
-			a.header.SetModel(args[0])
+			if err := a.switchProvider(a.cfg.Provider, args[0]); err != nil {
+				a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
+				a.statusBar.SetStatus("Error")
+				return nil
+			}
 			a.conversation.AddMessage("system", fmt.Sprintf("Model switched to %s", args[0]), false)
+			a.statusBar.SetStatus("Model updated")
+			_ = a.persistProjectConfig()
 		}
 	case "/mode":
 		if len(args) > 0 && agent.IsValid(args[0]) {
 			a.cfg.Mode = args[0]
 			a.header.SetMode(args[0])
 			a.conversation.AddMessage("system", fmt.Sprintf("Mode switched to %s", args[0]), false)
+			_ = a.persistProjectConfig()
+		} else {
+			a.conversation.AddMessage("assistant", "Error: usage /mode <suggest|auto-edit|full-auto|plan>", true)
 		}
+	case "/api-key":
+		if len(args) == 0 {
+			a.conversation.AddMessage("assistant", "Error: usage /api-key <value>", true)
+			return nil
+		}
+		a.ensureProviderConfig(a.cfg.Provider)
+		pc := a.cfg.Providers[a.cfg.Provider]
+		pc.APIKey = strings.Join(args, " ")
+		a.cfg.Providers[a.cfg.Provider] = pc
+		if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
+			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
+			return nil
+		}
+		a.conversation.AddMessage("system", fmt.Sprintf("API key updated for %s", a.cfg.Provider), false)
+		a.statusBar.SetStatus("API key updated")
+		_ = a.persistProjectConfig()
+	case "/model-api-key":
+		if len(args) == 0 {
+			a.conversation.AddMessage("assistant", "Error: usage /model-api-key <value>", true)
+			return nil
+		}
+		a.ensureProviderConfig(a.cfg.Provider)
+		pc := a.cfg.Providers[a.cfg.Provider]
+		if pc.Models == nil {
+			pc.Models = map[string]config.ModelConfig{}
+		}
+		mc := pc.Models[a.cfg.Model]
+		mc.APIKey = strings.Join(args, " ")
+		pc.Models[a.cfg.Model] = mc
+		a.cfg.Providers[a.cfg.Provider] = pc
+		if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
+			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
+			return nil
+		}
+		a.conversation.AddMessage("system", fmt.Sprintf("API key updated for %s/%s", a.cfg.Provider, a.cfg.Model), false)
+		a.statusBar.SetStatus("Model API key updated")
+		_ = a.persistProjectConfig()
+	case "/base-url":
+		if len(args) == 0 {
+			a.conversation.AddMessage("assistant", "Error: usage /base-url <url>", true)
+			return nil
+		}
+		a.ensureProviderConfig(a.cfg.Provider)
+		pc := a.cfg.Providers[a.cfg.Provider]
+		pc.BaseURL = args[0]
+		a.cfg.Providers[a.cfg.Provider] = pc
+		if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
+			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
+			return nil
+		}
+		a.conversation.AddMessage("system", fmt.Sprintf("Base URL updated for %s", a.cfg.Provider), false)
+		a.statusBar.SetStatus("Base URL updated")
+		_ = a.persistProjectConfig()
+	case "/provider-api-key":
+		if len(args) < 2 {
+			a.conversation.AddMessage("assistant", "Error: usage /provider-api-key <provider> <value>", true)
+			return nil
+		}
+		provider := args[0]
+		a.ensureProviderConfig(provider)
+		pc := a.cfg.Providers[provider]
+		pc.APIKey = strings.Join(args[1:], " ")
+		a.cfg.Providers[provider] = pc
+		if provider == a.cfg.Provider {
+			if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
+				a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
+				return nil
+			}
+		}
+		a.conversation.AddMessage("system", fmt.Sprintf("API key updated for %s", provider), false)
+		_ = a.persistProjectConfig()
+	case "/provider-base-url":
+		if len(args) < 2 {
+			a.conversation.AddMessage("assistant", "Error: usage /provider-base-url <provider> <url>", true)
+			return nil
+		}
+		provider := args[0]
+		a.ensureProviderConfig(provider)
+		pc := a.cfg.Providers[provider]
+		pc.BaseURL = args[1]
+		a.cfg.Providers[provider] = pc
+		if provider == a.cfg.Provider {
+			if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
+				a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
+				return nil
+			}
+		}
+		a.conversation.AddMessage("system", fmt.Sprintf("Base URL updated for %s", provider), false)
+		_ = a.persistProjectConfig()
+	case "/provider-model-api-key":
+		if len(args) < 3 {
+			a.conversation.AddMessage("assistant", "Error: usage /provider-model-api-key <provider> <model> <value>", true)
+			return nil
+		}
+		provider := args[0]
+		model := args[1]
+		if !isSupportedProvider(provider) {
+			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: unknown provider %q", provider), true)
+			return nil
+		}
+		a.ensureProviderConfig(provider)
+		pc := a.cfg.Providers[provider]
+		if pc.Models == nil {
+			pc.Models = map[string]config.ModelConfig{}
+		}
+		mc := pc.Models[model]
+		mc.APIKey = strings.Join(args[2:], " ")
+		pc.Models[model] = mc
+		a.cfg.Providers[provider] = pc
+		if provider == a.cfg.Provider && model == a.cfg.Model {
+			if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
+				a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
+				return nil
+			}
+		}
+		a.conversation.AddMessage("system", fmt.Sprintf("API key updated for %s/%s", provider, model), false)
+		a.statusBar.SetStatus("Provider/model API key updated")
+		_ = a.persistProjectConfig()
+	case "/sessions":
+		a.sessionBrowser.SetSessions([]*session.Session{a.sess})
+		a.sessionBrowser.Show()
+	case "/diff":
+		a.diffPane.Toggle()
+		a.layout()
+	case "/tree":
+		a.showFileTree = !a.showFileTree
+		a.layout()
+	case "/lsp":
+		a.lspPanel.Toggle()
+		a.layout()
+	case "/stats":
+		a.stats.InputTokens = a.sess.TotalInputTokens
+		a.stats.OutputTokens = a.sess.TotalOutputTokens
+		a.conversation.AddMessage("system", a.stats.View(), false)
 	case "/quit", "/exit":
 		return tea.Quit
+	default:
+		a.conversation.AddMessage("assistant", fmt.Sprintf("Unknown command: %s", cmd), true)
 	}
 	return nil
 }
@@ -527,12 +777,28 @@ func (a *App) layout() {
 		mainW = a.width - treeW - 1
 	}
 	if a.diffPane.Visible() {
-		convW := mainW * 4 / 10
+		convW := mainW * 45 / 100
 		diffW := mainW - convW - 1
+		if a.lspPanel.Visible() {
+			diffW = diffW * 60 / 100
+			lspW := mainW - convW - diffW - 2
+			if lspW < 20 {
+				lspW = 20
+				diffW = mainW - convW - lspW - 2
+			}
+			a.lspPanel.SetSize(lspW, mainH)
+		}
 		a.conversation.SetSize(convW, mainH)
 		a.diffPane.SetSize(diffW, mainH)
 	} else {
-		a.conversation.SetSize(mainW, mainH)
+		if a.lspPanel.Visible() {
+			convW := mainW * 70 / 100
+			lspW := mainW - convW - 1
+			a.conversation.SetSize(convW, mainH)
+			a.lspPanel.SetSize(lspW, mainH)
+		} else {
+			a.conversation.SetSize(mainW, mainH)
+		}
 	}
 	a.sessionBrowser.SetSize(a.width*3/4, a.height*3/4)
 }
@@ -567,6 +833,9 @@ func (a *App) View() string {
 		if a.diffPane.Visible() {
 			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", a.diffPane.View())
 		}
+		if a.lspPanel.Visible() {
+			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", a.lspPanel.View())
+		}
 		sb.WriteString(mainRow)
 	}
 	sb.WriteByte('\n')
@@ -590,4 +859,195 @@ func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialProm
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
+}
+
+func (a *App) persistProjectConfig() error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	root, err := gitutil.RootDir(a.ctx, cwd)
+	if err != nil || root == "" {
+		return nil
+	}
+	automergentDir := filepath.Join(root, ".automergent")
+	if err := os.MkdirAll(automergentDir, 0o700); err != nil {
+		return err
+	}
+
+	doc := map[string]any{
+		"provider": a.cfg.Provider,
+		"model":    a.cfg.Model,
+		"mode":     a.cfg.Mode,
+	}
+	if len(a.cfg.Providers) > 0 {
+		providers := map[string]map[string]any{}
+		for name, p := range a.cfg.Providers {
+			entry := map[string]any{}
+			if p.APIKey != "" {
+				entry["apiKey"] = p.APIKey
+			}
+			if p.BaseURL != "" {
+				entry["baseUrl"] = p.BaseURL
+			}
+			if p.OrgID != "" {
+				entry["orgId"] = p.OrgID
+			}
+			if len(p.Models) > 0 {
+				models := map[string]map[string]any{}
+				for model, mc := range p.Models {
+					modelEntry := map[string]any{}
+					if mc.APIKey != "" {
+						modelEntry["apiKey"] = mc.APIKey
+					}
+					if mc.BaseURL != "" {
+						modelEntry["baseUrl"] = mc.BaseURL
+					}
+					if len(modelEntry) > 0 {
+						models[model] = modelEntry
+					}
+				}
+				if len(models) > 0 {
+					entry["models"] = models
+				}
+			}
+			if len(entry) > 0 {
+				providers[name] = entry
+			}
+		}
+		if len(providers) > 0 {
+			doc["providers"] = providers
+		}
+	}
+
+	data, err := yaml.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	return atomicWriteFile(filepath.Join(automergentDir, "config.yaml"), data, 0o600)
+}
+
+func truncateUIContent(s string, reviewMode bool) string {
+	if reviewMode {
+		return s
+	}
+	const maxRunes = 500
+	if utf8.RuneCountInString(s) <= maxRunes {
+		return s
+	}
+	runes := []rune(s)
+	return string(runes[:maxRunes]) + " … [truncated, press Ctrl+R for full review mode]"
+}
+
+func (a *App) ensureProviderConfig(provider string) {
+	if a.cfg.Providers == nil {
+		a.cfg.Providers = map[string]config.ProviderConfig{}
+	}
+	if _, ok := a.cfg.Providers[provider]; !ok {
+		a.cfg.Providers[provider] = config.ProviderConfig{}
+	}
+}
+
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".automergent-cfg-tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		tmp.Close()
+		_ = os.Remove(tmpPath)
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmpPath, path)
+}
+
+func (a *App) switchProvider(provider, model string) error {
+	if provider == "" {
+		return fmt.Errorf("provider cannot be empty")
+	}
+	if !isSupportedProvider(provider) {
+		return fmt.Errorf("unknown provider %q", provider)
+	}
+	a.ensureProviderConfig(provider)
+	oldProvider, oldModel := a.cfg.Provider, a.cfg.Model
+	a.cfg.Provider = provider
+	if model == "" {
+		model = defaultModelForProvider(provider)
+	}
+	a.cfg.Model = model
+	p, err := buildProviderFromConfig(a.cfg)
+	if err != nil {
+		a.cfg.Provider = oldProvider
+		a.cfg.Model = oldModel
+		return err
+	}
+	a.ag.SetProvider(p)
+	a.header.SetProvider(a.cfg.Provider)
+	if a.cfg.Model != "" {
+		a.header.SetModel(a.cfg.Model)
+	}
+	a.availableModels = nil
+	return nil
+}
+
+func isSupportedProvider(name string) bool {
+	switch name {
+	case "google":
+		return true
+	default:
+		return false
+	}
+}
+
+func defaultModelForProvider(provider string) string {
+	switch provider {
+	case "google":
+		return "gemini-3.6-flash"
+	default:
+		return ""
+	}
+}
+
+func buildProviderFromConfig(cfg *config.Config) (ai.Provider, error) {
+	pc := cfg.Providers[cfg.Provider]
+	if mc, ok := pc.Models[cfg.Model]; ok {
+		if mc.APIKey != "" {
+			pc.APIKey = mc.APIKey
+		}
+		if mc.BaseURL != "" {
+			pc.BaseURL = mc.BaseURL
+		}
+	}
+	aiCfg := ai.ProviderConfig{
+		APIKey:       pc.APIKey,
+		BaseURL:      pc.BaseURL,
+		DefaultModel: cfg.Model,
+		OrgID:        pc.OrgID,
+	}
+
+	switch cfg.Provider {
+	case "google":
+		return googleProvider.New(aiCfg), nil
+	default:
+		if p, ok := ai.Get(cfg.Provider); ok {
+			return p, nil
+		}
+		return nil, fmt.Errorf("unknown provider %q", cfg.Provider)
+	}
 }
