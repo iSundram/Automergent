@@ -510,6 +510,11 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			}
 		}
 		return a.waitForAgentEvent()
+	case agent.EventThought:
+		if thought, ok := ev.Payload.(string); ok {
+			a.conversation.AppendThought(thought)
+		}
+		return a.waitForAgentEvent()
 	case agent.EventToolCall:
 		if te, ok := ev.Payload.(agent.ToolCallEvent); ok {
 			argText := ""

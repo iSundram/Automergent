@@ -130,8 +130,7 @@ func NewStyles(t *Theme) *Styles {
 	// Assistant message
 	s.AssistantLabel = lipgloss.NewStyle().
 		Foreground(t.Accent).
-		Bold(true).
-		MarginBottom(1)
+		Bold(true)
 	s.AssistantBubble = lipgloss.NewStyle().
 		Foreground(t.Text).
 		Padding(0, 1).

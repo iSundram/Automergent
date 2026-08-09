@@ -57,12 +57,14 @@ type CompletionResponse interface {
 	ToolCalls() []ToolCall
 	StopReason() StopReason
 	Usage() Usage
+	GetMetadata() map[string]any
 }
 
 // Message is a single turn in the conversation.
 type Message struct {
-	Role    Role
-	Content []ContentPart
+	Role     Role
+	Content  []ContentPart
+	Metadata map[string]any
 }
 
 // NewTextMessage is a convenience constructor.
@@ -106,6 +108,7 @@ type ToolSchema struct {
 // Chunk is a streaming token from the model.
 type Chunk struct {
 	Text      string
+	Thought   string
 	ToolCalls []ToolCall
 	Done      bool
 	Error     error

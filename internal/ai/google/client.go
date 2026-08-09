@@ -77,10 +77,12 @@ type geminiFunctionCall struct {
 type geminiPart struct {
 	Text             string              `json:"text,omitempty"`
 	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
-	FunctionResponse *struct {
-		Name     string         `json:"name"`
-		Response map[string]any `json:"response"`
-	} `json:"functionResponse,omitempty"`
+	FunctionResponse *geminiFunctionRes  `json:"functionResponse,omitempty"`
+}
+
+type geminiFunctionRes struct {
+	Name     string         `json:"name"`
+	Response map[string]any `json:"response"`
 }
 
 type geminiContent struct {
@@ -89,26 +91,31 @@ type geminiContent struct {
 }
 
 type geminiTool struct {
-	FunctionDeclarations []map[string]any `json:"functionDeclarations"`
+	FunctionDeclarations []map[string]any `json:"functionDeclarations,omitempty"`
+	GoogleSearch         *struct{}        `json:"googleSearch,omitempty"`
+}
+
+type geminiToolConfig struct {
+	FunctionCallingConfig *struct {
+		Mode string `json:"mode,omitempty"`
+	} `json:"functionCallingConfig,omitempty"`
+	IncludeServerSideToolInvocations bool `json:"includeServerSideToolInvocations,omitempty"`
 }
 
 type geminiRequest struct {
-	Contents          []geminiContent `json:"contents"`
-	SystemInstruction *geminiContent  `json:"systemInstruction,omitempty"`
-	Tools             []geminiTool    `json:"tools,omitempty"`
-	ToolConfig        *struct {
-		FunctionCallingConfig struct {
-			Mode string `json:"mode"`
-		} `json:"functionCallingConfig"`
-	} `json:"toolConfig,omitempty"`
+	Contents          []geminiContent   `json:"contents"`
+	SystemInstruction *geminiContent    `json:"systemInstruction,omitempty"`
+	Tools             []geminiTool      `json:"tools,omitempty"`
+	ToolConfig        *geminiToolConfig `json:"toolConfig,omitempty"`
 }
 
 type geminiResponsePart struct {
-	Text         string `json:"text"`
+	Text         string `json:"text,omitempty"`
+	Thought      bool   `json:"thought,omitempty"`
 	FunctionCall *struct {
 		Name string          `json:"name"`
 		Args json.RawMessage `json:"args"`
-	} `json:"functionCall"`
+	} `json:"functionCall,omitempty"`
 }
 
 type geminiResponse struct {
@@ -153,49 +160,59 @@ func buildGeminiContents(messages []ai.Message) []geminiContent {
 				Parts: []geminiPart{{Text: t}},
 			})
 		case ai.RoleAssistant:
+			// For model messages, we try to find the original parts if we stored them in metadata,
+			// or we rebuild them from the current message content.
 			var parts []geminiPart
-			for _, p := range m.Content {
-				switch p.Type {
-				case ai.ContentTypeText:
-					if p.Text != "" {
-						parts = append(parts, geminiPart{Text: p.Text})
-					}
-				case ai.ContentTypeToolCall:
-					if p.ToolCall != nil {
-						args := p.ToolCall.Args
-						if args == nil {
-							args = map[string]any{}
+			if partsRaw, ok := m.Metadata["google_parts"]; ok {
+				if b, err := json.Marshal(partsRaw); err == nil {
+					_ = json.Unmarshal(b, &parts)
+				}
+			}
+
+			if len(parts) == 0 {
+				for _, p := range m.Content {
+					switch p.Type {
+					case ai.ContentTypeText:
+						if p.Text != "" {
+							parts = append(parts, geminiPart{Text: p.Text})
 						}
-						parts = append(parts, geminiPart{
-							FunctionCall: &geminiFunctionCall{Name: p.ToolCall.Name, Args: args},
-						})
+					case ai.ContentTypeToolCall:
+						if p.ToolCall != nil {
+							args := p.ToolCall.Args
+							if args == nil {
+								args = map[string]any{}
+							}
+							parts = append(parts, geminiPart{
+								FunctionCall: &geminiFunctionCall{Name: p.ToolCall.Name, Args: args},
+							})
+						}
 					}
 				}
 			}
+
 			if len(parts) == 0 {
 				continue
 			}
 			out = append(out, geminiContent{Role: "model", Parts: parts})
+
 		case ai.RoleTool:
+			var parts []geminiPart
 			for _, p := range m.Content {
 				if p.Type != ai.ContentTypeToolResult || p.ToolResult == nil {
 					continue
 				}
 				name := toolNameForID(messages, i, p.ToolResult.ToolCallID)
-				out = append(out, geminiContent{
-					Role: "user",
-					Parts: []geminiPart{{
-						FunctionResponse: &struct {
-							Name     string         `json:"name"`
-							Response map[string]any `json:"response"`
-						}{
-							Name: name,
-							Response: map[string]any{
-								"result": p.ToolResult.Content,
-							},
+				parts = append(parts, geminiPart{
+					FunctionResponse: &geminiFunctionRes{
+						Name: name,
+						Response: map[string]any{
+							"result": p.ToolResult.Content,
 						},
-					}},
+					},
 				})
+			}
+			if len(parts) > 0 {
+				out = append(out, geminiContent{Role: "user", Parts: parts})
 			}
 		}
 	}
@@ -231,12 +248,12 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 	}
 	if decls := functionDeclarations(req.Tools); len(decls) > 0 {
 		gr.Tools = []geminiTool{{FunctionDeclarations: decls}}
-		gr.ToolConfig = &struct {
-			FunctionCallingConfig struct {
-				Mode string `json:"mode"`
-			} `json:"functionCallingConfig"`
-		}{}
-		gr.ToolConfig.FunctionCallingConfig.Mode = "AUTO"
+		gr.ToolConfig = &geminiToolConfig{
+			FunctionCallingConfig: &struct {
+				Mode string `json:"mode,omitempty"`
+			}{Mode: "AUTO"},
+			IncludeServerSideToolInvocations: true,
+		}
 	}
 
 	body, err := json.Marshal(gr)
@@ -271,10 +288,28 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 	}
 
 	var text string
+	var thought string
 	var toolCalls []ai.ToolCall
+	var rawParts []geminiPart
+
 	if len(gr2.Candidates) > 0 {
 		for _, part := range gr2.Candidates[0].Content.Parts {
-			if part.Text != "" {
+			// Save for next turn
+			rawParts = append(rawParts, geminiPart{
+				Text: part.Text,
+				FunctionCall: func() *geminiFunctionCall {
+					if part.FunctionCall == nil {
+						return nil
+					}
+					var args map[string]any
+					_ = json.Unmarshal(part.FunctionCall.Args, &args)
+					return &geminiFunctionCall{Name: part.FunctionCall.Name, Args: args}
+				}(),
+			})
+
+			if part.Thought {
+				thought += part.Text
+			} else if part.Text != "" {
 				text += part.Text
 			}
 			if part.FunctionCall != nil {
@@ -301,17 +336,21 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		TotalTokens:  gr2.UsageMetadata.TotalTokenCount,
 	}
 
-	stop := ai.StopReasonEnd
+	res := ai.NewStaticResponse(text, thought, toolCalls, ai.StopReasonEnd, usage)
+	if len(rawParts) > 0 {
+		res.SetMetadata(map[string]any{"google_parts": rawParts})
+	}
+
 	if len(toolCalls) > 0 {
-		stop = ai.StopReasonTools
+		res.SetStopReason(ai.StopReasonTools)
 	} else if len(gr2.Candidates) > 0 {
 		switch gr2.Candidates[0].FinishReason {
 		case "MAX_TOKENS":
-			stop = ai.StopReasonLength
+			res.SetStopReason(ai.StopReasonLength)
 		case "STOP", "":
-			stop = ai.StopReasonEnd
+			res.SetStopReason(ai.StopReasonEnd)
 		}
 	}
 
-	return ai.NewStaticResponse(text, toolCalls, stop, usage), nil
+	return res, nil
 }

@@ -18,6 +18,7 @@ import (
 type ConversationMsg struct {
 	Role        string
 	Content     string
+	Thought     string
 	IsError     bool
 	Timestamp   time.Time
 	ToolName    string
@@ -155,6 +156,27 @@ func (c *Conversation) AppendToken(token string) {
 	c.viewport.GotoBottom()
 }
 
+func (c *Conversation) AppendThought(thought string) {
+	if len(c.messages) == 0 || !c.streaming {
+		c.messages = append(c.messages, ConversationMsg{
+			Role:      "assistant",
+			Thought:   thought,
+			Timestamp: time.Now(),
+		})
+		c.streaming = true
+	} else {
+		last := &c.messages[len(c.messages)-1]
+		if last.Role == "assistant" {
+			last.Thought += thought
+		} else {
+			c.messages = append(c.messages, ConversationMsg{Role: "assistant", Thought: thought, Timestamp: time.Now()})
+			c.streaming = true
+		}
+	}
+	c.refresh()
+	c.viewport.GotoBottom()
+}
+
 func (c *Conversation) Clear() {
 	c.messages = nil
 	c.streaming = false
@@ -216,13 +238,20 @@ func (c *Conversation) refresh() {
 			}
 
 			label := c.styles.AssistantLabel.Render(labelStr)
-			rendered := render.Markdown(m.Content)
-			if m.IsError {
-				rendered = c.styles.Error.Render(m.Content)
+
+			var rendered strings.Builder
+			if m.Thought != "" {
+				rendered.WriteString(c.renderThought(m.Thought, msgW) + "\n")
 			}
 
-			bubble := bubbleStyle.Width(msgW).Render(rendered)
-			sb.WriteString(label + "\n" + bubble + "\n\n")
+			content := render.Markdown(m.Content)
+			if m.IsError {
+				content = c.styles.Error.Render(m.Content)
+			}
+			rendered.WriteString(content)
+
+			bubble := bubbleStyle.Width(msgW).Render(rendered.String())
+			sb.WriteString(label + "\n" + bubble + "\n") // Single newline after bubble
 
 		case "system":
 			sb.WriteString(c.styles.SystemMsg.Width(msgW).Render("  "+m.Content) + "\n\n")
@@ -232,6 +261,18 @@ func (c *Conversation) refresh() {
 		}
 	}
 	c.viewport.SetContent(sb.String())
+}
+
+func (c *Conversation) renderThought(thought string, width int) string {
+	if thought == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		Foreground(c.styles.T.Muted).
+		Italic(true).
+		Faint(true).
+		Width(width - 2).
+		Render("  " + strings.TrimSpace(thought))
 }
 
 func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {

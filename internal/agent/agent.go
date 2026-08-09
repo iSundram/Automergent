@@ -56,6 +56,7 @@ type ToolDoneEvent struct {
 
 const (
 	EventToken     = "token"
+	EventThought   = "thought"
 	EventToolCall  = "tool_call"
 	EventToolStart = "tool_start"
 	EventToolDone  = "tool_done"
@@ -234,6 +235,9 @@ func (a *Agent) drainStream(resp ai.CompletionResponse) (string, ai.Usage, error
 		}
 		if chunk.Done {
 			break
+		}
+		if chunk.Thought != "" {
+			a.emit(EventThought, chunk.Thought)
 		}
 		if chunk.Text != "" {
 			a.emit(EventToken, chunk.Text)
