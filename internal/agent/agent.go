@@ -26,12 +26,14 @@ type Event struct {
 }
 
 const (
-	EventToken    = "token"
-	EventToolCall = "tool_call"
-	EventToolDone = "tool_done"
-	EventDone     = "done"
-	EventError    = "error"
-	EventConfirm  = "confirm"
+	EventToken     = "token"
+	EventToolCall  = "tool_call"
+	EventToolStart = "tool_start"
+	EventToolDone  = "tool_done"
+	EventDone      = "done"
+	EventError     = "error"
+	EventConfirm   = "confirm"
+	EventStatus    = "status"
 )
 
 // New creates a new Agent.
@@ -41,7 +43,7 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 		provider: provider,
 		sess:     sess,
 		tools:    reg,
-		events:   make(chan Event, 256),
+		events:   make(chan Event, 512),
 	}
 }
 
@@ -64,17 +66,21 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			Tools:       toolSchemas,
 			System:      systemPrompt,
 			Temperature: 0.0,
-			MaxTokens:   4096,
+			MaxTokens:   8192,
 			Stream:      true,
 		}
 
+		a.emit(EventStatus, "thinking")
 		resp, err := a.provider.Complete(ctx, req)
 		if err != nil {
 			a.emit(EventError, err)
 			return fmt.Errorf("agent: complete: %w", err)
 		}
 
-		text, toolCalls, stop, usage := collectResponse(resp)
+		// Stream tokens as they arrive
+		text, usage := a.drainStream(resp)
+		toolCalls := resp.ToolCalls()
+		stop := resp.StopReason()
 		a.sess.AddUsage(usage)
 
 		if text != "" {
@@ -99,6 +105,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 
 		for _, tc := range toolCalls {
 			a.emit(EventToolCall, tc)
+			a.emit(EventStatus, fmt.Sprintf("running %s", tc.Name))
 			result, err := a.executeTool(ctx, tc)
 			if err != nil {
 				result = tools.Result{IsError: true, Content: err.Error()}
@@ -117,6 +124,26 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			a.sess.AddMessage(toolMsg)
 		}
 	}
+}
+
+// drainStream reads all chunks from the response, emitting EventToken for each text chunk.
+func (a *Agent) drainStream(resp ai.CompletionResponse) (string, ai.Usage) {
+	var text string
+	ch := resp.Stream()
+	for chunk := range ch {
+		if chunk.Error != nil {
+			a.emit(EventError, chunk.Error)
+			break
+		}
+		if chunk.Done {
+			break
+		}
+		if chunk.Text != "" {
+			a.emit(EventToken, chunk.Text)
+			text += chunk.Text
+		}
+	}
+	return text, resp.Usage()
 }
 
 func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, error) {
@@ -151,19 +178,6 @@ func (a *Agent) emit(eventType string, payload any) {
 	case a.events <- Event{Type: eventType, Payload: payload}:
 	default:
 	}
-}
-
-func collectResponse(resp ai.CompletionResponse) (string, []ai.ToolCall, ai.StopReason, ai.Usage) {
-	var text string
-	var usage ai.Usage
-	ch := resp.Stream()
-	for chunk := range ch {
-		if chunk.Error != nil {
-			break
-		}
-		text += chunk.Text
-	}
-	return text, resp.ToolCalls(), resp.StopReason(), usage
 }
 
 func buildToolSchemas(reg *tools.Registry) []ai.ToolSchema {

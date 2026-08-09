@@ -13,18 +13,22 @@ type Spinner struct {
 	sp     spinner.Model
 	styles *themes.Styles
 	active bool
+	label  string
 }
 
 // NewSpinner creates a new Spinner component.
 func NewSpinner(styles *themes.Styles) Spinner {
 	sp := spinner.New()
-	sp.Spinner = spinner.Dot
+	sp.Spinner = spinner.Points
 	sp.Style = lipgloss.NewStyle().Foreground(styles.T.Accent)
-	return Spinner{sp: sp, styles: styles}
+	return Spinner{sp: sp, styles: styles, label: "thinking"}
 }
 
-// Start activates the spinner.
+// Start activates the spinner with an optional label.
 func (s *Spinner) Start() { s.active = true }
+
+// SetLabel updates the spinner label.
+func (s *Spinner) SetLabel(label string) { s.label = label }
 
 // Stop deactivates the spinner.
 func (s *Spinner) Stop() { s.active = false }
@@ -47,5 +51,9 @@ func (s Spinner) View() string {
 	if !s.active {
 		return ""
 	}
-	return s.sp.View() + " thinking…"
+	label := s.label
+	if label == "" {
+		label = "thinking"
+	}
+	return s.sp.View() + " " + s.styles.Dim.Render(label+"…")
 }

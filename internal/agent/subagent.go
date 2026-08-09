@@ -48,13 +48,20 @@ func (s *SubAgent) Run(ctx context.Context) (string, error) {
 		Messages:    s.sess.Messages,
 		System:      systemPrompt,
 		Temperature: 0.0,
-		MaxTokens:   4096,
-		Stream:      false,
+		MaxTokens:   8192,
+		Stream:      true,
 	}
 	resp, err := s.provider.Complete(ctx, req)
 	if err != nil {
 		return "", err
 	}
-	text, _, _, _ := collectResponse(resp)
+	// Drain the stream and collect text
+	var text string
+	for chunk := range resp.Stream() {
+		if chunk.Done || chunk.Error != nil {
+			break
+		}
+		text += chunk.Text
+	}
 	return text, nil
 }

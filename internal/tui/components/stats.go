@@ -25,8 +25,9 @@ func NewStats(styles *themes.Styles) Stats {
 // View renders a compact stats line.
 func (s Stats) View() string {
 	elapsed := time.Since(s.StartTime).Round(time.Second)
-	return s.styles.Dim.Render(fmt.Sprintf(
-		"in:%d out:%d cost:$%.4f tools:%d elapsed:%s",
-		s.InputTokens, s.OutputTokens, s.TotalCost, s.ToolCallCount, elapsed,
-	))
+	totalTok := s.InputTokens + s.OutputTokens
+	return fmt.Sprintf(
+		"in:%d  out:%d  total:%d  tools:%d  elapsed:%s",
+		s.InputTokens, s.OutputTokens, totalTok, s.ToolCallCount, elapsed,
+	)
 }

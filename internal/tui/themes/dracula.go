@@ -30,6 +30,8 @@ func Get(name string) *Theme {
 	switch name {
 	case "dracula":
 		return Dracula()
+	case "nord":
+		return Nord()
 	default:
 		return Catppuccin()
 	}

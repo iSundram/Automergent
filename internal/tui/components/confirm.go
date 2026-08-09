@@ -18,6 +18,7 @@ type Confirm struct {
 	styles  *themes.Styles
 	visible bool
 	prompt  string
+	replyCh chan bool
 }
 
 // NewConfirm creates a new Confirm component.
@@ -27,6 +28,9 @@ func NewConfirm(styles *themes.Styles) Confirm {
 
 // Show displays the confirmation prompt.
 func (c *Confirm) Show(prompt string) { c.prompt = prompt; c.visible = true }
+
+// SetReply sets the channel to send the reply to.
+func (c *Confirm) SetReply(ch chan bool) { c.replyCh = ch }
 
 // Hide hides the confirmation prompt.
 func (c *Confirm) Hide() { c.visible = false }
@@ -43,9 +47,21 @@ func (c Confirm) Update(msg tea.Msg) (Confirm, tea.Cmd) {
 		switch km.String() {
 		case "y", "Y":
 			c.visible = false
+			if c.replyCh != nil {
+				select {
+				case c.replyCh <- true:
+				default:
+				}
+			}
 			return c, func() tea.Msg { return ConfirmMsg{Confirmed: true} }
 		case "n", "N", "esc":
 			c.visible = false
+			if c.replyCh != nil {
+				select {
+				case c.replyCh <- false:
+				default:
+				}
+			}
 			return c, func() tea.Msg { return ConfirmMsg{Confirmed: false} }
 		}
 	}
@@ -57,5 +73,8 @@ func (c Confirm) View() string {
 	if !c.visible {
 		return ""
 	}
-	return c.styles.Warning.Render(fmt.Sprintf("? %s [y/N] ", c.prompt))
+	box := c.styles.ConfirmBox.Render(
+		fmt.Sprintf("\n  %s\n\n  [y] Yes  [n] No\n", c.prompt),
+	)
+	return box
 }
