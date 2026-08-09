@@ -2,16 +2,7 @@ package sandbox
 
 import "context"
 
-// noopSandbox is a no-op fallback that does not apply any restrictions.
-type noopSandbox struct{}
-
-func (s *noopSandbox) Name() string      { return "noop" }
-func (s *noopSandbox) IsAvailable() bool { return false }
-
-func (s *noopSandbox) Wrap(_ context.Context, name string, args []string) (string, []string) {
-	return name, args
-}
-
+// Sandbox defines the interface for OS-level sandboxing.
 type Sandbox interface {
 	// Wrap wraps a command with sandbox restrictions.
 	Wrap(ctx context.Context, name string, args []string) (string, []string)
@@ -24,4 +15,14 @@ type Sandbox interface {
 // New returns the appropriate sandbox for the current OS and config.
 func New(kind string) Sandbox {
 	return newPlatformSandbox(kind)
+}
+
+// noopSandbox is a no-op fallback that does not apply any restrictions.
+type noopSandbox struct{}
+
+func (s *noopSandbox) Name() string      { return "noop" }
+func (s *noopSandbox) IsAvailable() bool { return false }
+
+func (s *noopSandbox) Wrap(_ context.Context, name string, args []string) (string, []string) {
+	return name, args
 }

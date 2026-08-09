@@ -1,7 +1,6 @@
 package render
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -30,5 +29,5 @@ func Diff(content string) string {
 		}
 		sb.WriteByte('\n')
 	}
-	return fmt.Sprintf("%s", sb.String())
+	return sb.String()
 }
