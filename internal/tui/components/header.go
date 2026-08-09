@@ -6,7 +6,6 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/iSundram/Automergent/internal/tui/themes"
-	"github.com/iSundram/Automergent/internal/version"
 )
 
 // Header renders the top bar.
@@ -57,12 +56,11 @@ func (h *Header) modeIcon() string {
 	}
 }
 
-// View renders the header bar.
+// View renders the header bar as a floating pill.
 func (h Header) View() string {
-	// Left: Automergent brand + version
-	left := h.styles.HeaderBrand.Render(fmt.Sprintf("  ◆ Automergent %s", version.Version))
-
-	// Center: provider/model and mode
+	if h.width <= 0 {
+		return ""
+	}
 	providerStr := h.provider
 	if providerStr == "" {
 		providerStr = "google"
@@ -75,25 +73,34 @@ func (h Header) View() string {
 	if modeStr == "" {
 		modeStr = "suggest"
 	}
-	center := h.styles.HeaderCenter.Render(
-		fmt.Sprintf("%s  %s/%s  %s %s",
-			"│", providerStr, modelStr, h.modeIcon(), modeStr),
-	)
 
-	// Right: tokens
-	right := h.styles.HeaderRight.Render(fmt.Sprintf("tokens: %s  ", formatTokens(h.tokens)))
+	brand := h.styles.HeaderBrand.Render(" ◈ Automergent ")
+	modelInfo := h.styles.HeaderCenter.Render(fmt.Sprintf("[ %s/%s ]", providerStr, modelStr))
+	modeInfo := h.styles.Header.Render(fmt.Sprintf("%s %s ", h.modeIcon(), modeStr))
 
-	used := lipgloss.Width(left) + lipgloss.Width(center) + lipgloss.Width(right)
-	spacer := h.width - used
-	if spacer < 0 {
-		spacer = 0
+	tokenStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)
+	if h.tokens > 100000 {
+		tokenStyle = lipgloss.NewStyle().Foreground(h.styles.T.Red)
+	} else if h.tokens > 50000 {
+		tokenStyle = lipgloss.NewStyle().Foreground(h.styles.T.Yellow)
 	}
 
-	return left +
-		lipgloss.NewStyle().Background(h.styles.T.Surface).Width(spacer/2).Render("") +
-		center +
-		lipgloss.NewStyle().Background(h.styles.T.Surface).Width(spacer-spacer/2).Render("") +
-		right
+	tokenStr := tokenStyle.Render(fmt.Sprintf("%s tokens", formatTokens(h.tokens)))
+	costStr := lipgloss.NewStyle().Foreground(h.styles.T.Subtext).Render(fmt.Sprintf("$%.3f", h.cost))
+
+	rightInfo := lipgloss.JoinHorizontal(lipgloss.Center, " │ ", costStr, "   ", tokenStr, " ")
+	content := lipgloss.JoinHorizontal(lipgloss.Center, brand, " │ ", modelInfo, " │ ", modeInfo, " │ ", rightInfo)
+
+	pill := h.styles.HeaderPill.Render(content)
+
+	// Ensure pill is not wider than width
+	pillWidth := lipgloss.Width(pill)
+	if pillWidth > h.width {
+		// If too wide, just render content without pill style or with reduced padding
+		return content
+	}
+
+	return lipgloss.PlaceHorizontal(h.width, lipgloss.Center, pill)
 }
 
 func formatTokens(n int) string {

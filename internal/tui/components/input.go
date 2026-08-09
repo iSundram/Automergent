@@ -13,23 +13,31 @@ type Input struct {
 	styles  *themes.Styles
 	history []string
 	histIdx int
+	focused bool
+	width   int
 }
 
 // NewInput creates a new Input component.
 func NewInput(styles *themes.Styles) Input {
 	ta := textarea.New()
-	ta.Placeholder = "Message Automergent… (Enter to send, Alt+Enter for newline, / for commands)"
+	ta.Placeholder = "Message Automergent... (Enter to send, Alt+Enter for newline, / for commands)"
 	ta.ShowLineNumbers = false
-	ta.SetHeight(3)
+	ta.SetHeight(1)
+	ta.MaxHeight = 8
 	ta.CharLimit = 0
 	ta.Focus()
 
-	return Input{ta: ta, styles: styles, histIdx: -1}
+	return Input{ta: ta, styles: styles, histIdx: -1, focused: true}
 }
 
 // SetWidth updates the input width.
 func (i *Input) SetWidth(w int) {
-	i.ta.SetWidth(w - 2)
+	i.width = w
+	taW := w - 8 // account for margins and borders
+	if taW < 10 {
+		taW = 10
+	}
+	i.ta.SetWidth(taW)
 }
 
 // Value returns the current input text.
@@ -45,21 +53,32 @@ func (i *Input) Reset() {
 		}
 	}
 	i.ta.Reset()
+	i.ta.SetHeight(1)
 	i.histIdx = -1
 }
 
 // Focus gives the input focus.
-func (i *Input) Focus() tea.Cmd { return i.ta.Focus() }
+func (i *Input) Focus() tea.Cmd {
+	i.focused = true
+	return i.ta.Focus()
+}
 
 // Blur removes focus from the input.
-func (i *Input) Blur() { i.ta.Blur() }
+func (i *Input) Blur() {
+	i.focused = false
+	i.ta.Blur()
+}
 
-// Update handles key events.
+// LineCount returns the number of lines in the input.
+func (i Input) LineCount() int {
+	return i.ta.LineCount()
+}
+
+// Update handles key events and auto-resizing.
 func (i Input) Update(msg tea.Msg) (Input, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok {
 		switch km.String() {
 		case "alt+up", "ctrl+p":
-			// Navigate history backwards
 			if len(i.history) > 0 {
 				if i.histIdx < len(i.history)-1 {
 					i.histIdx++
@@ -69,7 +88,6 @@ func (i Input) Update(msg tea.Msg) (Input, tea.Cmd) {
 				return i, nil
 			}
 		case "alt+down", "ctrl+n":
-			// Navigate history forwards
 			if i.histIdx > 0 {
 				i.histIdx--
 				idx := len(i.history) - 1 - i.histIdx
@@ -83,10 +101,26 @@ func (i Input) Update(msg tea.Msg) (Input, tea.Cmd) {
 	}
 	ta, cmd := i.ta.Update(msg)
 	i.ta = ta
+
+	lineCount := ta.LineCount()
+	if lineCount > ta.MaxHeight {
+		lineCount = ta.MaxHeight
+	}
+	if lineCount < 1 {
+		lineCount = 1
+	}
+	i.ta.SetHeight(lineCount)
+
 	return i, cmd
 }
 
 // View renders the input.
 func (i Input) View() string {
-	return i.ta.View()
+	if i.width <= 0 {
+		return ""
+	}
+	if i.focused {
+		return i.styles.InputFocused.Render(i.ta.View())
+	}
+	return i.styles.Input.Render(i.ta.View())
 }

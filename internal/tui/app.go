@@ -50,6 +50,7 @@ type App struct {
 	ctx            context.Context
 	cancel         context.CancelFunc
 	initialPrompt  string
+	focus          string // "input", "conversation", "diff", "tree"
 }
 
 // NewApp creates the root TUI model.
@@ -83,6 +84,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialP
 		cancel:         cancel,
 		initialPrompt:  initialPrompt,
 		statusMsg:      "Ready",
+		focus:          "input",
 	}
 	app.header.SetModel(cfg.Model)
 	app.header.SetProvider(cfg.Provider)
@@ -127,51 +129,55 @@ func (a *App) waitForAgentEvent() tea.Cmd {
 
 // Update handles messages.
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	var cmds []tea.Cmd
+	var (
+		cmd  tea.Cmd
+		cmds []tea.Cmd
+	)
 
 	switch m := msg.(type) {
 	case tea.WindowSizeMsg:
 		a.width = m.Width
 		a.height = m.Height
 		a.layout()
+		return a, nil
 
 	case tea.KeyMsg:
-		cmd := a.handleKey(m)
+		cmd = a.handleKey(m)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
 
 	case agentEventMsg:
-		cmd := a.handleAgentEvent(m.ev)
+		cmd = a.handleAgentEvent(m.ev)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-
-	case components.ConfirmMsg:
-		// handled by confirm component
-
-	case components.SessionSelectedMsg:
-		a.sess = m.Session
-
-	case components.FileTreeLoadedMsg:
-		a.fileTree.SetItems(m.Items)
 
 	case spinner.TickMsg:
 		sp, cmd := a.spin.Update(msg)
 		a.spin = sp
 		cmds = append(cmds, cmd)
+
+	case components.FileTreeLoadedMsg:
+		a.fileTree.SetItems(m.Items)
 	}
 
-	// Forward to conversation for scrolling
-	conv, cmd := a.conversation.Update(msg)
-	a.conversation = conv
-	cmds = append(cmds, cmd)
+	// Always update these if they're visible
+	if a.sessionBrowser.Visible() {
+		sb, cmd := a.sessionBrowser.Update(msg)
+		a.sessionBrowser = sb
+		cmds = append(cmds, cmd)
+	}
+	if a.confirm.Visible() {
+		c, cmd := a.confirm.Update(msg)
+		a.confirm = c
+		cmds = append(cmds, cmd)
+	}
 
 	return a, tea.Batch(cmds...)
 }
 
 func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
-	// Help overlay intercepts all keys
 	if a.showHelp {
 		if m.String() == "?" || m.String() == "esc" || m.String() == "q" {
 			a.showHelp = false
@@ -179,76 +185,101 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		return nil
 	}
 
-	// Confirm dialog
-	if a.confirm.Visible() {
-		c, cmd := a.confirm.Update(m)
-		a.confirm = c
-		return cmd
-	}
-
-	// Session browser
-	if a.sessionBrowser.Visible() {
-		sb, cmd := a.sessionBrowser.Update(m)
-		a.sessionBrowser = sb
-		return cmd
-	}
-
+	// Global Hotkeys
 	key := m.String()
-	switch {
-	case key == "ctrl+c" || key == "ctrl+q":
+	switch key {
+	case "ctrl+c", "ctrl+q":
 		a.cancel()
 		return tea.Quit
-
-	case key == "ctrl+d":
+	case "ctrl+d":
 		a.diffPane.Toggle()
-
-	case key == "ctrl+l":
+		a.layout()
+		return nil
+	case "ctrl+l":
 		a.lspPanel.Toggle()
-
-	case key == "ctrl+s":
+		a.layout()
+		return nil
+	case "ctrl+s":
 		a.sessionBrowser.Show()
-
-	case key == "ctrl+t":
+		return nil
+	case "ctrl+t":
 		a.showFileTree = !a.showFileTree
 		a.layout()
-
-	case key == "?":
-		// Only show help if input is empty
+		return nil
+	case "?":
 		if a.input.Value() == "" {
 			a.showHelp = true
 			return nil
 		}
-
-	case key == "ctrl+u":
-		a.input.Reset()
-
-	case (key == "enter" || key == "ctrl+m") && !a.thinking:
-		prompt := strings.TrimSpace(a.input.Value())
-		if prompt != "" {
-			a.input.Reset()
-			// Handle slash commands
-			if strings.HasPrefix(prompt, "/") {
-				return a.handleSlashCommand(prompt)
+	case "tab":
+		// Cycle focus
+		switch a.focus {
+		case "input":
+			a.focus = "conversation"
+		case "conversation":
+			if a.diffPane.Visible() {
+				a.focus = "diff"
+			} else if a.showFileTree {
+				a.focus = "tree"
+			} else {
+				a.focus = "input"
 			}
-			return a.startAgent(prompt)
+		case "diff":
+			if a.showFileTree {
+				a.focus = "tree"
+			} else {
+				a.focus = "input"
+			}
+		case "tree":
+			a.focus = "input"
 		}
+		if a.focus == "input" {
+			return a.input.Focus()
+		}
+		a.input.Blur()
+		return nil
+	}
 
-	default:
+	// Forward keys to focused component
+	var cmd tea.Cmd
+	switch a.focus {
+	case "input":
+		if (key == "enter" || key == "ctrl+m") && !a.thinking {
+			prompt := strings.TrimSpace(a.input.Value())
+			if prompt != "" {
+				a.input.Reset()
+				if strings.HasPrefix(prompt, "/") {
+					return a.handleSlashCommand(prompt)
+				}
+				return a.startAgent(prompt)
+			}
+		}
 		inp, cmd := a.input.Update(m)
 		a.input = inp
 		return cmd
+	case "conversation":
+		conv, cmd := a.conversation.Update(m)
+		a.conversation = conv
+		return cmd
+	case "diff":
+		diff, cmd := a.diffPane.Update(m)
+		a.diffPane = diff
+		return cmd
+	case "tree":
+		tree, cmd := a.fileTree.Update(m)
+		a.fileTree = tree
+		return cmd
 	}
-	return nil
+
+	return cmd
 }
 
-// handleAgentEvent processes one agent event and returns the next poll cmd (if still running).
 func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	switch ev.Type {
 	case agent.EventToken:
 		if tok, ok := ev.Payload.(string); ok {
 			a.conversation.AppendToken(tok)
 		}
-		// Keep polling
 		return a.waitForAgentEvent()
 
 	case agent.EventToolCall:
@@ -273,7 +304,6 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		a.thinking = false
 		a.spin.Stop()
 		a.statusBar.SetStatus("Ready")
-		// Update token stats from session
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
 		a.header.SetTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
@@ -302,7 +332,6 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	return a.waitForAgentEvent()
 }
 
-// handleSlashCommand processes a /command input.
 func (a *App) handleSlashCommand(input string) tea.Cmd {
 	parts := strings.Fields(input)
 	if len(parts) == 0 {
@@ -322,40 +351,44 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 			a.cfg.Model = args[0]
 			a.header.SetModel(args[0])
 			a.conversation.AddMessage("system", fmt.Sprintf("Model switched to %s", args[0]), false)
-		} else {
-			a.conversation.AddMessage("system", fmt.Sprintf("Current model: %s", a.cfg.Model), false)
 		}
 	case "/mode":
 		if len(args) > 0 && agent.IsValid(args[0]) {
 			a.cfg.Mode = args[0]
 			a.header.SetMode(args[0])
 			a.conversation.AddMessage("system", fmt.Sprintf("Mode switched to %s", args[0]), false)
-		} else {
-			a.conversation.AddMessage("system", fmt.Sprintf("Current mode: %s\nValid modes: %s",
-				a.cfg.Mode, strings.Join(agent.AllModes(), ", ")), false)
 		}
 	case "/sessions":
 		a.sessionBrowser.Show()
 	case "/diff":
 		a.diffPane.Toggle()
+		a.layout()
 	case "/tree":
 		a.showFileTree = !a.showFileTree
 		a.layout()
 	case "/lsp":
 		a.lspPanel.Toggle()
+		a.layout()
 	case "/stats":
 		a.conversation.AddMessage("system", a.stats.View(), false)
-	default:
-		a.conversation.AddMessage("system",
-			fmt.Sprintf("Unknown command: %s\nType /help for available commands.", cmd), false)
 	}
 	return nil
 }
 
 func (a *App) layout() {
-	headerH := 1
+	if a.width <= 0 || a.height <= 0 {
+		return
+	}
+	headerH := 4
 	statusH := 1
-	inputH := 5
+	inputH := a.input.LineCount() + 2
+	if inputH < 3 {
+		inputH = 3
+	}
+	if inputH > 10 {
+		inputH = 10
+	}
+
 	mainH := a.height - headerH - statusH - inputH
 	if mainH < 1 {
 		mainH = 1
@@ -367,7 +400,7 @@ func (a *App) layout() {
 
 	mainW := a.width
 	if a.showFileTree {
-		treeW := 28
+		treeW := 25
 		if a.width > 80 {
 			treeW = a.width / 5
 		}
@@ -376,8 +409,8 @@ func (a *App) layout() {
 	}
 
 	if a.diffPane.Visible() {
-		convW := mainW * 2 / 3
-		diffW := mainW - convW
+		convW := mainW * 4 / 10
+		diffW := mainW - convW - 1
 		a.conversation.SetSize(convW, mainH)
 		a.diffPane.SetSize(diffW, mainH)
 	} else {
@@ -388,27 +421,45 @@ func (a *App) layout() {
 	a.helpOverlay.SetSize(a.width*3/4, a.height*3/4)
 }
 
-// View renders the full TUI.
 func (a *App) View() string {
+	if a.width <= 0 || a.height <= 0 {
+		return "Initializing..."
+	}
 	if a.showHelp {
 		return a.helpOverlay.View()
 	}
 
 	var sb strings.Builder
 
-	sb.WriteString(a.header.View())
-	sb.WriteByte('\n')
+	headerView := a.header.View()
+	sb.WriteString(headerView)
+	if headerView != "" {
+		sb.WriteString("\n")
+	}
 
 	if a.sessionBrowser.Visible() {
 		sb.WriteString(a.sessionBrowser.View())
 	} else {
-		mainRow := a.conversation.View()
-		if a.diffPane.Visible() {
-			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, a.diffPane.View())
+		var mainRow string
+		convView := a.conversation.View()
+
+		// Style conversation based on focus
+		if a.focus == "conversation" {
+			convView = a.styles.ActivePane.Width(lipgloss.Width(convView)).Render(convView)
 		}
+
 		if a.showFileTree {
-			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, a.fileTree.View(), mainRow)
+			treeView := a.fileTree.View()
+			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, treeView, " ", convView)
+		} else {
+			mainRow = convView
 		}
+
+		if a.diffPane.Visible() {
+			diffView := a.diffPane.View()
+			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", diffView)
+		}
+
 		if a.lspPanel.Visible() {
 			mainRow = lipgloss.JoinVertical(lipgloss.Left, mainRow, a.lspPanel.View())
 		}
@@ -418,9 +469,9 @@ func (a *App) View() string {
 	sb.WriteByte('\n')
 
 	if a.confirm.Visible() {
-		sb.WriteString(a.confirm.View())
+		sb.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
 	} else if a.thinking {
-		sb.WriteString(a.spin.View())
+		sb.WriteString("  " + a.spin.View() + " Thinking...")
 	} else {
 		sb.WriteString(a.input.View())
 	}
@@ -431,7 +482,6 @@ func (a *App) View() string {
 	return sb.String()
 }
 
-// Run starts the Bubble Tea program.
 func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, initialPrompt string) error {
 	app := NewApp(cfg, ag, sess, initialPrompt)
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
