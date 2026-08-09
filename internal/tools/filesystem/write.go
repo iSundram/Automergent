@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/iSundram/Automergent/internal/tools"
 )
@@ -79,34 +80,13 @@ func (t *PatchFileTool) Execute(_ context.Context, args map[string]any) (tools.R
 		return tools.Result{IsError: true, Content: fmt.Sprintf("read: %v", err)}, nil
 	}
 	original := string(data)
-	var found bool
-	result := ""
-	for i := 0; i < len(original); {
-		idx := indexOf(original[i:], oldStr)
-		if idx < 0 {
-			result += original[i:]
-			break
-		}
-		result += original[i : i+idx]
-		result += newStr
-		i += idx + len(oldStr)
-		found = true
-		break // replace only first occurrence
-	}
-	if !found {
+	idx := strings.Index(original, oldStr)
+	if idx < 0 {
 		return tools.Result{IsError: true, Content: "old_str not found in file"}, nil
 	}
+	result := original[:idx] + newStr + original[idx+len(oldStr):]
 	if err := os.WriteFile(path, []byte(result), 0o644); err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("write: %v", err)}, nil
 	}
 	return tools.Result{Content: fmt.Sprintf("patched %s", path)}, nil
-}
-
-func indexOf(s, sub string) int {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }

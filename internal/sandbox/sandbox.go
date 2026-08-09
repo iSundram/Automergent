@@ -12,7 +12,10 @@ type Sandbox interface {
 	Name() string
 }
 
-// New returns the appropriate sandbox for the current OS and config.
+// New returns the appropriate Sandbox for the current OS and configuration.
+// The kind parameter selects the sandbox type: "auto", "macos", "docker",
+// "namespaces", or "off". When kind is "auto" or empty the platform default is
+// chosen automatically (sandbox-exec on macOS, bubblewrap on Linux).
 func New(kind string) Sandbox {
 	return newPlatformSandbox(kind)
 }

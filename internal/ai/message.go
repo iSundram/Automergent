@@ -38,3 +38,14 @@ func (m Message) HasToolCalls() bool {
 func (m *Message) AppendText(text string) {
 	m.Content = append(m.Content, ContentPart{Type: ContentTypeText, Text: text})
 }
+
+// ApproximateTokenCount estimates the token count for a slice of messages.
+// It uses the rough approximation of 1 token per 4 characters of text content.
+// For accurate counts, use provider-specific tokenizers such as tiktoken.
+func ApproximateTokenCount(messages []Message) int {
+	total := 0
+	for _, m := range messages {
+		total += len(m.TextContent()) / 4
+	}
+	return total
+}
