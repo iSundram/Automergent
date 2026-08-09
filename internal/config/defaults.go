@@ -46,6 +46,19 @@ func Default() *Config {
 		Security: SecurityConfig{
 			Sandbox:                "auto",
 			RequireGitForAutoModes: true,
+			BlockedWritePaths: []string{
+				".git/**",
+				"~/.ssh/**",
+				"~/.gnupg/**",
+				"~/.aws/**",
+				"~/.kube/**",
+			},
+			StripEnvVarPatterns: []string{
+				"*_SECRET", "*_PASSWORD", "*_TOKEN", "*_KEY",
+				"AWS_*", "GEMINI_*",
+				"HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+				"http_proxy", "https_proxy", "all_proxy", "no_proxy",
+			},
 		},
 
 		Tools: map[string]ToolConfig{
@@ -144,7 +157,7 @@ func (c *Config) ApplyFlags(f *CLIFlags) {
 		c.NoAnimation = true
 	}
 	if f.NoSandbox {
-		c.Security.Sandbox = "none"
+		c.Security.Sandbox = "off"
 	}
 	if f.Sandbox != "" {
 		c.Security.Sandbox = f.Sandbox

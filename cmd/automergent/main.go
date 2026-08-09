@@ -3,7 +3,12 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -27,7 +32,11 @@ var flags config.CLIFlags
 var cfgFile string
 
 func main() {
-	if err := rootCmd.Execute(); err != nil {
+	// Graceful shutdown: cancel context on SIGINT / SIGTERM.
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+
+	if err := rootCmd.ExecuteContext(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -48,26 +57,30 @@ func init() {
 
 	f := rootCmd.Flags()
 	f.StringVar(&cfgFile, "config", "", "config file (default ~/.automergent/config.yaml)")
-	f.StringVarP(&flags.Provider, "provider", "p", "", "AI provider (google)")
+	f.StringVarP(&flags.Prompt, "prompt", "p", "", "Non-interactive: run this prompt and exit")
+	f.StringVar(&flags.Provider, "provider", "", "AI provider (google)")
 	f.StringVarP(&flags.Model, "model", "m", "", "Model name")
 	f.StringVar(&flags.Mode, "mode", "", "Approval mode: suggest, auto-edit, full-auto, plan")
 	f.StringVar(&flags.Theme, "theme", "", "Color theme: catppuccin, dracula")
 	f.StringVar(&flags.Keybindings, "keybindings", "", "Key bindings: default, vim, emacs")
-	f.StringVarP(&flags.Output, "output", "o", "", "Output file for non-TUI mode")
+	f.StringVarP(&flags.Output, "output", "o", "text", "Output format: text | json | stream-json")
 	f.BoolVar(&flags.NoTUI, "no-tui", false, "Disable TUI, write output to stdout")
+	f.BoolVar(&flags.Stdin, "stdin", false, "Read prompt from stdin")
 	f.BoolVar(&flags.NoColor, "no-color", false, "Disable color output")
-	f.BoolVar(&flags.Quiet, "quiet", false, "Suppress non-essential output")
+	f.BoolVarP(&flags.Quiet, "quiet", "q", false, "Suppress non-essential output")
 	f.BoolVar(&flags.Verbose, "verbose", false, "Enable verbose logging")
 	f.BoolVar(&flags.NoAnimation, "no-animation", false, "Disable animations")
-	f.StringVar(&flags.Session, "session", "", "Resume a specific session ID")
+	f.StringVarP(&flags.Session, "session", "s", "", "Resume a specific session ID or name")
 	f.BoolVar(&flags.NewSession, "new-session", false, "Start a new session")
 	f.StringVar(&flags.SessionDir, "session-dir", "", "Session storage directory")
-	f.StringSliceVar(&flags.ContextFiles, "context", nil, "Extra context files to include")
-	f.StringSliceVar(&flags.Files, "files", nil, "Files to include in context")
+	f.StringSliceVarP(&flags.ContextFiles, "context", "c", nil, "Extra context files to include")
+	f.StringSliceVarP(&flags.Files, "file", "f", nil, "Files to include in context")
 	f.BoolVar(&flags.NoSandbox, "no-sandbox", false, "Disable OS sandboxing")
-	f.StringVar(&flags.Sandbox, "sandbox", "", "Sandbox type")
+	f.StringVar(&flags.Sandbox, "sandbox", "", "Sandbox type: auto | macos | docker | namespaces | off")
 	f.StringVar(&flags.APIKey, "api-key", "", "API key (overrides env var)")
 	f.StringVar(&flags.BaseURL, "base-url", "", "Custom API base URL")
+	f.BoolVar(&flags.NoContext, "no-context", false, "Skip loading AUTOMERGENT.md files")
+	f.StringVar(&flags.Layout, "layout", "", "TUI layout: auto | split | single")
 }
 
 func initConfig() {
@@ -92,13 +105,22 @@ func run(cmd *cobra.Command, args []string) error {
 	// Resolve API keys from environment if not set
 	resolveAPIKeysFromEnv(cfg)
 
-	// Build prompt from trailing args
-	prompt := ""
-	if len(args) > 0 {
-		prompt = args[0]
-		for _, a := range args[1:] {
-			prompt += " " + a
+	// Build prompt from --prompt flag, trailing args, or --stdin
+	prompt := flags.Prompt
+	if prompt == "" && len(args) > 0 {
+		prompt = strings.Join(args, " ")
+	}
+	if prompt == "" && flags.Stdin {
+		data, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return fmt.Errorf("read stdin: %w", err)
 		}
+		prompt = strings.TrimSpace(string(data))
+	}
+
+	// When a prompt is supplied via flag/stdin, default to headless (no-tui)
+	if prompt != "" && !cmd.Flags().Changed("no-tui") {
+		cfg.NoTUI = true
 	}
 
 	// Setup session
@@ -106,6 +128,15 @@ func run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("session storage: %w", err)
 	}
+
+	// Prune old sessions in the background to keep disk usage bounded.
+	go func() {
+		var maxAge time.Duration
+		if cfg.MaxSessionAge != "" {
+			maxAge, _ = time.ParseDuration(cfg.MaxSessionAge)
+		}
+		_ = storage.Prune(cfg.MaxSessions, maxAge)
+	}()
 
 	var sess *session.Session
 	if flags.Session != "" {
@@ -209,7 +240,7 @@ func resolveProvider(cfg *config.Config) (aiPkg.Provider, error) {
 
 func resolveAPIKeysFromEnv(cfg *config.Config) {
 	envMap := map[string]string{
-		"google": "GOOGLE_API_KEY",
+		"google": "GEMINI_API_KEY",
 	}
 	if cfg.Providers == nil {
 		cfg.Providers = map[string]config.ProviderConfig{}

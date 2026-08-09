@@ -32,7 +32,29 @@ func SaveCheckpoint(dir string, s *Session, index int) error {
 		return fmt.Errorf("checkpoint marshal: %w", err)
 	}
 	name := fmt.Sprintf("%s_cp%04d.json", s.ID, index)
-	return os.WriteFile(filepath.Join(dir, name), data, 0o644)
+	path := filepath.Join(dir, name)
+
+	// Write atomically with restricted permissions
+	tmp, err := os.CreateTemp(dir, ".automergent-cp-tmp-*")
+	if err != nil {
+		return fmt.Errorf("checkpoint temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		tmp.Close()
+		os.Remove(tmpPath)
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write checkpoint: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync checkpoint: %w", err)
+	}
+	tmp.Close()
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return fmt.Errorf("chmod checkpoint: %w", err)
+	}
+	return os.Rename(tmpPath, path)
 }
 
 // LoadCheckpoint reads a checkpoint file.

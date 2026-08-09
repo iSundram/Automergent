@@ -13,6 +13,7 @@ type Config struct {
 	CheckpointInterval int
 	SessionDir         string
 	MaxSessions        int
+	MaxSessionAge      string // e.g. "30d", "720h". Empty = never expire.
 
 	MaxContextTokens      int
 	WarnAtContextFraction float64
@@ -57,6 +58,7 @@ type CLIFlags struct {
 	Prompt       string
 	Output       string
 	NoTUI        bool
+	Stdin        bool
 	Theme        string
 	Keybindings  string
 	ConfigFile   string

@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
@@ -55,9 +57,20 @@ func (a *Agent) Session() *session.Session { return a.sess }
 
 // Run executes the agent loop for the given user prompt.
 func (a *Agent) Run(ctx context.Context, prompt string) error {
+	// In full-auto mode, check that we are inside a git repository when required.
+	if a.cfg.Mode == "full-auto" && a.cfg.Security.RequireGitForAutoModes {
+		cwd, _ := os.Getwd()
+		if !gitIsRepo(ctx, cwd) {
+			a.emit(EventStatus, "⚠ Not a git repository — full-auto mode requires git for safe rollback")
+		}
+	}
+
 	a.sess.AddMessage(ai.NewTextMessage(ai.RoleUser, prompt))
 
 	for {
+		// Check context window usage and emit warnings.
+		a.checkContextLimit(a.sess.Messages)
+
 		systemPrompt := buildSystemPrompt(a.cfg)
 		toolSchemas := buildToolSchemas(a.tools)
 
@@ -190,4 +203,42 @@ func buildToolSchemas(reg *tools.Registry) []ai.ToolSchema {
 		})
 	}
 	return schemas
+}
+
+// checkContextLimit emits warning/critical events when context usage is high.
+// It uses the approximate token count so no provider API call is needed.
+func (a *Agent) checkContextLimit(messages []ai.Message) {
+	tokens, err := a.provider.TokenCount(messages)
+	if err != nil {
+		return
+	}
+
+	limit := a.cfg.MaxContextTokens
+	if limit <= 0 {
+		limit = a.provider.ContextLimit()
+	}
+	if limit <= 0 {
+		return
+	}
+
+	fraction := float64(tokens) / float64(limit)
+	switch {
+	case fraction >= 0.95:
+		a.emit(EventStatus, fmt.Sprintf(
+			"⚠ Context is %d%% full (%d/%d tokens). Next request may fail — use /compress to reduce context.",
+			int(fraction*100), tokens, limit,
+		))
+	case fraction >= 0.80:
+		a.emit(EventStatus, fmt.Sprintf(
+			"Context is %d%% full (%d/%d tokens). Consider using /compress.",
+			int(fraction*100), tokens, limit,
+		))
+	}
+}
+
+// gitIsRepo reports whether dir is inside a git repository.
+func gitIsRepo(ctx context.Context, dir string) bool {
+	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--is-inside-work-tree")
+	cmd.Env = os.Environ()
+	return cmd.Run() == nil
 }

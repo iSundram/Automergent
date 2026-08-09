@@ -10,6 +10,38 @@ import (
 	"github.com/iSundram/Automergent/internal/tools"
 )
 
+// atomicWriteFile writes data to path atomically: write to a temp file in the
+// same directory, sync, set permissions, then rename into place.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return fmt.Errorf("mkdir: %w", err)
+	}
+	tmp, err := os.CreateTemp(dir, ".automergent-tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		tmp.Close()
+		os.Remove(tmpPath)
+	}()
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("write temp: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sync temp: %w", err)
+	}
+	tmp.Close()
+	if err := os.Chmod(tmpPath, perm); err != nil {
+		return fmt.Errorf("chmod temp: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("rename: %w", err)
+	}
+	return nil
+}
+
 // WriteFileTool writes content to a file.
 type WriteFileTool struct{}
 
@@ -38,10 +70,7 @@ func (t *WriteFileTool) Execute(_ context.Context, args map[string]any) (tools.R
 	if path == "" {
 		return tools.Result{IsError: true, Content: "path is required"}, nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return tools.Result{IsError: true, Content: fmt.Sprintf("mkdir: %v", err)}, nil
-	}
-	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+	if err := atomicWriteFile(path, []byte(content), 0o644); err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("write: %v", err)}, nil
 	}
 	return tools.Result{Content: fmt.Sprintf("wrote %d bytes to %s", len(content), path)}, nil
@@ -85,7 +114,7 @@ func (t *PatchFileTool) Execute(_ context.Context, args map[string]any) (tools.R
 		return tools.Result{IsError: true, Content: "old_str not found in file"}, nil
 	}
 	result := original[:idx] + newStr + original[idx+len(oldStr):]
-	if err := os.WriteFile(path, []byte(result), 0o644); err != nil {
+	if err := atomicWriteFile(path, []byte(result), 0o644); err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("write: %v", err)}, nil
 	}
 	return tools.Result{Content: fmt.Sprintf("patched %s", path)}, nil
