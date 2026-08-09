@@ -577,7 +577,11 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventConfirm:
 		if payload, ok := ev.Payload.(map[string]any); ok {
 			if tc, ok := payload["tool_call"].(ai.ToolCall); ok {
-				a.confirm.Show(fmt.Sprintf("Allow %s?", tc.Name))
+				prompt := fmt.Sprintf("Allow %s?", tc.Name)
+				if ctx := extractToolContext(tc.Name, tc.Args); ctx != "" {
+					prompt = fmt.Sprintf("Allow %s: %s?", tc.Name, ctx)
+				}
+				a.confirm.Show(prompt)
 				if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
 					a.confirm.SetReply(replyCh)
 				}
