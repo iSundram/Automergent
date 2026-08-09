@@ -231,11 +231,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		sb, cmd := a.sessionBrowser.Update(msg)
 		a.sessionBrowser = sb
 		cmds = append(cmds, cmd)
+		if !a.sessionBrowser.Visible() {
+			a.layout()
+		}
 	}
 	if a.confirm.Visible() {
 		c, cmd := a.confirm.Update(msg)
 		a.confirm = c
 		cmds = append(cmds, cmd)
+		if !a.confirm.Visible() {
+			a.layout()
+		}
 	}
 	return a, tea.Batch(cmds...)
 }
@@ -553,6 +559,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventDone:
 		a.thinking = false
 		a.spin.Stop()
+		a.layout() // Reclaim space from spinner
 		a.statusBar.SetStatus("Ready")
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
@@ -564,6 +571,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventError:
 		a.thinking = false
 		a.spin.Stop()
+		a.layout() // Reclaim space from spinner
 		if err, ok := ev.Payload.(error); ok {
 			errStr := err.Error()
 			msg := formatErrorMessage(errStr)
@@ -582,6 +590,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 					prompt = fmt.Sprintf("Allow %s: %s?", tc.Name, ctx)
 				}
 				a.confirm.Show(prompt)
+				a.layout() // Adjust layout for confirm box
 				if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
 					a.confirm.SetReply(replyCh)
 				}

@@ -250,10 +250,9 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 		statusText = "failed"
 	}
 
-	// Darker header style: sharing the box background, status color only on text/icon
+	// Compact header style: sharing the box background
 	headerStyle := lipgloss.NewStyle().
 		Foreground(statusColor).
-		Padding(0, 1).
 		Bold(true)
 
 	headerText := icon + m.ToolName
@@ -261,12 +260,16 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 		headerText += ": " + m.ToolContext
 	}
 	header := headerStyle.Render(headerText)
-	// Faint status text for a cleaner look
+
+	// Faint status text
 	status := lipgloss.NewStyle().
 		Foreground(statusColor).
 		Faint(true).
-		Padding(0, 1).
+		MarginLeft(1).
 		Render(statusText)
+
+	// Join header and status on one line
+	topLine := lipgloss.JoinHorizontal(lipgloss.Bottom, header, status)
 
 	// Tool Arguments (only show if reviewMode is ON)
 	args := ""
@@ -288,12 +291,15 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 			Render(m.Content)
 	}
 
-	// Base box style: using MaxWidth instead of fixed Width to allow auto-adjusting
-	boxStyle := c.styles.ToolBox.Copy().
-		MaxWidth(width).
-		BorderForeground(statusColor)
+	// Base box style: using Overlay for darker contrast and compact sizing
+	boxStyle := lipgloss.NewStyle().
+		Background(c.styles.T.Overlay).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(statusColor).
+		Padding(0, 1).
+		MaxWidth(width)
 
-	return boxStyle.Render(header + status + args + content)
+	return boxStyle.Render(topLine + args + content)
 }
 
 func (c Conversation) Update(msg tea.Msg) (Conversation, tea.Cmd) {
