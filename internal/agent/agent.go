@@ -163,21 +163,22 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		stop := resp.StopReason()
 		a.sess.AddUsage(usage)
 
-		if len(toolCalls) > 0 {
-			msg := ai.Message{Role: ai.RoleAssistant}
-			if text != "" {
-				msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeText, Text: text})
-			}
-			for _, tc := range toolCalls {
-				tcCopy := tc
-				msg.Content = append(msg.Content, ai.ContentPart{
-					Type:     ai.ContentTypeToolCall,
-					ToolCall: &tcCopy,
-				})
-			}
+		msg := ai.Message{
+			Role:     ai.RoleAssistant,
+			Metadata: resp.GetMetadata(),
+		}
+		if text != "" {
+			msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeText, Text: text})
+		}
+		for _, tc := range toolCalls {
+			tcCopy := tc
+			msg.Content = append(msg.Content, ai.ContentPart{
+				Type:     ai.ContentTypeToolCall,
+				ToolCall: &tcCopy,
+			})
+		}
+		if len(msg.Content) > 0 {
 			a.sess.AddMessage(msg)
-		} else if text != "" {
-			a.sess.AddMessage(ai.NewTextMessage(ai.RoleAssistant, text))
 		}
 
 		if stop != ai.StopReasonTools || len(toolCalls) == 0 {

@@ -76,7 +76,7 @@ type geminiFunctionCall struct {
 
 type geminiPart struct {
 	Text             string              `json:"text,omitempty"`
-	ThoughtSignature string              `json:"thought_signature,omitempty"`
+	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
 	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionRes  `json:"functionResponse,omitempty"`
 }
@@ -113,7 +113,7 @@ type geminiRequest struct {
 type geminiResponsePart struct {
 	Text             string `json:"text,omitempty"`
 	Thought          bool   `json:"thought,omitempty"`
-	ThoughtSignature string `json:"thought_signature,omitempty"`
+	ThoughtSignature string `json:"thoughtSignature,omitempty"`
 	FunctionCall     *struct {
 		Name string          `json:"name"`
 		Args json.RawMessage `json:"args"`
