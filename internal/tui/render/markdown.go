@@ -27,5 +27,5 @@ func Markdown(content string) string {
 	if err != nil {
 		return content
 	}
-	return strings.TrimRight(rendered, " \n\t")
+	return strings.TrimSpace(rendered)
 }

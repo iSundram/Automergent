@@ -31,6 +31,7 @@ import (
 
 type agentEventMsg struct{ ev agent.Event }
 type modelsFetchedMsg []ai.Model
+type clearCtrlCStatusMsg struct{}
 
 type App struct {
 	cfg            *config.Config
@@ -227,6 +228,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.availableModels = m
 		a.fetchingModels = false
 		a.updatePalette()
+	case clearCtrlCStatusMsg:
+		// Only clear if still showing the Ctrl+C message
+		if a.statusBar.View() != "" && !a.thinking {
+			a.statusBar.SetStatus("Ready")
+		}
 	}
 	if a.sessionBrowser.Visible() {
 		sb, cmd := a.sessionBrowser.Update(msg)
@@ -303,6 +309,9 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 			a.cancelActiveRun("Interrupted")
 		} else {
 			a.statusBar.SetStatus("Press Ctrl+C again to exit")
+			return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
+				return clearCtrlCStatusMsg{}
+			})
 		}
 		return nil
 	case "ctrl+q":
@@ -904,6 +913,7 @@ func (a *App) View() string {
 			sb.WriteByte('\n')
 			sb.WriteString("  " + a.spin.View())
 		}
+		sb.WriteString("\033[0K") // Clear to end of line to remove stale spinner glyphs
 		sb.WriteByte('\n')
 		sb.WriteString(a.input.View())
 	}
@@ -992,6 +1002,15 @@ func (a *App) cancelActiveRun(status string) {
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 	a.thinking = false
 	a.spin.Stop()
+	// Drain any pending events from the cancelled run
+	for {
+		select {
+		case <-a.ag.Events():
+		default:
+			goto done
+		}
+	}
+done:
 	a.layout() // Reclaim space
 	if status != "" {
 		a.statusBar.SetStatus(status)
