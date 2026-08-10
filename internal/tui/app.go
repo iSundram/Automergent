@@ -132,6 +132,7 @@ func (a *App) startAgent(prompt string) tea.Cmd {
 	a.spin.Start()
 	a.conversation.AddMessage("user", prompt, false)
 	a.statusBar.SetStatus("Thinking…")
+	a.layout() // Adjust for thinking spinner
 	go func() { _ = a.ag.Run(a.ctx, prompt) }()
 	return a.waitForAgentEvent()
 }
