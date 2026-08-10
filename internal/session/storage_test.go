@@ -66,6 +66,8 @@ func TestStorageSaveLoad(t *testing.T) {
 
 	sess := New()
 	sess.Title = "test session"
+	sess.Provider = "google"
+	sess.Model = "gemini-3.6-flash"
 	sess.AddMessage(newTestMessage("hello"))
 
 	if err := storage.Save(sess); err != nil {
@@ -78,6 +80,12 @@ func TestStorageSaveLoad(t *testing.T) {
 	}
 	if loaded.Title != sess.Title {
 		t.Errorf("title mismatch: got %q, want %q", loaded.Title, sess.Title)
+	}
+	if loaded.Provider != sess.Provider {
+		t.Errorf("provider mismatch: got %q, want %q", loaded.Provider, sess.Provider)
+	}
+	if loaded.Model != sess.Model {
+		t.Errorf("model mismatch: got %q, want %q", loaded.Model, sess.Model)
 	}
 	if len(loaded.Messages) != len(sess.Messages) {
 		t.Errorf("message count: got %d, want %d", len(loaded.Messages), len(sess.Messages))

@@ -16,7 +16,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/sahilm/fuzzy"
-	"gopkg.in/yaml.v3"
 
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/ai"
@@ -1018,20 +1017,7 @@ done:
 }
 
 func (a *App) persistProjectConfig() error {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return err
-	}
-	automergentDir := filepath.Join(home, ".automergent")
-	if err := os.MkdirAll(automergentDir, 0o700); err != nil {
-		return err
-	}
-
-	data, err := yaml.Marshal(a.cfg)
-	if err != nil {
-		return err
-	}
-	return atomicWriteFile(filepath.Join(automergentDir, "config.yaml"), data, 0o600)
+	return a.cfg.Save()
 }
 
 func extractToolContext(name string, args map[string]any) string {
@@ -1090,35 +1076,6 @@ func (a *App) ensureProviderConfig(provider string) {
 	}
 }
 
-func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	tmp, err := os.CreateTemp(dir, ".automergent-cfg-tmp-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		tmp.Close()
-		_ = os.Remove(tmpPath)
-	}()
-	if _, err := tmp.Write(data); err != nil {
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := os.Chmod(tmpPath, perm); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, path)
-}
-
 func (a *App) switchProvider(provider, model string) error {
 	if provider == "" {
 		return fmt.Errorf("provider cannot be empty")
@@ -1133,10 +1090,14 @@ func (a *App) switchProvider(provider, model string) error {
 		model = defaultModelForProvider(provider)
 	}
 	a.cfg.Model = model
+	a.sess.Provider = a.cfg.Provider
+	a.sess.Model = a.cfg.Model
 	p, err := buildProviderFromConfig(a.cfg)
 	if err != nil {
 		a.cfg.Provider = oldProvider
 		a.cfg.Model = oldModel
+		a.sess.Provider = oldProvider
+		a.sess.Model = oldModel
 		return err
 	}
 	a.ag.SetProvider(p)

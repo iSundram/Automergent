@@ -1,5 +1,13 @@
 package config
 
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	"gopkg.in/yaml.v3"
+)
+
 // Config holds the full application configuration.
 type Config struct {
 	Provider    string `mapstructure:"provider" yaml:"provider"`
@@ -48,6 +56,62 @@ type Config struct {
 	ProviderFallback []FallbackProvider `mapstructure:"providerFallback" yaml:"providerFallback,omitempty"`
 
 	Notifications NotificationConfig `mapstructure:"notifications" yaml:"notifications"`
+
+	// ConfigFile is the path to the config file used for loading and saving.
+	// It is not persisted to the config file itself.
+	ConfigFile string `mapstructure:"-" yaml:"-"`
+}
+
+// Save writes the current configuration back to disk.
+func (c *Config) Save() error {
+	path := c.ConfigFile
+	if path == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("config save: get home dir: %w", err)
+		}
+		path = filepath.Join(home, ".automergent", "config.yaml")
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return fmt.Errorf("config save: mkdir: %w", err)
+	}
+
+	data, err := yaml.Marshal(c)
+	if err != nil {
+		return fmt.Errorf("config save: marshal: %w", err)
+	}
+
+	// Use atomic write to avoid corrupting the config file if the process is killed.
+	tmp, err := os.CreateTemp(dir, ".automergent-cfg-tmp-*")
+	if err != nil {
+		return fmt.Errorf("config save: create temp: %w", err)
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		tmp.Close()
+		_ = os.Remove(tmpPath)
+	}()
+
+	if _, err := tmp.Write(data); err != nil {
+		return fmt.Errorf("config save: write temp: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("config save: sync temp: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("config save: close temp: %w", err)
+	}
+	if err := os.Chmod(tmpPath, 0o600); err != nil {
+		return fmt.Errorf("config save: chmod temp: %w", err)
+	}
+
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("config save: rename: %w", err)
+	}
+
+	return nil
 }
 
 // CLIFlags holds flags parsed from the command line.

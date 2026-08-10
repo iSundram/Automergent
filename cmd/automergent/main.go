@@ -105,8 +105,14 @@ func run(cmd *cobra.Command, args []string) error {
 	if err := decodeConfigFromViper(cfg); err != nil {
 		return fmt.Errorf("decode config: %w", err)
 	}
+	cfg.ConfigFile = viper.ConfigFileUsed()
 	cfg.ApplyFlags(&flags)
 	applyProjectDefaults(cfg, cmd)
+
+	// Save config if critical settings were changed via flags to persist as last used.
+	if flags.Provider != "" || flags.Model != "" || flags.APIKey != "" || flags.BaseURL != "" {
+		_ = cfg.Save()
+	}
 
 	// Resolve API keys from environment if not set
 	resolveAPIKeysFromEnv(cfg)
@@ -150,6 +156,15 @@ func run(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("load session %s: %w", flags.Session, err)
 		}
+		// Restore session-specific provider/model if not overridden by flags.
+		if flags.Provider == "" && sess.Provider != "" {
+			cfg.Provider = sess.Provider
+		}
+		if flags.Model == "" && sess.Model != "" {
+			cfg.Model = sess.Model
+		}
+		// Save resumed session's settings as new default
+		_ = cfg.Save()
 	} else {
 		sess = session.New()
 		if prompt != "" {
@@ -158,6 +173,10 @@ func run(cmd *cobra.Command, args []string) error {
 			sess.Title = "New conversation"
 		}
 	}
+
+	// Ensure session reflects the current provider/model.
+	sess.Provider = cfg.Provider
+	sess.Model = cfg.Model
 
 	// Build tool registry
 	reg := tools.NewRegistry()

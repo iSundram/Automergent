@@ -15,6 +15,8 @@ type Session struct {
 	UpdatedAt time.Time         `json:"updated_at"`
 	Messages  []ai.Message      `json:"messages"`
 	Metadata  map[string]string `json:"metadata"`
+	Provider  string            `json:"provider,omitempty"`
+	Model     string            `json:"model,omitempty"`
 
 	TotalInputTokens  int `json:"total_input_tokens"`
 	TotalOutputTokens int `json:"total_output_tokens"`
