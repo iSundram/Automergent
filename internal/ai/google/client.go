@@ -1,14 +1,12 @@
 package google
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
 
 	"github.com/iSundram/Automergent/internal/ai"
 )
@@ -74,10 +72,12 @@ func (c *Client) TokenCount(messages []ai.Message) (int, error) {
 type geminiFunctionCall struct {
 	Name string         `json:"name"`
 	Args map[string]any `json:"args,omitempty"`
+	ID   string         `json:"id,omitempty"`
 }
 
 type geminiPart struct {
 	Text             string              `json:"text,omitempty"`
+	Thought          bool                `json:"thought,omitempty"`
 	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
 	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
 	FunctionResponse *geminiFunctionRes  `json:"functionResponse,omitempty"`
@@ -86,6 +86,7 @@ type geminiPart struct {
 type geminiFunctionRes struct {
 	Name     string         `json:"name"`
 	Response map[string]any `json:"response"`
+	ID       string         `json:"id,omitempty"`
 }
 
 type geminiContent struct {
@@ -119,12 +120,14 @@ type geminiResponsePart struct {
 	FunctionCall     *struct {
 		Name string          `json:"name"`
 		Args json.RawMessage `json:"args"`
+		ID   string          `json:"id,omitempty"`
 	} `json:"functionCall,omitempty"`
 }
 
 type geminiResponse struct {
 	Candidates []struct {
 		Content struct {
+			Role  string               `json:"role"`
 			Parts []geminiResponsePart `json:"parts"`
 		} `json:"content"`
 		FinishReason string `json:"finishReason"`
@@ -187,7 +190,11 @@ func buildGeminiContents(messages []ai.Message) []geminiContent {
 								args = map[string]any{}
 							}
 							parts = append(parts, geminiPart{
-								FunctionCall: &geminiFunctionCall{Name: p.ToolCall.Name, Args: args},
+								FunctionCall: &geminiFunctionCall{
+									Name: p.ToolCall.Name,
+									Args: args,
+									ID:   p.ToolCall.ID,
+								},
 							})
 						}
 					}
@@ -209,6 +216,7 @@ func buildGeminiContents(messages []ai.Message) []geminiContent {
 				parts = append(parts, geminiPart{
 					FunctionResponse: &geminiFunctionRes{
 						Name: name,
+						ID:   p.ToolResult.ToolCallID,
 						Response: map[string]any{
 							"result": p.ToolResult.Content,
 						},
@@ -216,6 +224,7 @@ func buildGeminiContents(messages []ai.Message) []geminiContent {
 				})
 			}
 			if len(parts) > 0 {
+				// According to Gemini 3 documentation, tool results are provided in 'user' role.
 				out = append(out, geminiContent{Role: "user", Parts: parts})
 			}
 		}
@@ -256,7 +265,6 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 			FunctionCallingConfig: &struct {
 				Mode string `json:"mode,omitempty"`
 			}{Mode: "AUTO"},
-			IncludeServerSideToolInvocations: true,
 		}
 	}
 
@@ -271,9 +279,6 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 	}
 
 	url := fmt.Sprintf("%s/models/%s:%s?key=%s", c.baseURL, c.model, method, c.apiKey)
-	if req.Stream {
-		url += "&alt=sse"
-	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
@@ -311,14 +316,20 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 
 		if len(gr2.Candidates) > 0 {
 			for _, part := range gr2.Candidates[0].Content.Parts {
-				// Skip empty parts that could cause 400 errors
-				if part.Text == "" && part.FunctionCall == nil {
+				// Skip parts that are completely empty to avoid 400 error.
+				// If it only has thoughtSignature, it MUST still have some data field (like text).
+				if part.Text == "" && part.FunctionCall == nil && part.ThoughtSignature != "" {
+					// Add a placeholder space to satisfy "oneof field 'data' must have one initialized field"
+					part.Text = " "
+				}
+				if part.Text == "" && part.FunctionCall == nil && part.ThoughtSignature == "" {
 					continue
 				}
 
 				// Save for next turn
 				rawParts = append(rawParts, geminiPart{
 					Text:             part.Text,
+					Thought:          part.Thought,
 					ThoughtSignature: part.ThoughtSignature,
 					FunctionCall: func() *geminiFunctionCall {
 						if part.FunctionCall == nil {
@@ -342,7 +353,11 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 					if args == nil {
 						args = map[string]any{}
 					}
-					id := fmt.Sprintf("gemini_%d", len(toolCalls))
+					// Use model-provided ID if available
+					id := part.FunctionCall.ID
+					if id == "" {
+						id = fmt.Sprintf("gemini_%d", len(toolCalls))
+					}
 					toolCalls = append(toolCalls, ai.ToolCall{
 						ID:   id,
 						Name: part.FunctionCall.Name,
@@ -377,7 +392,7 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		return res, nil
 	}
 
-	// Streaming logic
+	// Streaming logic: Gemini returns a JSON array of objects during streamGenerateContent
 	ch := make(chan ai.Chunk, 128)
 	toolCallsPtr := &[]ai.ToolCall{}
 	stopReasonPtr := new(ai.StopReason)
@@ -389,23 +404,23 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		defer resp.Body.Close()
 		defer close(ch)
 
-		reader := bufio.NewReader(resp.Body)
-		for {
-			line, err := reader.ReadString('\n')
-			if err != nil {
-				if err != io.EOF {
-					ch <- ai.Chunk{Error: err}
-				}
-				break
-			}
-			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
-			data := strings.TrimPrefix(line, "data: ")
+		dec := json.NewDecoder(resp.Body)
+		// Read the opening '['
+		t, err := dec.Token()
+		if err != nil {
+			ch <- ai.Chunk{Error: fmt.Errorf("stream start: %w", err)}
+			return
+		}
+		if t != json.Delim('[') {
+			ch <- ai.Chunk{Error: fmt.Errorf("expected '[' at start of stream, got %v", t)}
+			return
+		}
+
+		for dec.More() {
 			var gr2 geminiResponse
-			if err := json.Unmarshal([]byte(data), &gr2); err != nil {
-				continue
+			if err := dec.Decode(&gr2); err != nil {
+				ch <- ai.Chunk{Error: fmt.Errorf("stream decode: %w", err)}
+				return
 			}
 
 			if gr2.UsageMetadata.TotalTokenCount > 0 {
@@ -418,7 +433,7 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 
 			if len(gr2.Candidates) > 0 {
 				cand := gr2.Candidates[0]
-				if cand.FinishReason != "" {
+				if cand.FinishReason != "" && *stopReasonPtr != ai.StopReasonTools {
 					switch cand.FinishReason {
 					case "MAX_TOKENS":
 						*stopReasonPtr = ai.StopReasonLength
@@ -428,14 +443,18 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 				}
 
 				for _, part := range cand.Content.Parts {
-					// Skip empty parts that could cause 400 errors
-					if part.Text == "" && part.FunctionCall == nil {
+					// Skip parts that are completely empty to avoid 400 error.
+					if part.Text == "" && part.FunctionCall == nil && part.ThoughtSignature != "" {
+						part.Text = " "
+					}
+					if part.Text == "" && part.FunctionCall == nil && part.ThoughtSignature == "" {
 						continue
 					}
 
 					// Save raw parts for context preservation
 					*rawPartsPtr = append(*rawPartsPtr, geminiPart{
 						Text:             part.Text,
+						Thought:          part.Thought,
 						ThoughtSignature: part.ThoughtSignature,
 						FunctionCall: func() *geminiFunctionCall {
 							if part.FunctionCall == nil {
@@ -462,7 +481,10 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 						if args == nil {
 							args = map[string]any{}
 						}
-						id := fmt.Sprintf("gemini_%d", len(*toolCallsPtr))
+						id := part.FunctionCall.ID
+						if id == "" {
+							id = fmt.Sprintf("gemini_%d", len(*toolCallsPtr))
+						}
 						tc := ai.ToolCall{
 							ID:   id,
 							Name: part.FunctionCall.Name,
