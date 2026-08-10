@@ -1,7 +1,6 @@
 package components
 
 import (
-	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -276,71 +275,65 @@ func (c *Conversation) renderThought(thought string, width int) string {
 }
 
 func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
-	icon := " ⚙ "
+	icon := " 󱓞 " // Executing/Thinking icon
 	statusColor := c.styles.T.Yellow
 	statusText := "running"
 
 	switch m.Status {
 	case "done":
-		icon = " ✓ "
+		icon = " 󰄬 "
 		statusColor = c.styles.T.Green
-		statusText = fmt.Sprintf("done (%s)", m.Duration.Round(time.Millisecond))
+		statusText = "done"
 	case "error":
-		icon = " ✗ "
+		icon = " 󱄊 "
 		statusColor = c.styles.T.Red
 		statusText = "failed"
 	}
 
-	// Compact header style: sharing the box background
-	headerStyle := lipgloss.NewStyle().
-		Foreground(statusColor).
-		Bold(true)
+	// Icon with background
+	iconStyled := lipgloss.NewStyle().
+		Foreground(c.styles.T.Background).
+		Background(statusColor).
+		Render(icon)
 
-	headerText := icon + m.ToolName
+	// Tool name
+	nameStyled := c.styles.ToolName.Render(" " + m.ToolName)
 	if m.ToolContext != "" {
-		headerText += ": " + m.ToolContext
+		nameStyled += lipgloss.NewStyle().Foreground(c.styles.T.Subtext).Render(" (" + m.ToolContext + ")")
 	}
-	header := headerStyle.Render(headerText)
 
-	// Faint status text
-	status := lipgloss.NewStyle().
-		Foreground(statusColor).
-		Faint(true).
-		MarginLeft(1).
-		Render(statusText)
+	// Status and duration
+	statusStyled := c.styles.ToolStatus.Foreground(statusColor).Render(statusText)
+	duration := ""
+	if m.Duration > 0 {
+		duration = c.styles.ToolDuration.Render(m.Duration.Round(time.Millisecond).String())
+	}
 
-	// Join header and status on one line
-	topLine := lipgloss.JoinHorizontal(lipgloss.Bottom, header, status)
+	header := lipgloss.JoinHorizontal(lipgloss.Center, iconStyled, nameStyled, statusStyled, duration)
 
-	// Tool Arguments (only show if reviewMode is ON)
-	args := ""
+	var body strings.Builder
+	body.WriteString(header)
+
+	// Tool Arguments (only show if reviewMode is ON or it's running)
 	if c.reviewMode {
 		argText := m.ToolArgs
 		if argText != "" && argText != "{}" {
-			args = "\n" + lipgloss.NewStyle().
-				Foreground(c.styles.T.Subtext).
-				Italic(true).
-				Render("  "+argText)
+			body.WriteString("\n\n" + lipgloss.NewStyle().Foreground(c.styles.T.Subtext).Bold(true).Render(" ARGS"))
+			body.WriteString("\n" + render.Code(argText, "json"))
 		}
 	}
 
 	// Tool Result/Content (only show if reviewMode is ON)
-	content := ""
 	if c.reviewMode && m.Content != "" {
-		content = "\n\n" + lipgloss.NewStyle().
-			Foreground(c.styles.T.Text).
-			Render(m.Content)
+		body.WriteString("\n\n" + lipgloss.NewStyle().Foreground(statusColor).Bold(true).Render(" RESULTS"))
+		body.WriteString("\n" + m.Content)
 	}
 
-	// Base box style: using Overlay for darker contrast and compact sizing
-	boxStyle := lipgloss.NewStyle().
-		Background(c.styles.T.Overlay).
-		Border(lipgloss.RoundedBorder()).
+	// Apply side accent and padding
+	return c.styles.ToolAccent.
 		BorderForeground(statusColor).
-		Padding(0, 1).
-		MaxWidth(width)
-
-	return boxStyle.Render(topLine + args + content)
+		Width(width - 2).
+		Render(body.String())
 }
 
 func (c Conversation) Update(msg tea.Msg) (Conversation, tea.Cmd) {

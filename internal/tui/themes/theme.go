@@ -48,6 +48,11 @@ type Styles struct {
 	ToolCall        lipgloss.Style
 	ToolResult      lipgloss.Style
 	ToolBox         lipgloss.Style
+	ToolName        lipgloss.Style
+	ToolStatus      lipgloss.Style
+	ToolDuration    lipgloss.Style
+	ToolIcon        lipgloss.Style
+	ToolAccent      lipgloss.Style
 	Error           lipgloss.Style
 	Border          lipgloss.Style
 	Code            lipgloss.Style
@@ -149,14 +154,32 @@ func NewStyles(t *Theme) *Styles {
 	s.ToolCall = lipgloss.NewStyle().
 		Foreground(t.Yellow)
 	s.ToolResult = lipgloss.NewStyle().
-		Foreground(t.Muted).
-		MarginLeft(4) // Indent tool results slightly
+		Foreground(t.Muted)
 
 	s.ToolBox = lipgloss.NewStyle().
-		Background(t.Surface).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.BorderNormal).
-		Padding(0, 1)
+		Background(t.Overlay).
+		Padding(0, 1).
+		MarginBottom(1)
+
+	s.ToolName = lipgloss.NewStyle().
+		Foreground(t.Text).
+		Bold(true)
+
+	s.ToolStatus = lipgloss.NewStyle().
+		Faint(true).
+		MarginLeft(1)
+
+	s.ToolDuration = lipgloss.NewStyle().
+		Foreground(t.Muted).
+		Italic(true).
+		MarginLeft(1)
+
+	s.ToolIcon = lipgloss.NewStyle().
+		MarginRight(1)
+
+	s.ToolAccent = lipgloss.NewStyle().
+		PaddingLeft(1).
+		Border(lipgloss.NormalBorder(), false, false, false, true) // Left border only
 
 	// Misc
 	s.Error = lipgloss.NewStyle().
