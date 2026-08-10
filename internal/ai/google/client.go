@@ -311,6 +311,11 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 
 		if len(gr2.Candidates) > 0 {
 			for _, part := range gr2.Candidates[0].Content.Parts {
+				// Skip empty parts that could cause 400 errors
+				if part.Text == "" && part.FunctionCall == nil {
+					continue
+				}
+
 				// Save for next turn
 				rawParts = append(rawParts, geminiPart{
 					Text:             part.Text,
@@ -324,7 +329,6 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 						return &geminiFunctionCall{Name: part.FunctionCall.Name, Args: args}
 					}(),
 				})
-
 				if part.Thought {
 					thought += part.Text
 				} else if part.Text != "" {
@@ -424,6 +428,11 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 				}
 
 				for _, part := range cand.Content.Parts {
+					// Skip empty parts that could cause 400 errors
+					if part.Text == "" && part.FunctionCall == nil {
+						continue
+					}
+
 					// Save raw parts for context preservation
 					*rawPartsPtr = append(*rawPartsPtr, geminiPart{
 						Text:             part.Text,

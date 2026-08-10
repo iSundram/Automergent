@@ -896,14 +896,15 @@ func (a *App) View() string {
 		}
 		sb.WriteString(mainRow)
 	}
-	sb.WriteByte('\n')
 	if a.confirm.Visible() {
+		sb.WriteByte('\n')
 		sb.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
 	} else {
 		if a.thinking {
-			sb.WriteString("  " + a.spin.View())
 			sb.WriteByte('\n')
+			sb.WriteString("  " + a.spin.View())
 		}
+		sb.WriteByte('\n')
 		sb.WriteString(a.input.View())
 	}
 	sb.WriteByte('\n')
@@ -991,6 +992,7 @@ func (a *App) cancelActiveRun(status string) {
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 	a.thinking = false
 	a.spin.Stop()
+	a.layout() // Reclaim space
 	if status != "" {
 		a.statusBar.SetStatus(status)
 	}
