@@ -873,7 +873,9 @@ func (a *App) View() string {
 	} else {
 		var mainRow string
 		convView := a.conversation.View()
-		if a.focus == "conversation" {
+		// Only wrap in ActivePane border if we have multiple panes (FileTree, Diff, or LSP)
+		hasOtherPanes := a.showFileTree || a.diffPane.Visible() || a.lspPanel.Visible()
+		if a.focus == "conversation" && hasOtherPanes {
 			convView = a.styles.ActivePane.Width(lipgloss.Width(convView)).Render(convView)
 		}
 		if a.showFileTree {
@@ -898,7 +900,8 @@ func (a *App) View() string {
 		sb.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
 	} else {
 		if a.thinking {
-			sb.WriteString("  " + a.spin.View() + "\n")
+			sb.WriteString("  " + a.spin.View())
+			sb.WriteByte('\n')
 		}
 		sb.WriteString(a.input.View())
 	}

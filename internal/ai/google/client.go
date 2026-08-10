@@ -1,12 +1,14 @@
 package google
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/iSundram/Automergent/internal/ai"
 )
@@ -263,7 +265,16 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		return nil, err
 	}
 
-	url := fmt.Sprintf("%s/models/%s:generateContent?key=%s", c.baseURL, c.model, c.apiKey)
+	method := "generateContent"
+	if req.Stream {
+		method = "streamGenerateContent"
+	}
+
+	url := fmt.Sprintf("%s/models/%s:%s?key=%s", c.baseURL, c.model, method, c.apiKey)
+	if req.Stream {
+		url += "&alt=sse"
+	}
+
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
@@ -274,86 +285,215 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
 
-	data, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
 	if resp.StatusCode != http.StatusOK {
+		defer resp.Body.Close()
+		data, _ := io.ReadAll(resp.Body)
 		return nil, fmt.Errorf("google: status %d: %s", resp.StatusCode, data)
 	}
 
-	var gr2 geminiResponse
-	if err := json.Unmarshal(data, &gr2); err != nil {
-		return nil, err
-	}
+	if !req.Stream {
+		defer resp.Body.Close()
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, err
+		}
 
-	var text string
-	var thought string
-	var toolCalls []ai.ToolCall
-	var rawParts []geminiPart
+		var gr2 geminiResponse
+		if err := json.Unmarshal(data, &gr2); err != nil {
+			return nil, err
+		}
 
-	if len(gr2.Candidates) > 0 {
-		for _, part := range gr2.Candidates[0].Content.Parts {
-			// Save for next turn
-			rawParts = append(rawParts, geminiPart{
-				Text:             part.Text,
-				ThoughtSignature: part.ThoughtSignature,
-				FunctionCall: func() *geminiFunctionCall {
-					if part.FunctionCall == nil {
-						return nil
-					}
-					var args map[string]any
-					_ = json.Unmarshal(part.FunctionCall.Args, &args)
-					return &geminiFunctionCall{Name: part.FunctionCall.Name, Args: args}
-				}(),
-			})
+		var text string
+		var thought string
+		var toolCalls []ai.ToolCall
+		var rawParts []geminiPart
 
-			if part.Thought {
-				thought += part.Text
-			} else if part.Text != "" {
-				text += part.Text
-			}
-			if part.FunctionCall != nil {
-				var args map[string]any
-				if len(part.FunctionCall.Args) > 0 {
-					_ = json.Unmarshal(part.FunctionCall.Args, &args)
-				}
-				if args == nil {
-					args = map[string]any{}
-				}
-				id := fmt.Sprintf("gemini_%d", len(toolCalls))
-				toolCalls = append(toolCalls, ai.ToolCall{
-					ID:   id,
-					Name: part.FunctionCall.Name,
-					Args: args,
+		if len(gr2.Candidates) > 0 {
+			for _, part := range gr2.Candidates[0].Content.Parts {
+				// Save for next turn
+				rawParts = append(rawParts, geminiPart{
+					Text:             part.Text,
+					ThoughtSignature: part.ThoughtSignature,
+					FunctionCall: func() *geminiFunctionCall {
+						if part.FunctionCall == nil {
+							return nil
+						}
+						var args map[string]any
+						_ = json.Unmarshal(part.FunctionCall.Args, &args)
+						return &geminiFunctionCall{Name: part.FunctionCall.Name, Args: args}
+					}(),
 				})
+
+				if part.Thought {
+					thought += part.Text
+				} else if part.Text != "" {
+					text += part.Text
+				}
+				if part.FunctionCall != nil {
+					var args map[string]any
+					if len(part.FunctionCall.Args) > 0 {
+						_ = json.Unmarshal(part.FunctionCall.Args, &args)
+					}
+					if args == nil {
+						args = map[string]any{}
+					}
+					id := fmt.Sprintf("gemini_%d", len(toolCalls))
+					toolCalls = append(toolCalls, ai.ToolCall{
+						ID:   id,
+						Name: part.FunctionCall.Name,
+						Args: args,
+					})
+				}
 			}
 		}
-	}
 
-	usage := ai.Usage{
-		InputTokens:  gr2.UsageMetadata.PromptTokenCount,
-		OutputTokens: gr2.UsageMetadata.CandidatesTokenCount,
-		TotalTokens:  gr2.UsageMetadata.TotalTokenCount,
-	}
-
-	res := ai.NewStaticResponse(text, thought, toolCalls, ai.StopReasonEnd, usage)
-	if len(rawParts) > 0 {
-		res.SetMetadata(map[string]any{"google_parts": rawParts})
-	}
-
-	if len(toolCalls) > 0 {
-		res.SetStopReason(ai.StopReasonTools)
-	} else if len(gr2.Candidates) > 0 {
-		switch gr2.Candidates[0].FinishReason {
-		case "MAX_TOKENS":
-			res.SetStopReason(ai.StopReasonLength)
-		case "STOP", "":
-			res.SetStopReason(ai.StopReasonEnd)
+		usage := ai.Usage{
+			InputTokens:  gr2.UsageMetadata.PromptTokenCount,
+			OutputTokens: gr2.UsageMetadata.CandidatesTokenCount,
+			TotalTokens:  gr2.UsageMetadata.TotalTokenCount,
 		}
+
+		res := ai.NewStaticResponse(text, thought, toolCalls, ai.StopReasonEnd, usage)
+		if len(rawParts) > 0 {
+			res.SetMetadata(map[string]any{"google_parts": rawParts})
+		}
+
+		if len(toolCalls) > 0 {
+			res.SetStopReason(ai.StopReasonTools)
+		} else if len(gr2.Candidates) > 0 {
+			switch gr2.Candidates[0].FinishReason {
+			case "MAX_TOKENS":
+				res.SetStopReason(ai.StopReasonLength)
+			case "STOP", "":
+				res.SetStopReason(ai.StopReasonEnd)
+			}
+		}
+
+		return res, nil
 	}
 
-	return res, nil
+	// Streaming logic
+	ch := make(chan ai.Chunk, 128)
+	toolCallsPtr := &[]ai.ToolCall{}
+	stopReasonPtr := new(ai.StopReason)
+	*stopReasonPtr = ai.StopReasonEnd
+	usagePtr := &ai.Usage{}
+	rawPartsPtr := &[]geminiPart{}
+
+	go func() {
+		defer resp.Body.Close()
+		defer close(ch)
+
+		reader := bufio.NewReader(resp.Body)
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				if err != io.EOF {
+					ch <- ai.Chunk{Error: err}
+				}
+				break
+			}
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			data := strings.TrimPrefix(line, "data: ")
+			var gr2 geminiResponse
+			if err := json.Unmarshal([]byte(data), &gr2); err != nil {
+				continue
+			}
+
+			if gr2.UsageMetadata.TotalTokenCount > 0 {
+				*usagePtr = ai.Usage{
+					InputTokens:  gr2.UsageMetadata.PromptTokenCount,
+					OutputTokens: gr2.UsageMetadata.CandidatesTokenCount,
+					TotalTokens:  gr2.UsageMetadata.TotalTokenCount,
+				}
+			}
+
+			if len(gr2.Candidates) > 0 {
+				cand := gr2.Candidates[0]
+				if cand.FinishReason != "" {
+					switch cand.FinishReason {
+					case "MAX_TOKENS":
+						*stopReasonPtr = ai.StopReasonLength
+					case "STOP":
+						*stopReasonPtr = ai.StopReasonEnd
+					}
+				}
+
+				for _, part := range cand.Content.Parts {
+					// Save raw parts for context preservation
+					*rawPartsPtr = append(*rawPartsPtr, geminiPart{
+						Text:             part.Text,
+						ThoughtSignature: part.ThoughtSignature,
+						FunctionCall: func() *geminiFunctionCall {
+							if part.FunctionCall == nil {
+								return nil
+							}
+							var args map[string]any
+							_ = json.Unmarshal(part.FunctionCall.Args, &args)
+							return &geminiFunctionCall{Name: part.FunctionCall.Name, Args: args}
+						}(),
+					})
+
+					chunk := ai.Chunk{}
+					if part.Thought {
+						chunk.Thought = part.Text
+					} else if part.Text != "" {
+						chunk.Text = part.Text
+					}
+
+					if part.FunctionCall != nil {
+						var args map[string]any
+						if len(part.FunctionCall.Args) > 0 {
+							_ = json.Unmarshal(part.FunctionCall.Args, &args)
+						}
+						if args == nil {
+							args = map[string]any{}
+						}
+						id := fmt.Sprintf("gemini_%d", len(*toolCallsPtr))
+						tc := ai.ToolCall{
+							ID:   id,
+							Name: part.FunctionCall.Name,
+							Args: args,
+						}
+						*toolCallsPtr = append(*toolCallsPtr, tc)
+						chunk.ToolCalls = append(chunk.ToolCalls, tc)
+						*stopReasonPtr = ai.StopReasonTools
+					}
+					ch <- chunk
+				}
+			}
+		}
+		ch <- ai.Chunk{Done: true}
+	}()
+
+	res := ai.NewChannelResponse(ch, ai.StopReasonEnd, ai.Usage{})
+	return &geminiStreamResponse{
+		res:        res,
+		toolCalls:  toolCallsPtr,
+		stopReason: stopReasonPtr,
+		usage:      usagePtr,
+		rawParts:   rawPartsPtr,
+	}, nil
+}
+
+type geminiStreamResponse struct {
+	res        *ai.ChannelResponse
+	toolCalls  *[]ai.ToolCall
+	stopReason *ai.StopReason
+	usage      *ai.Usage
+	rawParts   *[]geminiPart
+}
+
+func (r *geminiStreamResponse) Stream() <-chan ai.Chunk { return r.res.Stream() }
+func (r *geminiStreamResponse) ToolCalls() []ai.ToolCall {
+	return *r.toolCalls
+}
+func (r *geminiStreamResponse) StopReason() ai.StopReason { return *r.stopReason }
+func (r *geminiStreamResponse) Usage() ai.Usage           { return *r.usage }
+func (r *geminiStreamResponse) GetMetadata() map[string]any {
+	return map[string]any{"google_parts": *r.rawParts}
 }

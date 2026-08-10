@@ -1,6 +1,8 @@
 package render
 
 import (
+	"strings"
+
 	"github.com/charmbracelet/glamour"
 )
 
@@ -25,5 +27,5 @@ func Markdown(content string) string {
 	if err != nil {
 		return content
 	}
-	return rendered
+	return strings.TrimRight(rendered, " \n\t")
 }

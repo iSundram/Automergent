@@ -244,14 +244,14 @@ func (c *Conversation) refresh() {
 				rendered.WriteString(c.renderThought(m.Thought, msgW) + "\n")
 			}
 
-			content := render.Markdown(m.Content)
+			content := render.Markdown(strings.TrimSpace(m.Content))
 			if m.IsError {
-				content = c.styles.Error.Render(m.Content)
+				content = c.styles.Error.Render(strings.TrimSpace(m.Content))
 			}
 			rendered.WriteString(content)
 
 			bubble := bubbleStyle.Width(msgW).Render(rendered.String())
-			sb.WriteString(label + "\n" + bubble + "\n") // Single newline after bubble
+			sb.WriteString(label + "\n" + bubble + "\n")
 
 		case "system":
 			sb.WriteString(c.styles.SystemMsg.Width(msgW).Render("  "+m.Content) + "\n\n")
