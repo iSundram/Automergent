@@ -1,6 +1,6 @@
 package themes
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Nord returns the Nord color theme.
 func Nord() *Theme {

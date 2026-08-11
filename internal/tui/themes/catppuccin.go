@@ -1,6 +1,6 @@
 package themes
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Catppuccin returns the Catppuccin Mocha theme.
 func Catppuccin() *Theme {

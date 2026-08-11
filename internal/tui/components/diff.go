@@ -3,9 +3,9 @@ package components
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/iSundram/Automergent/internal/tui/render"
 	"github.com/iSundram/Automergent/internal/tui/themes"
@@ -29,15 +29,15 @@ type Diff struct {
 
 // NewDiff creates a new Diff component.
 func NewDiff(styles *themes.Styles) Diff {
-	vp := viewport.New(40, 20)
+	vp := viewport.New(viewport.WithWidth(40), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = false // Enforce keyboard-only scrolling
 	return Diff{viewport: vp, styles: styles}
 }
 
 // SetSize updates the component dimensions.
 func (d *Diff) SetSize(w, h int) {
-	d.viewport.Width = w - 2
-	d.viewport.Height = h - 3
+	d.viewport.SetWidth(w - 2)
+	d.viewport.SetHeight(h - 3)
 	d.refresh()
 }
 
@@ -76,7 +76,7 @@ func (d *Diff) refresh() {
 			// Wrap active hunk in a subtle highlight if theme supports it
 			rendered = lipgloss.NewStyle().
 				Background(d.styles.T.Surface).
-				Width(d.viewport.Width).
+				Width(d.viewport.Width()).
 				Render(rendered)
 		}
 		sb.WriteString(rendered + "\n")

@@ -3,8 +3,8 @@ package components
 import (
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textarea"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
@@ -48,7 +48,7 @@ func (i Input) Value() string { return i.ta.Value() }
 // SetValue updates the input text.
 func (i *Input) SetValue(v string) {
 	i.ta.SetValue(v)
-	i.ta.SetCursor(len(v))
+	// i.ta.SetCursor(len(v)) // TODO: Fix for Bubble Tea v2
 }
 
 // Reset clears the input.
@@ -150,7 +150,7 @@ func (i *Input) InsertValue(v string) {
 			i.ta.SetValue(val[:idx] + "@" + v + " ")
 		}
 	}
-	i.ta.SetCursor(len(i.ta.Value()))
+	// i.ta.SetCursor(len(i.ta.Value())) // TODO: Fix for Bubble Tea v2
 }
 
 // Update handles key events and auto-resizing.

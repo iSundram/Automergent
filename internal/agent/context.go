@@ -21,7 +21,7 @@ func buildSystemPrompt(cfg *config.Config, reg *tools.Registry) string {
 	sb.WriteString("testing, documenting, and explaining code.\n\n")
 
 	sb.WriteString("## Capabilities\n")
-	sb.WriteString("- Read and write files with read_file, write_file, patch_file\n")
+	sb.WriteString("- Read and write files with read_file, write_file, edit_file\n")
 	sb.WriteString("- Search codebases with grep\n")
 	sb.WriteString("- Execute shell commands with run_command\n")
 	sb.WriteString("- Browse directories with list_directory\n")

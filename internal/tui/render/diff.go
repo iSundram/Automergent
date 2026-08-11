@@ -3,7 +3,7 @@ package render
 import (
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // Diff renders a unified diff with color highlighting.

@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/tui/themes"
@@ -63,7 +63,7 @@ func (c Confirm) Visible() bool { return c.visible }
 func (c *Confirm) SetSize(w, h int) {
 	c.width = w
 	c.height = h
-	c.feedback.Width = w / 2
+	c.feedback.SetWidth(w / 2)
 }
 
 // Update handles confirmation selection and feedback input.

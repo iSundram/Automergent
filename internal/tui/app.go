@@ -12,9 +12,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/spinner"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/spinner"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/sahilm/fuzzy"
 
 	"github.com/iSundram/Automergent/internal/agent"
@@ -25,7 +25,6 @@ import (
 	"github.com/iSundram/Automergent/internal/tools"
 	"github.com/iSundram/Automergent/internal/tui/components"
 	"github.com/iSundram/Automergent/internal/tui/keys"
-	"github.com/iSundram/Automergent/internal/tui/render"
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
@@ -199,9 +198,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.layout()
 		return a, nil
 	case tea.KeyMsg:
-		cmd = a.handleKey(m)
-		if cmd != nil {
-			cmds = append(cmds, cmd)
+		// When confirmation modal is visible, route key events only to the modal.
+		if !a.confirm.Visible() {
+			cmd = a.handleKey(m)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 	case agentEventMsg:
 		cmd = a.handleAgentEvent(m.ev)
@@ -556,7 +558,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 				}
 			}
 			ctx := extractToolContext(te.Name, te.Args)
-			a.conversation.AddToolLifecycleStart(te.Name, argText, ctx)
+			a.conversation.AddToolLifecycleStart(te.ID, te.Name, argText, ctx)
 			a.stats.ToolCallCount++
 			a.statusBar.SetStatus(fmt.Sprintf("⚙ %s…", te.Name))
 		} else if tc, ok := ev.Payload.(ai.ToolCall); ok {
@@ -567,14 +569,14 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 				}
 			}
 			ctx := extractToolContext(tc.Name, tc.Args)
-			a.conversation.AddToolCall(tc.Name, argText, ctx)
+			a.conversation.AddToolLifecycleStart(tc.ID, tc.Name, argText, ctx)
 			a.stats.ToolCallCount++
 			a.statusBar.SetStatus(fmt.Sprintf("⚙ %s…", tc.Name))
 		}
 		return a.waitForAgentEvent()
 	case agent.EventToolDone:
 		if td, ok := ev.Payload.(agent.ToolDoneEvent); ok {
-			a.conversation.AddToolLifecycleDone(td.Name, td.Duration, td.Result, a.conversation.ReviewMode())
+			a.conversation.AddToolLifecycleDone(td.ID, td.Name, td.Duration, td.Result, a.conversation.ReviewMode())
 		} else if r, ok := ev.Payload.(tools.Result); ok {
 			if r.IsError {
 				a.conversation.AddMessage("assistant", "Tool error: "+r.Content, true)
@@ -596,7 +598,8 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventDone:
 		a.thinking = false
 		a.spin.Stop()
-		a.layout() // Reclaim space from spinner
+		a.conversation.FinalizeStreaming() // Re-render with markdown
+		a.layout()                         // Reclaim space from spinner
 		a.statusBar.SetStatus("Ready")
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
@@ -608,7 +611,8 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventError:
 		a.thinking = false
 		a.spin.Stop()
-		a.layout() // Reclaim space from spinner
+		a.conversation.FinalizeStreaming() // Re-render with markdown
+		a.layout()                         // Reclaim space from spinner
 		if err, ok := ev.Payload.(error); ok {
 			errStr := err.Error()
 			msg := formatErrorMessage(errStr)
@@ -628,7 +632,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 				}
 
 				// Special handling for file edits: show diff
-				if tc.Name == "write_file" || tc.Name == "patch_file" {
+				if tc.Name == "write_file" || tc.Name == "edit_file" {
 					path, _ := tc.Args["path"].(string)
 					newContent := ""
 					if tc.Name == "write_file" {
@@ -664,7 +668,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 					go func() {
 						res := <-wrapped
 						// If we showed diff for this, hide it
-						if tc.Name == "write_file" || tc.Name == "patch_file" {
+						if tc.Name == "write_file" || tc.Name == "edit_file" {
 							if a.diffPane.Visible() {
 								a.diffPane.Toggle()
 							}
@@ -846,35 +850,29 @@ func (a *App) layout() {
 	if a.width <= 0 || a.height <= 0 {
 		return
 	}
-	// Set header width first so we can calculate its rendered height
+
 	a.header.SetWidth(a.width)
-
-	// Calculate actual header height from rendered content
-	headerView := a.header.View()
-	headerH := strings.Count(headerView, "\n") + 1
-	if headerView == "" {
-		headerH = 0
-	}
-
-	statusH := 1
-	inputH := a.input.LineCount() + 2
-	if inputH < 3 {
-		inputH = 3
-	}
-
-	thinkingH := 0
-	if a.thinking && !a.confirm.Visible() {
-		thinkingH = 2 // spinner line + preceding newline
-	}
-
-	mainH := a.height - headerH - statusH - inputH - thinkingH
-	if mainH < 1 {
-		mainH = 1
-	}
-
 	a.statusBar.SetWidth(a.width)
 	a.input.SetWidth(a.width)
 	a.palette.SetWidth(a.width / 2)
+	a.confirm.SetSize(a.width, a.height)
+
+	headerH := lipgloss.Height(a.header.View())
+	statusH := lipgloss.Height(a.statusBar.View())
+	footerH := 0
+	if a.confirm.Visible() {
+		footerH = lipgloss.Height(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
+	} else {
+		footerH = lipgloss.Height(a.input.View())
+		if a.thinking {
+			footerH++
+		}
+	}
+
+	mainH := a.height - headerH - statusH - footerH
+	if mainH < 1 {
+		mainH = 1
+	}
 
 	mainW := a.width
 	if a.showFileTree {
@@ -899,38 +897,36 @@ func (a *App) layout() {
 		}
 		a.conversation.SetSize(convW, mainH)
 		a.diffPane.SetSize(diffW, mainH)
-		render.SetWidth(convW - 10) // Update markdown word wrap width
 	} else {
 		if a.lspPanel.Visible() {
 			convW := mainW * 70 / 100
 			lspW := mainW - convW - 1
 			a.conversation.SetSize(convW, mainH)
 			a.lspPanel.SetSize(lspW, mainH)
-			render.SetWidth(convW - 10) // Update markdown word wrap width
 		} else {
 			a.conversation.SetSize(mainW, mainH)
-			render.SetWidth(mainW - 10) // Update markdown word wrap width
 		}
 	}
 	a.sessionBrowser.SetSize(a.width*3/4, a.height*3/4)
 }
 
-func (a *App) View() string {
+func (a *App) View() tea.View {
 	if a.width <= 0 || a.height <= 0 {
-		return "Initializing..."
+		return tea.NewView("Initializing...")
 	}
 	if a.showHelp {
-		return a.helpOverlay.View()
+		return tea.NewView(a.helpOverlay.View())
 	}
-	var sb strings.Builder
+
 	headerView := a.header.View()
-	sb.WriteString(headerView)
+	statusView := a.statusBar.View()
+	var sections []string
 	if headerView != "" {
-		sb.WriteString("\n")
+		sections = append(sections, headerView)
 	}
 
 	if a.sessionBrowser.Visible() {
-		sb.WriteString(a.sessionBrowser.View())
+		sections = append(sections, a.sessionBrowser.View())
 	} else {
 		var mainRow string
 		convView := a.conversation.View()
@@ -954,23 +950,23 @@ func (a *App) View() string {
 			paletteView := lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.palette.View())
 			mainRow = overlayBottom(mainRow, paletteView)
 		}
-		sb.WriteString(mainRow)
+		sections = append(sections, mainRow)
 	}
 	if a.confirm.Visible() {
-		sb.WriteByte('\n')
-		sb.WriteString(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
+		sections = append(sections, lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
 	} else {
+		var footer []string
 		if a.thinking {
-			sb.WriteByte('\n')
-			sb.WriteString("  " + a.spin.View())
+			footer = append(footer, "  "+a.spin.View())
 		}
-		sb.WriteString("\033[0K") // Clear to end of line to remove stale spinner glyphs
-		sb.WriteByte('\n')
-		sb.WriteString(a.input.View())
+		footer = append(footer, a.input.View())
+		sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, footer...))
 	}
-	sb.WriteByte('\n')
-	sb.WriteString(a.statusBar.View())
-	return sb.String()
+	sections = append(sections, statusView)
+	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, sections...))
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
 }
 
 func overlayBottom(base, overlay string) string {
@@ -1043,7 +1039,7 @@ func isTransientStatus(s string) bool {
 
 func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string) error {
 	app := NewApp(cfg, ag, sess, storage, initialPrompt)
-	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	p := tea.NewProgram(app)
 	_, err := p.Run()
 	return err
 }
@@ -1077,7 +1073,7 @@ func extractToolContext(name string, args map[string]any) string {
 		return ""
 	}
 	switch name {
-	case "read_file", "write_file", "patch_file", "list_directory", "lsp_diagnostics":
+	case "read_file", "write_file", "edit_file", "list_directory", "lsp_diagnostics":
 		if path, ok := args["path"].(string); ok {
 			return filepath.Base(path)
 		}

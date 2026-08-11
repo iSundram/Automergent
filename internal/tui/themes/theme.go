@@ -1,27 +1,31 @@
 package themes
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"image/color"
+
+	"charm.land/lipgloss/v2"
+)
 
 // Theme defines the color palette for the TUI.
 type Theme struct {
 	Name string
 
-	Background    lipgloss.Color
-	Surface       lipgloss.Color
-	Overlay       lipgloss.Color
-	Text          lipgloss.Color
-	Subtext       lipgloss.Color
-	Muted         lipgloss.Color
-	Accent        lipgloss.Color
-	AccentAlt     lipgloss.Color
-	Green         lipgloss.Color
-	Red           lipgloss.Color
-	Yellow        lipgloss.Color
-	Blue          lipgloss.Color
-	Magenta       lipgloss.Color
-	Cyan          lipgloss.Color
-	BorderNormal  lipgloss.Color
-	BorderFocused lipgloss.Color
+	Background    color.Color
+	Surface       color.Color
+	Overlay       color.Color
+	Text          color.Color
+	Subtext       color.Color
+	Muted         color.Color
+	Accent        color.Color
+	AccentAlt     color.Color
+	Green         color.Color
+	Red           color.Color
+	Yellow        color.Color
+	Blue          color.Color
+	Magenta       color.Color
+	Cyan          color.Color
+	BorderNormal  color.Color
+	BorderFocused color.Color
 }
 
 // Styles pre-builds common lipgloss styles from a theme.

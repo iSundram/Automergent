@@ -5,9 +5,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/iSundram/Automergent/internal/tools"
 	"github.com/iSundram/Automergent/internal/tui/render"
@@ -20,6 +20,7 @@ type ConversationMsg struct {
 	Thought     string
 	IsError     bool
 	Timestamp   time.Time
+	ToolID      string
 	ToolName    string
 	ToolArgs    string
 	ToolContext string
@@ -37,8 +38,15 @@ type Conversation struct {
 	reviewMode bool
 }
 
+func (c *Conversation) refreshWithFollow(shouldFollow bool) {
+	c.refresh()
+	if shouldFollow {
+		c.viewport.GotoBottom()
+	}
+}
+
 func NewConversation(styles *themes.Styles) Conversation {
-	vp := viewport.New(80, 20)
+	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
 	vp.MouseWheelEnabled = false // Enforce keyboard-only scrolling
 	vp.KeyMap.Up.SetKeys("up")
 	vp.KeyMap.Down.SetKeys("down")
@@ -46,6 +54,7 @@ func NewConversation(styles *themes.Styles) Conversation {
 }
 
 func (c *Conversation) SetSize(w, h int) {
+	shouldFollow := c.viewport.AtBottom()
 	if w < 0 {
 		w = 0
 	}
@@ -54,12 +63,13 @@ func (c *Conversation) SetSize(w, h int) {
 	}
 	c.width = w
 	c.height = h
-	c.viewport.Width = w
-	c.viewport.Height = h
-	c.refresh()
+	c.viewport.SetWidth(w)
+	c.viewport.SetHeight(h)
+	c.refreshWithFollow(shouldFollow)
 }
 
 func (c *Conversation) AddMessage(role, content string, isError bool) {
+	shouldFollow := c.viewport.AtBottom()
 	c.streaming = false
 	c.messages = append(c.messages, ConversationMsg{
 		Role:      role,
@@ -67,41 +77,56 @@ func (c *Conversation) AddMessage(role, content string, isError bool) {
 		IsError:   isError,
 		Timestamp: time.Now(),
 	})
-	c.refresh()
-	c.viewport.GotoBottom()
+	c.refreshWithFollow(shouldFollow)
 }
 
-func (c *Conversation) AddToolCall(name, args, context string) {
+func (c *Conversation) AddToolLifecycleStart(id, name, args, context string) {
+	shouldFollow := c.viewport.AtBottom()
 	c.streaming = false
+	if id != "" {
+		for i := len(c.messages) - 1; i >= 0; i-- {
+			if c.messages[i].Role == "tool_call" && c.messages[i].Status == "running" && c.messages[i].ToolID == id {
+				return
+			}
+		}
+	} else if n := len(c.messages); n > 0 {
+		last := c.messages[n-1]
+		if last.Role == "tool_call" && last.Status == "running" &&
+			last.ToolName == name && last.ToolArgs == args && last.ToolContext == context {
+			return
+		}
+	}
 	c.messages = append(c.messages, ConversationMsg{
 		Role:        "tool_call",
+		ToolID:      id,
 		ToolName:    name,
 		ToolArgs:    args,
 		ToolContext: context,
 		Status:      "running",
 		Timestamp:   time.Now(),
 	})
-	c.refresh()
-	c.viewport.GotoBottom()
+	c.refreshWithFollow(shouldFollow)
 }
 
-func (c *Conversation) AddToolLifecycleStart(name, args, context string) {
+func (c *Conversation) AddToolLifecycleDone(id, name string, duration time.Duration, result tools.Result, reviewMode bool) {
+	shouldFollow := c.viewport.AtBottom()
 	c.streaming = false
-	c.messages = append(c.messages, ConversationMsg{
-		Role:        "tool_call",
-		ToolName:    name,
-		ToolArgs:    args,
-		ToolContext: context,
-		Status:      "running",
-		Timestamp:   time.Now(),
-	})
-	c.refresh()
-	c.viewport.GotoBottom()
-}
-
-func (c *Conversation) AddToolLifecycleDone(name string, duration time.Duration, result tools.Result, reviewMode bool) {
-	c.streaming = false
-	// Find the last running tool call with this name and update it
+	if id != "" {
+		for i := len(c.messages) - 1; i >= 0; i-- {
+			if c.messages[i].Role == "tool_call" && c.messages[i].Status == "running" && c.messages[i].ToolID == id {
+				c.messages[i].Status = "done"
+				if result.IsError {
+					c.messages[i].Status = "error"
+					c.messages[i].IsError = true
+				}
+				c.messages[i].Duration = duration
+				c.messages[i].Content = result.Content
+				c.refreshWithFollow(shouldFollow)
+				return
+			}
+		}
+	}
+	// Fallback: match latest running tool call with same name.
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		if c.messages[i].Role == "tool_call" && c.messages[i].ToolName == name && c.messages[i].Status == "running" {
 			c.messages[i].Status = "done"
@@ -111,7 +136,7 @@ func (c *Conversation) AddToolLifecycleDone(name string, duration time.Duration,
 			}
 			c.messages[i].Duration = duration
 			c.messages[i].Content = result.Content
-			c.refresh()
+			c.refreshWithFollow(shouldFollow)
 			return
 		}
 	}
@@ -123,6 +148,7 @@ func (c *Conversation) AddToolLifecycleDone(name string, duration time.Duration,
 	}
 	c.messages = append(c.messages, ConversationMsg{
 		Role:      "tool_call",
+		ToolID:    id,
 		ToolName:  name,
 		Content:   result.Content,
 		Status:    status,
@@ -130,11 +156,11 @@ func (c *Conversation) AddToolLifecycleDone(name string, duration time.Duration,
 		Duration:  duration,
 		Timestamp: time.Now(),
 	})
-	c.refresh()
-	c.viewport.GotoBottom()
+	c.refreshWithFollow(shouldFollow)
 }
 
 func (c *Conversation) AppendToken(token string) {
+	shouldFollow := c.viewport.AtBottom()
 	if len(c.messages) == 0 || !c.streaming {
 		c.messages = append(c.messages, ConversationMsg{
 			Role:      "assistant",
@@ -151,11 +177,11 @@ func (c *Conversation) AppendToken(token string) {
 			c.streaming = true
 		}
 	}
-	c.refresh()
-	c.viewport.GotoBottom()
+	c.refreshWithFollow(shouldFollow)
 }
 
 func (c *Conversation) AppendThought(thought string) {
+	shouldFollow := c.viewport.AtBottom()
 	if len(c.messages) == 0 || !c.streaming {
 		c.messages = append(c.messages, ConversationMsg{
 			Role:      "assistant",
@@ -172,14 +198,21 @@ func (c *Conversation) AppendThought(thought string) {
 			c.streaming = true
 		}
 	}
-	c.refresh()
-	c.viewport.GotoBottom()
+	c.refreshWithFollow(shouldFollow)
 }
 
 func (c *Conversation) Clear() {
 	c.messages = nil
 	c.streaming = false
 	c.refresh()
+}
+
+// FinalizeStreaming ends streaming mode and re-renders to apply markdown.
+func (c *Conversation) FinalizeStreaming() {
+	if c.streaming {
+		c.streaming = false
+		c.refresh()
+	}
 }
 
 // SetReviewMode toggles detailed tool output rendering.
@@ -204,7 +237,9 @@ func (c *Conversation) refresh() {
 		msgW = 20
 	}
 
-	for _, m := range c.messages {
+	lastIdx := len(c.messages) - 1
+	for i, m := range c.messages {
+		isLast := i == lastIdx
 		switch m.Role {
 		case "user":
 			label := c.styles.UserLabel.Render(" You ")
@@ -243,7 +278,15 @@ func (c *Conversation) refresh() {
 				rendered.WriteString(c.renderThought(m.Thought, msgW) + "\n")
 			}
 
-			content := render.Markdown(strings.TrimSpace(m.Content))
+			// Skip expensive markdown rendering during streaming for performance
+			var content string
+			if c.streaming && isLast {
+				// During streaming, just show raw text
+				content = strings.TrimSpace(m.Content)
+			} else {
+				// Render markdown for completed messages
+				content = render.Markdown(strings.TrimSpace(m.Content))
+			}
 			if m.IsError {
 				content = c.styles.Error.Render(strings.TrimSpace(m.Content))
 			}

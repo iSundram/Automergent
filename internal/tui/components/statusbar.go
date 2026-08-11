@@ -3,8 +3,9 @@ package components
 import (
 	"fmt"
 	"time"
+	"unicode/utf8"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
@@ -34,15 +35,35 @@ func (s *StatusBar) SetStatus(msg string) { s.status = msg }
 
 // View renders the status bar.
 func (s StatusBar) View() string {
-	left := s.styles.StatusBar.Render(fmt.Sprintf("  %s", s.status))
-	help := "enter send │ esc interrupt │ ctrl+c x2 quit │ ctrl+r review │ ctrl+d diff │ ctrl+l lsp │ ctrl+s sessions │ ctrl+t tree"
-	right := s.styles.StatusBarRight.Render(fmt.Sprintf("%s  ", help))
+	if s.width <= 0 {
+		return ""
+	}
+
+	help := "enter send │ esc interrupt │ ctrl+c x2 quit │ ctrl+r review"
+	leftRaw := fmt.Sprintf("  %s", s.status)
+	rightRaw := fmt.Sprintf("%s  ", help)
+
+	// Ensure the composed status line always fits in one terminal row.
+	maxLeft := s.width - utf8.RuneCountInString(rightRaw)
+	if maxLeft < 1 {
+		maxLeft = 1
+	}
+	if utf8.RuneCountInString(leftRaw) > maxLeft {
+		r := []rune(leftRaw)
+		if maxLeft > 1 {
+			leftRaw = string(r[:maxLeft-1]) + "…"
+		} else {
+			leftRaw = "…"
+		}
+	}
+
+	left := s.styles.StatusBar.Render(leftRaw)
+	right := s.styles.StatusBarRight.Render(rightRaw)
 
 	spacer := s.width - lipgloss.Width(left) - lipgloss.Width(right)
 	if spacer < 0 {
 		spacer = 0
 	}
 
-	// Minimalist footer without heavy background
 	return left + lipgloss.NewStyle().Width(spacer).Render("") + right
 }

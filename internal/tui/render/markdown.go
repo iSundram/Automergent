@@ -2,54 +2,30 @@ package render
 
 import (
 	"strings"
-	"sync"
 
-	"github.com/charmbracelet/glamour"
+	"charm.land/glamour/v2"
 )
 
-var (
-	defaultRenderer *glamour.TermRenderer
-	rendererMu      sync.Mutex
-	currentWidth    int = 100
-)
+var defaultRenderer *glamour.TermRenderer
 
 func init() {
-	initRenderer(100)
-}
-
-func initRenderer(width int) {
+	// Use a reasonable default width - glamour handles wrapping internally
+	// and lipgloss will constrain the final output
 	r, err := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
-		glamour.WithWordWrap(width),
+		glamour.WithStandardStyle("dark"),
+		glamour.WithWordWrap(0), // Disable word wrap - let lipgloss handle it
 	)
 	if err == nil {
 		defaultRenderer = r
-		currentWidth = width
-	}
-}
-
-// SetWidth updates the word wrap width for markdown rendering.
-func SetWidth(width int) {
-	if width <= 0 {
-		width = 80
-	}
-	rendererMu.Lock()
-	defer rendererMu.Unlock()
-	if width != currentWidth {
-		initRenderer(width)
 	}
 }
 
 // Markdown renders markdown text to terminal-formatted output.
 func Markdown(content string) string {
-	rendererMu.Lock()
-	r := defaultRenderer
-	rendererMu.Unlock()
-
-	if r == nil {
+	if defaultRenderer == nil {
 		return content
 	}
-	rendered, err := r.Render(content)
+	rendered, err := defaultRenderer.Render(content)
 	if err != nil {
 		return content
 	}

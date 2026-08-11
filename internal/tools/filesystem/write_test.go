@@ -5,13 +5,13 @@ import (
 	"testing"
 )
 
-func TestPatchFileReplaceAll(t *testing.T) {
+func TestEditFileReplaceAll(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/a.txt"
 	if err := os.WriteFile(path, []byte("x a x a"), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	tool := &PatchFileTool{}
+	tool := &EditFileTool{}
 	res, err := tool.Execute(nil, map[string]any{
 		"path":        path,
 		"old_str":     "a",

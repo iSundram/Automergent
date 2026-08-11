@@ -1,6 +1,6 @@
 package themes
 
-import "github.com/charmbracelet/lipgloss"
+import "charm.land/lipgloss/v2"
 
 // Dracula returns the Dracula theme.
 func Dracula() *Theme {

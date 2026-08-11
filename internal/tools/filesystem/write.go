@@ -79,16 +79,16 @@ func (t *WriteFileTool) Execute(_ context.Context, args map[string]any) (tools.R
 	return tools.Result{Content: fmt.Sprintf("wrote %d bytes to %s", len(content), path)}, nil
 }
 
-// PatchFileTool applies a string replacement in a file.
-type PatchFileTool struct{}
+// EditFileTool applies a string replacement in a file.
+type EditFileTool struct{}
 
-func (t *PatchFileTool) Name() string        { return "patch_file" }
-func (t *PatchFileTool) Description() string { return "Replace a substring in a file." }
-func (t *PatchFileTool) RequiresConfirmation(mode string) bool {
+func (t *EditFileTool) Name() string        { return "edit_file" }
+func (t *EditFileTool) Description() string { return "Replace a substring in a file." }
+func (t *EditFileTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
 }
 
-func (t *PatchFileTool) Schema() map[string]any {
+func (t *EditFileTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
@@ -110,7 +110,7 @@ func (t *PatchFileTool) Schema() map[string]any {
 	}
 }
 
-func (t *PatchFileTool) Execute(_ context.Context, args map[string]any) (tools.Result, error) {
+func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Result, error) {
 	path, pathOk := tools.StringArg(args, "path")
 	oldStr, oldOk := tools.StringArg(args, "old_str")
 	newStr, newOk := tools.StringArg(args, "new_str")

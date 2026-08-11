@@ -182,7 +182,7 @@ func run(cmd *cobra.Command, args []string) error {
 	reg := tools.NewRegistry()
 	reg.Register(&toolsFS.ReadFileTool{})
 	reg.Register(&toolsFS.WriteFileTool{})
-	reg.Register(&toolsFS.PatchFileTool{})
+	reg.Register(&toolsFS.EditFileTool{})
 	reg.Register(&toolsFS.ListDirectoryTool{})
 	reg.Register(&toolsFS.GrepTool{})
 	reg.Register(toolsShell.NewRunnerTool(0))
@@ -213,9 +213,10 @@ func run(cmd *cobra.Command, args []string) error {
 	ag := agent.New(cfg, provider, sess, reg)
 	ag.SetSessionPersist(func() { _ = storage.Save(sess) })
 
-	// Save session on exit
+	// Save session and config on exit
 	defer func() {
 		_ = storage.Save(sess)
+		_ = cfg.Save()
 	}()
 
 	if cfg.NoTUI {
