@@ -28,36 +28,46 @@ type Asset struct {
 	BrowserDownloadURL string `json:"browser_download_url"`
 }
 
-// GetLatestVersion fetches the latest version string from GitHub.
+// GetLatestVersion fetches the latest agent version string (v*) from GitHub tags.
 func GetLatestVersion() (string, error) {
-	resp, err := http.Get(fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", Repo))
+	resp, err := http.Get(fmt.Sprintf("https://api.github.com/repos/%s/tags", Repo))
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to fetch latest release: %s", resp.Status)
+		return "", fmt.Errorf("failed to fetch tags: %s", resp.Status)
 	}
 
-	var rel Release
-	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
+	var tags []struct {
+		Name string `json:"name"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
 		return "", err
 	}
 
-	return strings.TrimPrefix(rel.TagName, "v"), nil
+	for _, tag := range tags {
+		if strings.HasPrefix(tag.Name, "v") && !strings.Contains(tag.Name, "/") {
+			return strings.TrimPrefix(tag.Name, "v"), nil
+		}
+	}
+
+	return "", fmt.Errorf("no valid agent version tag found")
 }
 
 // DownloadBinary downloads the binary for the given version and system info.
 func DownloadBinary(version string, info *Info, progressChan chan float64) (string, error) {
-	resp, err := http.Get(fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/v%s", Repo, version))
+	// version passed here is the raw number (e.g. 0.1.0), we need to add the 'v' prefix for the release tag
+	tag := "v" + version
+	resp, err := http.Get(fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/%s", Repo, tag))
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("failed to fetch release v%s: %s", version, resp.Status)
+		return "", fmt.Errorf("failed to fetch release %s: %s", tag, resp.Status)
 	}
 
 	var rel Release

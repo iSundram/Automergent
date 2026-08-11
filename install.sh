@@ -27,18 +27,21 @@ esac
 
 echo "✧ Bootstrapping Automergent Installer for ${OS}/${ARCH}..."
 
-# Get latest release tag
+# Get latest installer release tag (e.g., installer/v0.0.1)
 if [ -z "$VERSION" ]; then
-    VERSION=$(curl -s "https://api.github.com/repos/$REPO/releases/latest" | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+    VERSION=$(curl -s "https://api.github.com/repos/$REPO/tags" | grep '"name": "installer/v' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
 fi
 
 if [ -z "$VERSION" ]; then
-    echo "Error: Could not detect latest version."
+    echo "Error: Could not detect latest installer version."
     exit 1
 fi
 
+# Extract the raw version number (e.g., 0.0.1 from installer/v0.0.1)
+RAW_VER=$(echo $VERSION | sed -E 's|installer/v||')
+
 # Download URL for the TUI Installer
-BINARY_NAME="installer_${VERSION}_${OS}_${ARCH}.tar.gz"
+BINARY_NAME="installer_${RAW_VER}_${OS}_${ARCH}.tar.gz"
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/$BINARY_NAME"
 
 TMP_DIR=$(mktemp -d)
