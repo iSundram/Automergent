@@ -120,6 +120,8 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 
 func (a *App) Init() tea.Cmd {
 	cmds := []tea.Cmd{
+		// Clear screen on startup to ensure clean slate (alt screen will be enabled by View)
+		func() tea.Msg { return tea.ClearScreen() },
 		a.input.Focus(),
 		a.spin.Tick(),
 		a.fileTree.Load("."),
@@ -1135,9 +1137,19 @@ func isTransientStatus(s string) bool {
 }
 
 func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string) error {
+	// Enter alternate screen immediately before TUI starts to prevent
+	// any flash of existing terminal content
+	fmt.Print("\x1b[?1049h") // Enter alt screen
+	fmt.Print("\x1b[H")      // Move cursor to home position
+	fmt.Print("\x1b[2J")     // Clear entire screen
+
 	app := NewApp(cfg, ag, sess, storage, initialPrompt)
 	p := tea.NewProgram(app)
 	_, err := p.Run()
+
+	// Exit alternate screen after TUI ends (bubbletea should do this,
+	// but we do it explicitly to ensure cleanup)
+	fmt.Print("\x1b[?1049l")
 	return err
 }
 
