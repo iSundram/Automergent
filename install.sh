@@ -38,7 +38,8 @@ if [ -z "$VERSION" ]; then
 fi
 
 # Extract the raw version number (e.g., 0.0.1 from installer/v0.0.1)
-RAW_VER=$(echo $VERSION | sed -E 's|installer/v||')
+# Note: we need to handle both 'v0.0.1' and 'installer/v0.0.1' formats
+RAW_VER=$(echo $VERSION | sed -E 's|.*v||')
 
 # Download URL for the TUI Installer
 BINARY_NAME="installer_${RAW_VER}_${OS}_${ARCH}.tar.gz"
