@@ -21,8 +21,6 @@ func GetSystemInfo() (*Info, error) {
 	osName := runtime.GOOS
 	arch := runtime.GOARCH
 
-	// Normalize architecture names if needed (Go names are usually fine)
-	// but let's be explicit for common release patterns.
 	switch arch {
 	case "amd64":
 	case "arm64":
@@ -30,10 +28,16 @@ func GetSystemInfo() (*Info, error) {
 		return nil, fmt.Errorf("unsupported architecture: %s", arch)
 	}
 
-	// Default destination
+	// Default destination with permission check
 	destDir := "/usr/local/bin"
 	if osName == "windows" {
 		destDir = filepath.Join(os.Getenv("APPDATA"), "automergent", "bin")
+	} else {
+		// On Unix, check if /usr/local/bin is writable, otherwise fallback to ~/.local/bin
+		if !isDirWritable(destDir) {
+			home, _ := os.UserHomeDir()
+			destDir = filepath.Join(home, ".local", "bin")
+		}
 	}
 
 	return &Info{
@@ -41,6 +45,28 @@ func GetSystemInfo() (*Info, error) {
 		Arch:    arch,
 		DestDir: destDir,
 	}, nil
+}
+
+func isDirWritable(path string) bool {
+	info, err := os.Stat(path)
+	if err != nil {
+		// If it doesn't exist, check if we can create it
+		err := os.MkdirAll(path, 0755)
+		return err == nil
+	}
+	if !info.IsDir() {
+		return false
+	}
+
+	// Check write permission by creating a temporary file
+	tmpFile, err := os.CreateTemp(path, ".write-test")
+	if err != nil {
+		return false
+	}
+	tmpPath := tmpFile.Name()
+	tmpFile.Close()
+	os.Remove(tmpPath)
+	return true
 }
 
 // IsRoot checks if the process has administrative privileges.

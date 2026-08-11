@@ -38,7 +38,7 @@ if [ -z "$VERSION" ]; then
 fi
 
 # Download URL for the TUI Installer
-BINARY_NAME="installer_$(echo $VERSION | sed 's/v//')_${OS}_${ARCH}.tar.gz"
+BINARY_NAME="installer_${VERSION}_${OS}_${ARCH}.tar.gz"
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/$BINARY_NAME"
 
 TMP_DIR=$(mktemp -d)

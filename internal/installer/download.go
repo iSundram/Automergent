@@ -50,18 +50,22 @@ func GetLatestVersion() (string, error) {
 
 // DownloadBinary downloads the binary for the given version and system info.
 func DownloadBinary(version string, info *Info, progressChan chan float64) (string, error) {
-	resp, err := http.Get(fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", Repo))
+	resp, err := http.Get(fmt.Sprintf("https://api.github.com/repos/%s/releases/tags/v%s", Repo, version))
 	if err != nil {
 		return "", err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to fetch release v%s: %s", version, resp.Status)
+	}
 
 	var rel Release
 	if err := json.NewDecoder(resp.Body).Decode(&rel); err != nil {
 		return "", err
 	}
 
-	// Match asset name: automergent_0.1.0_linux_amd64.tar.gz
+	// Match asset name: automergent_v0.1.0_linux_amd64.tar.gz
 	ext := "tar.gz"
 	if runtime.GOOS == "windows" {
 		ext = "zip"
@@ -70,14 +74,14 @@ func DownloadBinary(version string, info *Info, progressChan chan float64) (stri
 	targetSuffix := fmt.Sprintf("%s_%s.%s", runtime.GOOS, runtime.GOARCH, ext)
 	var downloadURL string
 	for _, asset := range rel.Assets {
-		if strings.HasSuffix(asset.Name, targetSuffix) {
+		if strings.HasPrefix(asset.Name, "automergent_") && strings.HasSuffix(asset.Name, targetSuffix) {
 			downloadURL = asset.BrowserDownloadURL
 			break
 		}
 	}
 
 	if downloadURL == "" {
-		return "", fmt.Errorf("no matching asset found for %s/%s", runtime.GOOS, runtime.GOARCH)
+		return "", fmt.Errorf("no matching automergent asset found for %s/%s", runtime.GOOS, runtime.GOARCH)
 	}
 
 	// Download the asset
@@ -166,7 +170,12 @@ func extractTarGz(archivePath, destDir string) error {
 
 		// Only extract the 'automergent' binary
 		if header.Typeflag == tar.TypeReg && (header.Name == "automergent" || header.Name == "automergent.exe") {
+			// Zip Slip protection: ensure path is within destDir
 			target := filepath.Join(destDir, header.Name)
+			if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)) {
+				return fmt.Errorf("illegal file path in archive: %s", header.Name)
+			}
+
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
@@ -196,7 +205,12 @@ func extractZip(archivePath, destDir string) error {
 			continue
 		}
 		if f.Name == "automergent" || f.Name == "automergent.exe" {
+			// Zip Slip protection: ensure path is within destDir
 			target := filepath.Join(destDir, f.Name)
+			if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)) {
+				return fmt.Errorf("illegal file path in archive: %s", f.Name)
+			}
+
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}

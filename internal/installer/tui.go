@@ -299,7 +299,7 @@ func (m Model) View() tea.View {
 
 	// --- Footer ---
 	if footerEntry > 0 {
-		footer := m.styles.StatusBar.Width(m.width).Render("Built with love by iSundram │ Press 'q' to exit")
+		footer := m.styles.StatusBar.Width(m.width).Render(fmt.Sprintf("v%s │ Built with love by iSundram │ Press 'q' to exit", Version))
 		sb.WriteString(lipgloss.PlaceVertical(m.height-lipgloss.Height(sb.String())-1, lipgloss.Bottom, footer))
 	}
 
