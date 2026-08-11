@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -616,6 +617,11 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		if err, ok := ev.Payload.(error); ok {
 			errStr := err.Error()
 			msg := formatErrorMessage(errStr)
+			if isCancellationError(errStr) {
+				a.conversation.AddMessage("system", msg, false)
+				a.statusBar.SetStatus("Cancelled")
+				return nil
+			}
 			a.conversation.AddMessage("assistant", msg, true)
 			if strings.Contains(errStr, "401") || strings.Contains(errStr, "authentication_error") {
 				a.conversation.AddMessage("system", "Tip: You can set the API key using: /api-key <key>", false)
@@ -1022,6 +1028,13 @@ func computeSimpleDiff(filename, old, new string) string {
 }
 
 func formatErrorMessage(errStr string) string {
+	// First, sanitize any URLs to hide API keys
+	errStr = sanitizeURLs(errStr)
+
+	// Handle user cancellation gracefully
+	if isCancellationError(errStr) {
+		return "Request cancelled"
+	}
 	if strings.Contains(errStr, "401") || strings.Contains(errStr, "authentication_error") {
 		return "API Key missing or invalid. Use /api-key <value> to set it, or export the appropriate environment variable (e.g., GEMINI_API_KEY)."
 	}
@@ -1031,7 +1044,49 @@ func formatErrorMessage(errStr string) string {
 	if strings.Contains(errStr, "429") {
 		return "Rate limit exceeded. Please wait a moment before trying again."
 	}
+	if strings.Contains(errStr, "connection refused") || strings.Contains(errStr, "no such host") {
+		return "Connection failed. Check your network or API endpoint configuration."
+	}
+	if strings.Contains(errStr, "timeout") || strings.Contains(errStr, "deadline exceeded") {
+		return "Request timed out. The server may be busy, please try again."
+	}
 	return "Error: " + errStr
+}
+
+func isCancellationError(errStr string) bool {
+	s := strings.ToLower(errStr)
+	return strings.Contains(s, "context canceled") || strings.Contains(s, "context cancelled")
+}
+
+// sanitizeURLs removes sensitive data (API keys, tokens) from URLs in error messages
+func sanitizeURLs(s string) string {
+	// Pattern to match common API key patterns in URLs
+	patterns := []struct {
+		pattern string
+		replace string
+	}{
+		// ?key=xxx or &key=xxx
+		{`([?&])key=[^&\s"']+`, `$1key=***`},
+		// ?api_key=xxx or &api_key=xxx
+		{`([?&])api_key=[^&\s"']+`, `$1api_key=***`},
+		// ?apikey=xxx or &apikey=xxx
+		{`([?&])apikey=[^&\s"']+`, `$1apikey=***`},
+		// ?token=xxx or &token=xxx
+		{`([?&])token=[^&\s"']+`, `$1token=***`},
+		// ?access_token=xxx
+		{`([?&])access_token=[^&\s"']+`, `$1access_token=***`},
+		// Bearer tokens in headers shown in errors
+		{`Bearer\s+[A-Za-z0-9_\-\.]+`, `Bearer ***`},
+		// x-api-key header values
+		{`x-api-key:\s*[^\s"']+`, `x-api-key: ***`},
+	}
+
+	result := s
+	for _, p := range patterns {
+		re := regexp.MustCompile(p.pattern)
+		result = re.ReplaceAllString(result, p.replace)
+	}
+	return result
 }
 
 func isTransientStatus(s string) bool {
