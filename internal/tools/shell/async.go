@@ -26,6 +26,13 @@ type AsyncSession struct {
 	ExitCode  int
 	Error     error
 	mu        sync.Mutex
+
+	// Track read positions to avoid returning duplicate output
+	stdoutReadPos int
+	stderrReadPos int
+
+	// Cancel function for context-based cancellation
+	cancel context.CancelFunc
 }
 
 // SessionManager manages async shell sessions.
@@ -61,6 +68,26 @@ func (m *SessionManager) Delete(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.sessions, id)
+}
+
+// Cleanup removes completed sessions older than maxAge to prevent memory leaks.
+func (m *SessionManager) Cleanup(maxAge time.Duration) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cutoff := time.Now().Add(-maxAge)
+	removed := 0
+
+	for id, s := range m.sessions {
+		s.mu.Lock()
+		if s.Completed && s.Started.Before(cutoff) {
+			delete(m.sessions, id)
+			removed++
+		}
+		s.mu.Unlock()
+	}
+
+	return removed
 }
 
 func (m *SessionManager) List() []*AsyncSession {
@@ -250,7 +277,17 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 		shellID = GetManager().NextID()
 	}
 
-	cmd := exec.Command("bash", "-c", command)
+	// Create a cancellable context for non-detached processes
+	var ctx context.Context
+	var cancel context.CancelFunc
+	if detach {
+		ctx = context.Background()
+		cancel = nil
+	} else {
+		ctx, cancel = context.WithCancel(context.Background())
+	}
+
+	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
@@ -260,6 +297,9 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to create stdin pipe: %v", err)}, nil
 	}
 
@@ -274,9 +314,13 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 		Stdout:  &stdout,
 		Stderr:  &stderr,
 		Started: time.Now(),
+		cancel:  cancel,
 	}
 
 	if err := cmd.Start(); err != nil {
+		if cancel != nil {
+			cancel()
+		}
 		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to start command: %v", err)}, nil
 	}
 
@@ -356,9 +400,29 @@ func (t *ReadShellTool) Execute(_ context.Context, args map[string]any) (tools.R
 	session.mu.Lock()
 	defer session.mu.Unlock()
 
-	output := session.Stdout.String()
-	if session.Stderr.Len() > 0 {
-		output += "\n[stderr]\n" + session.Stderr.String()
+	// Get only new output since last read
+	stdoutData := session.Stdout.Bytes()
+	stderrData := session.Stderr.Bytes()
+
+	var output string
+	if session.stdoutReadPos < len(stdoutData) {
+		output = string(stdoutData[session.stdoutReadPos:])
+		session.stdoutReadPos = len(stdoutData)
+	}
+
+	if session.stderrReadPos < len(stderrData) {
+		newStderr := string(stderrData[session.stderrReadPos:])
+		if newStderr != "" {
+			if output != "" {
+				output += "\n"
+			}
+			output += "[stderr]\n" + newStderr
+		}
+		session.stderrReadPos = len(stderrData)
+	}
+
+	if output == "" {
+		output = "(no new output)"
 	}
 
 	if session.Completed {
@@ -536,8 +600,14 @@ func (t *StopShellTool) Execute(_ context.Context, args map[string]any) (tools.R
 		GetManager().Delete(shellID)
 		return tools.Result{Content: fmt.Sprintf("shell %s was already completed, session cleaned up", shellID)}, nil
 	}
+
+	// Cancel the context first (graceful shutdown)
+	if session.cancel != nil {
+		session.cancel()
+	}
 	session.mu.Unlock()
 
+	// If process is still running after context cancel, force kill
 	if session.Cmd.Process != nil {
 		session.Cmd.Process.Kill()
 	}

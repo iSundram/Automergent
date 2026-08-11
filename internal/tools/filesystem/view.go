@@ -128,28 +128,24 @@ func viewFileWithLines(path string, args map[string]any) (tools.Result, error) {
 	linesRead := 0
 	truncated := false
 
+	// Capture lines in range
 	for scanner.Scan() {
 		lineNum++
 
-		// Skip lines before start
-		if lineNum < startLine {
-			continue
+		// Range check
+		if lineNum >= startLine && (endLine == -1 || lineNum <= endLine) {
+			if linesRead < maxLines {
+				lines = append(lines, fmt.Sprintf("%d. %s", lineNum, scanner.Text()))
+				linesRead++
+			} else {
+				truncated = true
+			}
 		}
+	}
 
-		// Stop after end line (if specified)
-		if endLine != -1 && lineNum > endLine {
-			break
-		}
-
-		// Check max lines limit
-		if linesRead >= maxLines {
-			truncated = true
-			break
-		}
-
-		// Format line with number prefix
-		lines = append(lines, fmt.Sprintf("%d. %s", lineNum, scanner.Text()))
-		linesRead++
+	// Continue scanning to get accurate total line count if we stopped early
+	for scanner.Scan() {
+		lineNum++
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -170,8 +166,14 @@ func viewFileWithLines(path string, args map[string]any) (tools.Result, error) {
 		result += fmt.Sprintf("\n\n... (truncated at %d lines, use view_range to see more)", maxLines)
 	}
 
+	summary := fmt.Sprintf("read %d-%d of %d lines", startLine, startLine+linesRead-1, lineNum)
+	if linesRead == 0 {
+		summary = "read 0 lines"
+	}
+
 	return tools.Result{
 		Content: result,
+		Summary: summary,
 		Metadata: map[string]any{
 			"total_lines": lineNum,
 			"lines_shown": linesRead,
@@ -229,10 +231,13 @@ func listDirectoryTree(root string, maxDepth int) (tools.Result, error) {
 	}
 
 	if len(entries) == 0 {
-		return tools.Result{Content: "(empty directory)"}, nil
+		return tools.Result{Content: "(empty directory)", Summary: "listed 0 items"}, nil
 	}
 
-	return tools.Result{Content: strings.Join(entries, "\n")}, nil
+	return tools.Result{
+		Content: strings.Join(entries, "\n"),
+		Summary: fmt.Sprintf("listed %d items", len(entries)),
+	}, nil
 }
 
 func toInt(v any) (int, bool) {

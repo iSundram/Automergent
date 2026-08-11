@@ -158,12 +158,23 @@ func (t *RunnerTool) Execute(ctx context.Context, args map[string]any) (tools.Re
 			return tools.Result{
 				IsError: true,
 				Content: fmt.Sprintf("command timed out after %s", timeout),
+				Summary: "timed out",
 			}, nil
 		}
+
+		exitCode := -1
+		if exitError, ok := err.(*exec.ExitError); ok {
+			exitCode = exitError.ExitCode()
+		}
+
 		return tools.Result{
 			IsError: true,
 			Content: fmt.Sprintf("command failed: %v\n%s", err, output),
+			Summary: fmt.Sprintf("exit %d", exitCode),
 		}, nil
 	}
-	return tools.Result{Content: output}, nil
+	return tools.Result{
+		Content: output,
+		Summary: "exit 0",
+	}, nil
 }

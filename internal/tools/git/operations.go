@@ -70,7 +70,24 @@ func (t *CommitTool) Execute(ctx context.Context, args map[string]any) (tools.Re
 		cmdArgs = append(cmdArgs, "--no-verify")
 	}
 
-	return runGit(ctx, cmdArgs...)
+	res, err := runGit(ctx, cmdArgs...)
+	if err != nil {
+		return res, err
+	}
+
+	// Extract commit hash for summary
+	// Format: [main a9a0329] message
+	summary := "committed"
+	parts := strings.Split(strings.TrimSpace(res.Content), " ")
+	if len(parts) >= 2 {
+		hash := strings.TrimSuffix(strings.TrimPrefix(parts[1], "["), "]")
+		if len(hash) > 7 {
+			hash = hash[:7]
+		}
+		summary = fmt.Sprintf("committed %s", hash)
+	}
+	res.Summary = summary
+	return res, nil
 }
 
 // AddTool stages files for commit.
@@ -131,8 +148,18 @@ func (t *AddTool) Execute(ctx context.Context, args map[string]any) (tools.Resul
 
 	// Show what was staged
 	statusResult, _ := runGit(ctx, "status", "--short")
+
+	stagedCount := 0
+	lines := strings.Split(strings.TrimSpace(statusResult.Content), "\n")
+	for _, line := range lines {
+		if len(line) >= 2 && line[0] != ' ' && line[0] != '?' {
+			stagedCount++
+		}
+	}
+
 	return tools.Result{
 		Content: fmt.Sprintf("staged files\n\n%s", statusResult.Content),
+		Summary: fmt.Sprintf("staged +%d files", stagedCount),
 	}, nil
 }
 

@@ -11,10 +11,13 @@ LDFLAGS := -s -w \
 
 .PHONY: all build clean test lint fmt tidy install
 
-all: build
+all: build build-installer
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) ./cmd/automergent
+
+build-installer:
+	go build -ldflags "$(LDFLAGS)" -o bin/installer ./cmd/installer
 
 install:
 	go install -ldflags "$(LDFLAGS)" ./cmd/automergent

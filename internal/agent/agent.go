@@ -41,6 +41,7 @@ type Event struct {
 type ToolCallEvent struct {
 	ID        string
 	Name      string
+	Context   string
 	Args      map[string]any
 	StartedAt time.Time
 }
@@ -48,6 +49,7 @@ type ToolCallEvent struct {
 type ToolDoneEvent struct {
 	ID         string
 	Name       string
+	Context    string
 	StartedAt  time.Time
 	FinishedAt time.Time
 	Duration   time.Duration
@@ -63,6 +65,7 @@ const (
 	EventDone      = "done"
 	EventError     = "error"
 	EventConfirm   = "confirm"
+	EventAskUser   = "ask_user"
 	EventStatus    = "status"
 )
 
@@ -128,7 +131,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	if a.cfg.Mode == "edit" && a.cfg.Security.RequireGitForAutoModes {
 		cwd, _ := os.Getwd()
 		if !gitIsRepo(ctx, cwd) {
-			a.emit(EventStatus, "⚠ Not a git repository — edit mode requires git for safe rollback")
+			a.Emit(EventStatus, "⚠ Not a git repository — edit mode requires git for safe rollback")
 		}
 	}
 
@@ -152,17 +155,17 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			Stream:      true,
 		}
 
-		a.emit(EventStatus, "thinking")
+		a.Emit(EventStatus, "thinking")
 		resp, err := provider.Complete(ctx, req)
 		if err != nil {
-			a.emit(EventError, err)
+			a.Emit(EventError, err)
 			a.tryPersist()
 			return fmt.Errorf("agent: complete: %w", err)
 		}
 
 		text, usage, err := a.drainStream(resp)
 		if err != nil {
-			a.emit(EventError, err)
+			a.Emit(EventError, err)
 			a.tryPersist()
 			return fmt.Errorf("agent: stream: %w", err)
 		}
@@ -189,28 +192,49 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		}
 
 		if stop != ai.StopReasonTools || len(toolCalls) == 0 {
-			a.emit(EventDone, text)
+			a.Emit(EventDone, text)
 			a.tryPersist()
 			return nil
 		}
 
 		for _, tc := range toolCalls {
 			startedAt := time.Now()
-			a.emit(EventToolCall, ToolCallEvent{
+
+			// Extract context for display (e.g. filename, command)
+			var context string
+			if path, ok := tc.Args["path"].(string); ok {
+				context = path
+			} else if cmd, ok := tc.Args["command"].(string); ok {
+				context = cmd
+			} else if pattern, ok := tc.Args["pattern"].(string); ok {
+				context = pattern
+			} else if dir, ok := tc.Args["dir"].(string); ok {
+				context = dir
+			}
+
+			a.Emit(EventToolCall, ToolCallEvent{
 				ID:        tc.ID,
 				Name:      tc.Name,
+				Context:   context,
 				Args:      tc.Args,
 				StartedAt: startedAt,
 			})
-			a.emit(EventStatus, fmt.Sprintf("running %s", tc.Name))
+
+			status := fmt.Sprintf("running %s", tc.Name)
+			if context != "" {
+				status = fmt.Sprintf("running %s (%s)", tc.Name, context)
+			}
+			a.Emit(EventStatus, status)
+
 			result, err := a.executeTool(ctx, tc)
 			if err != nil {
 				result = tools.Result{IsError: true, Content: err.Error()}
 			}
 			finishedAt := time.Now()
-			a.emit(EventToolDone, ToolDoneEvent{
+			a.Emit(EventToolDone, ToolDoneEvent{
 				ID:         tc.ID,
 				Name:       tc.Name,
+				Context:    context,
 				StartedAt:  startedAt,
 				FinishedAt: finishedAt,
 				Duration:   finishedAt.Sub(startedAt),
@@ -238,17 +262,17 @@ func (a *Agent) drainStream(resp ai.CompletionResponse) (string, ai.Usage, error
 	ch := resp.Stream()
 	for chunk := range ch {
 		if chunk.Error != nil {
-			a.emit(EventError, chunk.Error)
+			a.Emit(EventError, chunk.Error)
 			return text, resp.Usage(), fmt.Errorf("stream chunk: %w", chunk.Error)
 		}
 		if chunk.Done {
 			break
 		}
 		if chunk.Thought != "" {
-			a.emit(EventThought, chunk.Thought)
+			a.Emit(EventThought, chunk.Thought)
 		}
 		if chunk.Text != "" {
-			a.emit(EventToken, chunk.Text)
+			a.Emit(EventToken, chunk.Text)
 			text += chunk.Text
 		}
 	}
@@ -286,7 +310,7 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 
 func (a *Agent) requestConfirmation(tc ai.ToolCall) ConfirmationResponse {
 	ch := make(chan ConfirmationResponse, 1)
-	a.emit(EventConfirm, map[string]any{"tool_call": tc, "reply": ch})
+	a.Emit(EventConfirm, map[string]any{"tool_call": tc, "reply": ch})
 	select {
 	case res := <-ch:
 		return res
@@ -295,8 +319,22 @@ func (a *Agent) requestConfirmation(tc ai.ToolCall) ConfirmationResponse {
 	}
 }
 
-func (a *Agent) emit(eventType string, payload any) {
-	a.events <- Event{Type: eventType, Payload: payload}
+func (a *Agent) Emit(eventType string, payload any) {
+	select {
+	case a.events <- Event{Type: eventType, Payload: payload}:
+	default:
+		// Channel full - this shouldn't happen with 8192 buffer, but prevent deadlock
+		// Drop oldest event and retry
+		select {
+		case <-a.events:
+		default:
+		}
+		select {
+		case a.events <- Event{Type: eventType, Payload: payload}:
+		default:
+			// Still full, drop event rather than block
+		}
+	}
 }
 
 func buildToolSchemas(reg *tools.Registry) []ai.ToolSchema {
@@ -330,12 +368,12 @@ func (a *Agent) checkContextLimit(provider ai.Provider, messages []ai.Message) {
 	fraction := float64(tokens) / float64(limit)
 	switch {
 	case fraction >= 0.95:
-		a.emit(EventStatus, fmt.Sprintf(
+		a.Emit(EventStatus, fmt.Sprintf(
 			"⚠ Context is %d%% full (%d/%d tokens). Next request may fail — use /compress to reduce context.",
 			int(fraction*100), tokens, limit,
 		))
 	case fraction >= 0.80:
-		a.emit(EventStatus, fmt.Sprintf(
+		a.Emit(EventStatus, fmt.Sprintf(
 			"Context is %d%% full (%d/%d tokens). Consider using /compress.",
 			int(fraction*100), tokens, limit,
 		))

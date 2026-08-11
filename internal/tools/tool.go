@@ -14,6 +14,7 @@ type Tool interface {
 // Result holds the output of a tool execution.
 type Result struct {
 	Content  string
+	Summary  string
 	IsError  bool
 	Metadata map[string]any
 }

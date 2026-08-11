@@ -133,10 +133,27 @@ func (c Confirm) View() string {
 			c.styles.Dim.Render("[enter] Submit  [esc] Back"),
 		)
 	} else {
+		// Highlight the tool name in the prompt (usually after 'Allow ')
+		promptDisp := c.prompt
+		if strings.HasPrefix(promptDisp, "Allow ") {
+			parts := strings.SplitN(promptDisp, "Allow ", 2)
+			rest := parts[1]
+			toolName := ""
+			// Find first space or colon
+			if idx := strings.IndexAny(rest, " :"); idx != -1 {
+				toolName = rest[:idx]
+				rest = rest[idx:]
+			} else {
+				toolName = rest
+				rest = ""
+			}
+			promptDisp = "Allow " + c.styles.Bold.Copy().Foreground(c.styles.T.Blue).Render(toolName) + rest
+		}
+
 		content = fmt.Sprintf(
 			" %s\n %s\n\n %s  %s  %s  %s",
 			c.styles.Bold.Render("Tool Confirmation Required:"),
-			c.prompt,
+			promptDisp,
 			c.renderKey("y", "Allow Once"),
 			c.renderKey("a", "Always for Session"),
 			c.renderKey("n", "Reject"),

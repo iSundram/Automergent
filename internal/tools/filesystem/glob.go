@@ -138,6 +138,7 @@ func (t *GlobTool) Execute(_ context.Context, args map[string]any) (tools.Result
 
 	return tools.Result{
 		Content: result,
+		Summary: fmt.Sprintf("found %d files", len(matches)),
 		Metadata: map[string]any{
 			"count":     len(matches),
 			"truncated": truncated,

@@ -214,14 +214,27 @@ func (t *GrepTool) Execute(_ context.Context, args map[string]any) (tools.Result
 		output += fmt.Sprintf("\n\n... (truncated at %d results)", maxResults)
 	}
 
+	summary := fmt.Sprintf("found %d matches across %d files", resultCount, len(matchedFiles))
+	if resultCount == 0 {
+		summary = "no matches found"
+	}
+
 	return tools.Result{
 		Content: output,
+		Summary: summary,
 		Metadata: map[string]any{
 			"files_matched": len(matchedFiles),
 			"total_matches": resultCount,
 			"truncated":     truncated,
 		},
 	}, nil
+}
+
+// pendingMatch tracks a match that needs after-context lines before being emitted
+type pendingMatch struct {
+	contextLines []string // lines to emit (before + match + after)
+	afterNeeded  int      // how many more after-context lines needed
+	matchLineNum int      // line number of the match
 }
 
 func searchFileByLine(path string, re *regexp.Regexp, outputMode string, showLineNumbers bool, contextBefore, contextAfter int, results *[]string, fileCounts map[string]int, matchedFiles map[string]bool, resultCount *int, maxResults int) error {
@@ -240,13 +253,36 @@ func searchFileByLine(path string, re *regexp.Regexp, outputMode string, showLin
 	file.Seek(0, 0)
 
 	scanner := bufio.NewScanner(file)
-	var lines []string
+	var beforeBuffer []string  // rolling buffer of before-context lines
+	var pending []pendingMatch // matches waiting for after-context
 	lineNum := 0
 
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
-		lines = append(lines, line)
+
+		// Add this line as after-context to any pending matches
+		for i := range pending {
+			if pending[i].afterNeeded > 0 {
+				if showLineNumbers {
+					pending[i].contextLines = append(pending[i].contextLines, fmt.Sprintf("%s:%d+ %s", path, lineNum, line))
+				} else {
+					pending[i].contextLines = append(pending[i].contextLines, fmt.Sprintf("%s+ %s", path, line))
+				}
+				pending[i].afterNeeded--
+			}
+		}
+
+		// Emit any matches that have collected enough after-context
+		newPending := pending[:0]
+		for _, pm := range pending {
+			if pm.afterNeeded == 0 {
+				*results = append(*results, strings.Join(pm.contextLines, "\n"))
+			} else {
+				newPending = append(newPending, pm)
+			}
+		}
+		pending = newPending
 
 		if re.MatchString(line) {
 			matchedFiles[path] = true
@@ -256,17 +292,17 @@ func searchFileByLine(path string, re *regexp.Regexp, outputMode string, showLin
 				// Build context output
 				var contextLines []string
 
-				// Before context
-				start := len(lines) - 1 - contextBefore
+				// Before context from buffer
+				start := len(beforeBuffer) - contextBefore
 				if start < 0 {
 					start = 0
 				}
-				for i := start; i < len(lines)-1; i++ {
-					ln := lineNum - (len(lines) - 1 - i)
+				for i := start; i < len(beforeBuffer); i++ {
+					ln := lineNum - (len(beforeBuffer) - i)
 					if showLineNumbers {
-						contextLines = append(contextLines, fmt.Sprintf("%s:%d- %s", path, ln, lines[i]))
+						contextLines = append(contextLines, fmt.Sprintf("%s:%d- %s", path, ln, beforeBuffer[i]))
 					} else {
-						contextLines = append(contextLines, fmt.Sprintf("%s- %s", path, lines[i]))
+						contextLines = append(contextLines, fmt.Sprintf("%s- %s", path, beforeBuffer[i]))
 					}
 				}
 
@@ -277,22 +313,40 @@ func searchFileByLine(path string, re *regexp.Regexp, outputMode string, showLin
 					contextLines = append(contextLines, fmt.Sprintf("%s: %s", path, line))
 				}
 
-				*results = append(*results, strings.Join(contextLines, "\n"))
+				// If we need after-context, defer this match
+				if contextAfter > 0 {
+					pending = append(pending, pendingMatch{
+						contextLines: contextLines,
+						afterNeeded:  contextAfter,
+						matchLineNum: lineNum,
+					})
+				} else {
+					*results = append(*results, strings.Join(contextLines, "\n"))
+				}
 			}
 
 			(*resultCount)++
 			if *resultCount >= maxResults {
+				// Emit any pending matches before returning
+				for _, pm := range pending {
+					*results = append(*results, strings.Join(pm.contextLines, "\n"))
+				}
 				return fmt.Errorf("limit reached")
 			}
 		}
 
-		// Keep only necessary context lines
-		if contextBefore > 0 && len(lines) > contextBefore+1 {
-			lines = lines[1:]
+		// Maintain before-context buffer
+		beforeBuffer = append(beforeBuffer, line)
+		if len(beforeBuffer) > contextBefore {
+			beforeBuffer = beforeBuffer[1:]
 		}
 	}
 
-	// Handle after context (simplified - would need more complex buffering for full implementation)
+	// Emit any remaining pending matches (EOF before enough after-context)
+	for _, pm := range pending {
+		*results = append(*results, strings.Join(pm.contextLines, "\n"))
+	}
+
 	return nil
 }
 

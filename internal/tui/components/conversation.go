@@ -24,6 +24,7 @@ type ConversationMsg struct {
 	ToolName    string
 	ToolArgs    string
 	ToolContext string
+	ToolSummary string
 	Duration    time.Duration
 	Status      string // "running", "done", "error"
 }
@@ -108,7 +109,7 @@ func (c *Conversation) AddToolLifecycleStart(id, name, args, context string) {
 	c.refreshWithFollow(shouldFollow)
 }
 
-func (c *Conversation) AddToolLifecycleDone(id, name string, duration time.Duration, result tools.Result, reviewMode bool) {
+func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, duration time.Duration, result tools.Result, reviewMode bool) {
 	shouldFollow := c.viewport.AtBottom()
 	c.streaming = false
 	if id != "" {
@@ -121,6 +122,12 @@ func (c *Conversation) AddToolLifecycleDone(id, name string, duration time.Durat
 				}
 				c.messages[i].Duration = duration
 				c.messages[i].Content = result.Content
+				if context != "" {
+					c.messages[i].ToolContext = context
+				}
+				if summary != "" {
+					c.messages[i].ToolSummary = summary
+				}
 				c.refreshWithFollow(shouldFollow)
 				return
 			}
@@ -136,6 +143,12 @@ func (c *Conversation) AddToolLifecycleDone(id, name string, duration time.Durat
 			}
 			c.messages[i].Duration = duration
 			c.messages[i].Content = result.Content
+			if context != "" {
+				c.messages[i].ToolContext = context
+			}
+			if summary != "" {
+				c.messages[i].ToolSummary = summary
+			}
 			c.refreshWithFollow(shouldFollow)
 			return
 		}
@@ -147,14 +160,16 @@ func (c *Conversation) AddToolLifecycleDone(id, name string, duration time.Durat
 		status = "error"
 	}
 	c.messages = append(c.messages, ConversationMsg{
-		Role:      "tool_call",
-		ToolID:    id,
-		ToolName:  name,
-		Content:   result.Content,
-		Status:    status,
-		IsError:   result.IsError,
-		Duration:  duration,
-		Timestamp: time.Now(),
+		Role:        "tool_call",
+		ToolID:      id,
+		ToolName:    name,
+		ToolContext: context,
+		ToolSummary: summary,
+		Content:     result.Content,
+		Status:      status,
+		IsError:     result.IsError,
+		Duration:    duration,
+		Timestamp:   time.Now(),
 	})
 	c.refreshWithFollow(shouldFollow)
 }
@@ -263,11 +278,11 @@ func (c *Conversation) refresh() {
 			sb.WriteString("\n")
 
 		case "assistant":
-			labelStr := " ◈ Automergent "
+			labelStr := " ⟡ Automergent "
 			bubbleStyle := c.styles.AssistantBubble
 
 			if m.IsError {
-				labelStr = " ◈ Automergent (Error) "
+				labelStr = " ⟡ Automergent (Error) "
 				bubbleStyle = bubbleStyle.Copy().BorderForeground(c.styles.T.Red)
 			}
 
@@ -318,20 +333,27 @@ func (c *Conversation) renderThought(thought string, width int) string {
 }
 
 func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
-	icon := " 󱓞 " // Executing/Thinking icon
+	icon := " 󱓞 " // Executing icon
 	statusColor := c.styles.T.Yellow
 	statusText := "running"
+
+	// Fallback icons if not using Nerd Fonts (simulated check via a config or just provide clean characters)
+	// For Automergent, we will use characters that look good in all terminals but still unique.
 
 	switch m.Status {
 	case "done":
 		icon = " 󰄬 "
-		statusColor = c.styles.T.Green
 		statusText = "done"
+		statusColor = c.styles.T.Green
 	case "error":
 		icon = " 󱄊 "
-		statusColor = c.styles.T.Red
 		statusText = "failed"
+		statusColor = c.styles.T.Red
 	}
+
+	// Simple check: if we are in a basic terminal environment, use standard brackets
+	// In some environments, we might want to check an env var like AUTOMERGENT_NO_NERD_FONTS
+	// But here we'll ensure the icon string is at least printable.
 
 	// Icon with background
 	iconStyled := lipgloss.NewStyle().
@@ -339,20 +361,56 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 		Background(statusColor).
 		Render(icon)
 
-	// Tool name
+	// Tool name and context
 	nameStyled := c.styles.ToolName.Render(" " + m.ToolName)
 	if m.ToolContext != "" {
-		nameStyled += lipgloss.NewStyle().Foreground(c.styles.T.Subtext).Render(" (" + m.ToolContext + ")")
+		// If we have context, make it the primary description for better readability
+		desc := m.ToolContext
+		if m.Status == "done" {
+			switch m.ToolName {
+			case "view", "read_file":
+				desc = "viewed " + desc
+			case "write_file", "create_file":
+				desc = "wrote " + desc
+			case "edit_file":
+				desc = "edited " + desc
+			case "delete_file":
+				desc = "deleted " + desc
+			case "move_file":
+				desc = "moved " + desc
+			case "copy_file":
+				desc = "copied " + desc
+			case "list_directory":
+				desc = "listed " + desc
+			}
+		}
+		nameStyled = c.styles.ToolName.Render(" " + desc)
 	}
 
 	// Status and duration
-	statusStyled := c.styles.ToolStatus.Foreground(statusColor).Render(statusText)
+	statusTextDisp := statusText
+	if m.ToolSummary != "" {
+		statusTextDisp = m.ToolSummary
+	}
+
+	// Hide redundant "done" if we have a descriptive summary
+	if m.Status == "done" && m.ToolSummary != "" {
+		statusTextDisp = m.ToolSummary
+	} else if m.Status == "done" {
+		statusTextDisp = "completed"
+	}
+
+	statusStyled := c.styles.ToolStatus.Foreground(statusColor).Render(statusTextDisp)
 	duration := ""
 	if m.Duration > 0 {
 		duration = c.styles.ToolDuration.Render(m.Duration.Round(time.Millisecond).String())
 	}
 
-	header := lipgloss.JoinHorizontal(lipgloss.Center, iconStyled, nameStyled, statusStyled, duration)
+	// Build a cleaner header: [ICON] [ACTION/CONTEXT] [SUMMARY] [DURATION]
+	header := iconStyled + nameStyled + " " + statusStyled
+	if duration != "" {
+		header += " " + duration
+	}
 
 	var body strings.Builder
 	body.WriteString(header)
@@ -366,10 +424,27 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 		}
 	}
 
-	// Tool Result/Content (only show if reviewMode is ON)
-	if c.reviewMode && m.Content != "" {
-		body.WriteString("\n\n" + lipgloss.NewStyle().Foreground(statusColor).Bold(true).Render(" RESULTS"))
-		body.WriteString("\n" + m.Content)
+	// Tool Result/Content
+	if m.Content != "" {
+		if c.reviewMode {
+			body.WriteString("\n\n" + lipgloss.NewStyle().Foreground(statusColor).Bold(true).Render(" RESULTS"))
+			body.WriteString("\n" + m.Content)
+		} else if m.Status == "running" && (m.ToolName == "write_file" || m.ToolName == "edit_file") {
+			// Show stylized diff box only while running/previewing
+			body.WriteString("\n\n")
+			lines := strings.Split(strings.TrimSpace(m.Content), "\n")
+			for _, line := range lines {
+				style := lipgloss.NewStyle()
+				if strings.HasPrefix(line, "+") {
+					style = style.Foreground(c.styles.T.Green)
+				} else if strings.HasPrefix(line, "-") {
+					style = style.Foreground(c.styles.T.Red)
+				} else {
+					style = style.Foreground(c.styles.T.Muted)
+				}
+				body.WriteString(style.Render(line) + "\n")
+			}
+		}
 	}
 
 	// Apply side accent and padding

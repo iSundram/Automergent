@@ -76,7 +76,27 @@ func (t *WriteFileTool) Execute(_ context.Context, args map[string]any) (tools.R
 	if err := atomicWriteFile(path, []byte(content), 0o644); err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("write: %v", err)}, nil
 	}
-	return tools.Result{Content: fmt.Sprintf("wrote %d bytes to %s", len(content), path)}, nil
+
+	lineCount := strings.Count(content, "\n")
+	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+		lineCount++
+	}
+
+	// Build a simple "full add" diff
+	var diff strings.Builder
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if i >= 10 { // Limit to 10 lines
+			diff.WriteString(fmt.Sprintf("... (%d more lines)\n", len(lines)-10))
+			break
+		}
+		diff.WriteString("+ " + line + "\n")
+	}
+
+	return tools.Result{
+		Content: diff.String(),
+		Summary: fmt.Sprintf("wrote +%d lines", lineCount),
+	}, nil
 }
 
 // EditFileTool applies a string replacement in a file.
@@ -121,6 +141,14 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 	if !pathOk || path == "" || !oldOk || oldStr == "" || !newOk {
 		return tools.Result{IsError: true, Content: "path, old_str, and new_str are required"}, nil
 	}
+
+	// Get original file permissions before reading
+	info, err := os.Stat(path)
+	if err != nil {
+		return tools.Result{IsError: true, Content: fmt.Sprintf("stat: %v", err)}, nil
+	}
+	originalPerm := info.Mode().Perm()
+
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("read: %v", err)}, nil
@@ -137,10 +165,41 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 	} else {
 		result = strings.Replace(original, oldStr, newStr, 1)
 	}
-	if err := atomicWriteFile(path, []byte(result), 0o644); err != nil {
+	if err := atomicWriteFile(path, []byte(result), originalPerm); err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("write: %v", err)}, nil
 	}
-	return tools.Result{Content: fmt.Sprintf("patched %s (%d replacement%s)", path, replaced, pluralS(replaced))}, nil
+
+	oldLines := strings.Count(oldStr, "\n")
+	newLines := strings.Count(newStr, "\n")
+
+	totalAdded := newLines * replaced
+	totalRemoved := oldLines * replaced
+
+	// Build a simple diff snippet
+	var diff strings.Builder
+	oldL := strings.Split(oldStr, "\n")
+	newL := strings.Split(newStr, "\n")
+
+	maxLines := 5
+	for i, line := range oldL {
+		if i >= maxLines {
+			diff.WriteString(fmt.Sprintf("... (%d more removed lines)\n", len(oldL)-maxLines))
+			break
+		}
+		diff.WriteString("- " + line + "\n")
+	}
+	for i, line := range newL {
+		if i >= maxLines {
+			diff.WriteString(fmt.Sprintf("... (%d more added lines)\n", len(newL)-maxLines))
+			break
+		}
+		diff.WriteString("+ " + line + "\n")
+	}
+
+	return tools.Result{
+		Content: diff.String(),
+		Summary: fmt.Sprintf("applied +%d -%d lines", totalAdded, totalRemoved),
+	}, nil
 }
 
 func pluralS(n int) string {

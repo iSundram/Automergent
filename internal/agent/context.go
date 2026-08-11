@@ -24,31 +24,35 @@ func buildSystemPrompt(cfg *config.Config, reg *tools.Registry) string {
 	// Capabilities overview
 	sb.WriteString("## Capabilities\n\n")
 	sb.WriteString("### File System\n")
-	sb.WriteString("- `view`: Read files with line numbers, view line ranges (e.g., view_range: [10, 50]), list directories\n")
-	sb.WriteString("- `read_file`: Read raw file contents, supports line ranges\n")
-	sb.WriteString("- `glob`: Fast file pattern matching (e.g., **/*.go, src/**/*.ts)\n")
-	sb.WriteString("- `grep`: Search file contents with regex, context lines, output modes\n")
+	sb.WriteString("- `view`: Read files with line numbers, view line ranges, list directories (max_lines default: 500)\n")
+	sb.WriteString("- `read_file`: Read raw file contents, supports start_line/end_line\n")
+	sb.WriteString("- `glob`: Fast pattern matching (e.g., **/*.go). Params: max_results (default 1000), include_hidden\n")
+	sb.WriteString("- `grep`: Search file contents with regex. Params: output_mode, context_before/after, max_results (default 100)\n")
 	sb.WriteString("- `write_file`: Write/overwrite file contents\n")
-	sb.WriteString("- `create_file`: Create new files (fails if exists - prevents overwrites)\n")
+	sb.WriteString("- `create_file`: Create new files (fails if exists - prevents accidental overwrites)\n")
 	sb.WriteString("- `edit_file`: Replace text in files (use old_str/new_str)\n")
-	sb.WriteString("- `delete_file`: Delete files/directories\n")
+	sb.WriteString("- `delete_file`: Delete files/directories (ALWAYS requires confirmation)\n")
 	sb.WriteString("- `move_file`: Move/rename files\n")
-	sb.WriteString("- `copy_file`: Copy files/directories\n\n")
+	sb.WriteString("- `copy_file`: Copy files/directories\n")
+	sb.WriteString("- `list_directory`: List directory contents\n\n")
 
 	sb.WriteString("### Shell Execution\n")
-	sb.WriteString("- `bash`: Execute commands (sync or async mode)\n")
+	sb.WriteString("- `bash`: Execute shell commands\n")
 	sb.WriteString("  - mode=\"sync\": Wait for completion (default)\n")
 	sb.WriteString("  - mode=\"async\": Run in background, returns shell_id\n")
 	sb.WriteString("  - detach=true: Process survives session shutdown (for servers)\n")
-	sb.WriteString("- `read_shell`: Read output from async shell\n")
+	sb.WriteString("  - initial_wait: Seconds to wait before backgrounding (sync mode)\n")
+	sb.WriteString("  - env: Additional environment variables (object)\n")
+	sb.WriteString("  - shell_id: Custom shell ID (auto-generated if not provided)\n")
+	sb.WriteString("- `read_shell`: Read output from async shell (requires shell_id)\n")
 	sb.WriteString("- `write_shell`: Send input to running shell (supports {enter}, {up}, {down})\n")
 	sb.WriteString("- `stop_shell`: Terminate a shell session\n")
 	sb.WriteString("- `list_shells`: List active shell sessions\n\n")
 
 	sb.WriteString("### Git\n")
 	sb.WriteString("- `git_status`: Repository status\n")
-	sb.WriteString("- `git_diff`: Show changes (supports staged, file-specific)\n")
-	sb.WriteString("- `git_log`: Commit history (filter by author, count)\n")
+	sb.WriteString("- `git_diff`: Show changes (params: file, staged)\n")
+	sb.WriteString("- `git_log`: Commit history (params: n for count)\n")
 	sb.WriteString("- `git_commit`: Create commits (auto-adds co-author trailer)\n")
 	sb.WriteString("- `git_add`: Stage files\n")
 	sb.WriteString("- `git_checkout`: Switch branches or restore files\n")
@@ -59,22 +63,24 @@ func buildSystemPrompt(cfg *config.Config, reg *tools.Registry) string {
 
 	sb.WriteString("### Sub-Agents\n")
 	sb.WriteString("- `task`: Spawn sub-agents for complex tasks\n")
-	sb.WriteString("  - agent_type=\"explore\": Fast codebase exploration, batch questions (Gemini)\n")
-	sb.WriteString("  - agent_type=\"task\": Execute commands, brief summary on success (Gemini)\n")
-	sb.WriteString("  - agent_type=\"code-review\": High-signal code review (Gemini)\n")
-	sb.WriteString("  - agent_type=\"general-purpose\": Complex multi-step tasks (Gemini)\n")
+	sb.WriteString("  - agent_type=\"explore\": Fast codebase exploration, batch questions\n")
+	sb.WriteString("  - agent_type=\"task\": Execute commands, brief summary on success\n")
+	sb.WriteString("  - agent_type=\"code-review\": High-signal code review\n")
+	sb.WriteString("  - agent_type=\"general-purpose\": Complex multi-step tasks\n")
 	sb.WriteString("  - mode=\"background\": Run async, use read_agent for results\n")
-	sb.WriteString("- `read_agent`: Get results from background agent\n")
+	sb.WriteString("- `read_agent`: Get results from background agent (params: agent_id, wait, timeout)\n")
 	sb.WriteString("- `list_agents`: List running/completed agents\n\n")
 
 	sb.WriteString("### Testing & Security\n")
 	sb.WriteString("- `run_tests`: Auto-detect framework (go/npm/pytest/cargo/maven) and run tests\n")
+	sb.WriteString("  - Params: path, pattern, framework (auto|go|npm|yarn|pnpm|pytest|unittest|cargo|maven|gradle)\n")
 	sb.WriteString("- `test_coverage`: Generate coverage reports\n")
-	sb.WriteString("- `secrets_scan`: Detect hardcoded secrets/credentials\n")
+	sb.WriteString("- `secrets_scan`: Detect hardcoded secrets/credentials (params: path, exclude, include_tests)\n")
 	sb.WriteString("- `dependency_audit`: Check for vulnerable dependencies\n\n")
 
 	sb.WriteString("### Database\n")
 	sb.WriteString("- `sql`: Query session SQLite database\n")
+	sb.WriteString("  - REQUIRED param: description (2-5 word summary of query)\n")
 	sb.WriteString("  - Pre-built tables: todos, todo_deps, session_state\n")
 	sb.WriteString("  - Use for task tracking, batch operations, state management\n\n")
 
@@ -186,9 +192,9 @@ func buildSystemPrompt(cfg *config.Config, reg *tools.Registry) string {
 func modeDescription(mode string) string {
 	switch mode {
 	case "edit":
-		return "In edit mode, automatically read files, but ask for confirmation before writing files or running shell commands."
+		return "In edit mode: automatically read files, but ask for confirmation before writing files or running shell commands."
 	case "plan":
-		return "In plan mode, create a detailed plan of the changes to be made, then ask for approval before executing."
+		return "In plan mode: ask for confirmation before ALL operations (reads, writes, shell commands). Use this for careful review of each action."
 	default:
 		return ""
 	}

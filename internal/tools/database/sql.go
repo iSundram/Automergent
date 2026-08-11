@@ -10,8 +10,18 @@ import (
 )
 
 // SQLTool provides SQL query capabilities against a session database.
-// Note: This is a simplified in-memory implementation.
-// For production, integrate with modernc.org/sqlite (pure Go SQLite).
+//
+// TODO: For production use, integrate with modernc.org/sqlite (pure Go SQLite).
+// The current implementation is an in-memory stub that:
+// - Does not persist data across restarts
+// - Does not parse SQL properly (uses string matching)
+// - Does not support complex queries, JOINs, WHERE clauses, etc.
+//
+// To implement properly:
+// 1. Add "modernc.org/sqlite" to go.mod
+// 2. Replace tables map with *sql.DB connection
+// 3. Use actual SQL execution with db.Query/db.Exec
+// 4. Store database file in session folder (e.g., ~/.copilot/session-state/{id}/session.db)
 type SQLTool struct {
 	mu     sync.RWMutex
 	tables map[string][]map[string]any

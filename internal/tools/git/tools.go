@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 
 	"github.com/iSundram/Automergent/internal/tools"
 )
@@ -24,7 +25,40 @@ func (t *StatusTool) Schema() map[string]any {
 }
 
 func (t *StatusTool) Execute(ctx context.Context, _ map[string]any) (tools.Result, error) {
-	return runGit(ctx, "status", "--short")
+	res, err := runGit(ctx, "status", "--short")
+	if err != nil {
+		return res, err
+	}
+
+	lines := strings.Split(strings.TrimSpace(res.Content), "\n")
+	staged := 0
+	modified := 0
+	untracked := 0
+
+	for _, line := range lines {
+		if len(line) < 2 {
+			continue
+		}
+		if line[0] != ' ' && line[0] != '?' {
+			staged++
+		}
+		if line[1] != ' ' {
+			modified++
+		}
+		if line[0] == '?' && line[1] == '?' {
+			untracked++
+		}
+	}
+
+	summary := "clean"
+	if len(lines) > 0 && lines[0] != "" {
+		summary = fmt.Sprintf("%d staged, %d modified", staged, modified)
+		if untracked > 0 {
+			summary += fmt.Sprintf(", %d untracked", untracked)
+		}
+	}
+	res.Summary = summary
+	return res, nil
 }
 
 // DiffTool shows the current diff.
@@ -44,11 +78,23 @@ func (t *DiffTool) Schema() map[string]any {
 }
 
 func (t *DiffTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
+	var res tools.Result
+	var err error
 	file, _ := tools.StringArg(args, "file")
 	if file != "" {
-		return runGit(ctx, "diff", "--", file)
+		res, err = runGit(ctx, "diff", "--", file)
+	} else {
+		res, err = runGit(ctx, "diff")
 	}
-	return runGit(ctx, "diff")
+
+	if err != nil {
+		return res, err
+	}
+
+	plus := strings.Count(res.Content, "\n+")
+	minus := strings.Count(res.Content, "\n-")
+	res.Summary = fmt.Sprintf("diff +%d -%d lines", plus, minus)
+	return res, nil
 }
 
 // LogTool shows recent git log entries.
@@ -72,7 +118,17 @@ func (t *LogTool) Execute(ctx context.Context, args map[string]any) (tools.Resul
 	if ni, ok := tools.ArgInt(args, "n"); ok && ni > 0 {
 		n = ni
 	}
-	return runGit(ctx, "log", fmt.Sprintf("--max-count=%d", n), "--oneline")
+	res, err := runGit(ctx, "log", fmt.Sprintf("--max-count=%d", n), "--oneline")
+	if err != nil {
+		return res, err
+	}
+
+	count := strings.Count(strings.TrimSpace(res.Content), "\n")
+	if len(strings.TrimSpace(res.Content)) > 0 {
+		count++
+	}
+	res.Summary = fmt.Sprintf("read %d commits", count)
+	return res, nil
 }
 
 func runGit(ctx context.Context, args ...string) (tools.Result, error) {

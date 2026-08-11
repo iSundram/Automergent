@@ -32,6 +32,7 @@ import (
 type agentEventMsg struct{ ev agent.Event }
 type modelsFetchedMsg []ai.Model
 type clearCtrlCStatusMsg struct{}
+type hideDiffPaneMsg struct{} // Message to safely hide diff pane from main loop
 
 type App struct {
 	cfg            *config.Config
@@ -70,6 +71,10 @@ type App struct {
 	availableProviders []string
 	streamedReply      bool
 	lastCtrlCAt        time.Time
+	askUserReplyCh     chan string
+
+	// pendingDiffHide is set when confirmation completes and diff should be hidden
+	pendingDiffHide bool
 }
 
 func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string) *App {
@@ -249,6 +254,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.statusBar.View() != "" && !a.thinking {
 			a.statusBar.SetStatus("Ready")
 		}
+	case hideDiffPaneMsg:
+		// Safely hide diff pane from main event loop (not from goroutine)
+		if a.diffPane.Visible() {
+			a.diffPane.Toggle()
+			a.layout()
+		}
 	}
 	if a.sessionBrowser.Visible() {
 		sb, cmd := a.sessionBrowser.Update(msg)
@@ -263,6 +274,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.confirm = c
 		cmds = append(cmds, cmd)
 		if !a.confirm.Visible() {
+			// Check if we need to hide diff pane after confirmation
+			if a.pendingDiffHide && a.diffPane.Visible() {
+				a.diffPane.Toggle()
+				a.pendingDiffHide = false
+			}
 			a.layout()
 		}
 	}
@@ -411,6 +427,15 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		if (key == "enter" || key == "ctrl+m") && !a.thinking {
 			prompt := strings.TrimSpace(a.input.Value())
 			if prompt != "" {
+				// If we are waiting for an ask_user response, send it
+				if a.askUserReplyCh != nil {
+					a.askUserReplyCh <- prompt
+					a.askUserReplyCh = nil
+					a.input.Reset()
+					a.statusBar.SetStatus("Thinking…")
+					return nil
+				}
+
 				a.input.Reset()
 				a.palette.Hide()
 				a.layout()
@@ -558,7 +583,10 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 					argText = string(b)
 				}
 			}
-			ctx := extractToolContext(te.Name, te.Args)
+			ctx := te.Context
+			if ctx == "" {
+				ctx = extractToolContext(te.Name, te.Args)
+			}
 			a.conversation.AddToolLifecycleStart(te.ID, te.Name, argText, ctx)
 			a.stats.ToolCallCount++
 			a.statusBar.SetStatus(fmt.Sprintf("⚙ %s…", te.Name))
@@ -577,7 +605,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		return a.waitForAgentEvent()
 	case agent.EventToolDone:
 		if td, ok := ev.Payload.(agent.ToolDoneEvent); ok {
-			a.conversation.AddToolLifecycleDone(td.ID, td.Name, td.Duration, td.Result, a.conversation.ReviewMode())
+			a.conversation.AddToolLifecycleDone(td.ID, td.Name, td.Context, td.Result.Summary, td.Duration, td.Result, a.conversation.ReviewMode())
 		} else if r, ok := ev.Payload.(tools.Result); ok {
 			if r.IsError {
 				a.conversation.AddMessage("assistant", "Tool error: "+r.Content, true)
@@ -668,21 +696,30 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 				a.confirm.Show(prompt)
 				a.layout() // Adjust layout for confirm box
 				if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
-					// Wrap reply channel to hide diff on response
+					// Mark that we need to hide diff after confirmation (for file edits)
+					showedDiff := tc.Name == "write_file" || tc.Name == "edit_file"
+					if showedDiff {
+						a.pendingDiffHide = true
+					}
+
+					// Wrap reply channel to forward response
 					wrapped := make(chan agent.ConfirmationResponse, 1)
 					a.confirm.SetReply(wrapped)
 					go func() {
 						res := <-wrapped
-						// If we showed diff for this, hide it
-						if tc.Name == "write_file" || tc.Name == "edit_file" {
-							if a.diffPane.Visible() {
-								a.diffPane.Toggle()
-							}
-						}
 						replyCh <- res
 					}()
 				}
 			}
+		}
+		return a.waitForAgentEvent()
+	case agent.EventAskUser:
+		if payload, ok := ev.Payload.(map[string]any); ok {
+			question, _ := payload["question"].(string)
+			replyCh, _ := payload["reply"].(chan string)
+			a.askUserReplyCh = replyCh
+			a.statusBar.SetStatus("PROMPT: " + question)
+			a.input.Focus()
 		}
 		return a.waitForAgentEvent()
 	}
@@ -1109,6 +1146,16 @@ func (a *App) cancelActiveRun(status string) {
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 	a.thinking = false
 	a.spin.Stop()
+
+	// Clean up any pending ask_user channel to prevent agent deadlock
+	if a.askUserReplyCh != nil {
+		select {
+		case a.askUserReplyCh <- "": // Send empty response to unblock
+		default:
+		}
+		a.askUserReplyCh = nil
+	}
+
 	// Drain any pending events from the cancelled run
 	for {
 		select {

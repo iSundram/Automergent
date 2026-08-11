@@ -109,6 +109,29 @@ func (m *AgentManager) List(includeCompleted bool) []*AgentInstance {
 	return result
 }
 
+// Cleanup removes completed/failed agents older than maxAge to prevent memory leaks.
+func (m *AgentManager) Cleanup(maxAge time.Duration) int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cutoff := time.Now().Add(-maxAge)
+	removed := 0
+
+	for id, a := range m.agents {
+		a.mu.Lock()
+		isCompleted := a.Status == AgentStatusCompleted || a.Status == AgentStatusFailed || a.Status == AgentStatusCancelled
+		completedBefore := a.CompletedAt.Before(cutoff)
+		a.mu.Unlock()
+
+		if isCompleted && completedBefore {
+			delete(m.agents, id)
+			removed++
+		}
+	}
+
+	return removed
+}
+
 func (m *AgentManager) NextID(name string) string {
 	m.mu.Lock()
 	defer m.mu.Unlock()

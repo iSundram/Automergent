@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/iSundram/Automergent/internal/tools"
 )
@@ -71,8 +72,14 @@ func (t *CreateFileTool) Execute(_ context.Context, args map[string]any) (tools.
 		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to create file: %v", err)}, nil
 	}
 
+	lineCount := strings.Count(content, "\n")
+	if len(content) > 0 && !strings.HasSuffix(content, "\n") {
+		lineCount++
+	}
+
 	return tools.Result{
 		Content: fmt.Sprintf("created %s (%d bytes)", path, len(content)),
+		Summary: fmt.Sprintf("wrote +%d lines", lineCount),
 	}, nil
 }
 
@@ -130,7 +137,10 @@ func (t *DeleteFileTool) Execute(_ context.Context, args map[string]any) (tools.
 			if err := os.RemoveAll(path); err != nil {
 				return tools.Result{IsError: true, Content: fmt.Sprintf("failed to delete directory: %v", err)}, nil
 			}
-			return tools.Result{Content: fmt.Sprintf("deleted directory (recursive): %s", path)}, nil
+			return tools.Result{
+				Content: fmt.Sprintf("deleted directory (recursive): %s", path),
+				Summary: "deleted",
+			}, nil
 		}
 		if err := os.Remove(path); err != nil {
 			return tools.Result{
@@ -138,14 +148,20 @@ func (t *DeleteFileTool) Execute(_ context.Context, args map[string]any) (tools.
 				Content: fmt.Sprintf("failed to delete directory (not empty? use recursive=true): %v", err),
 			}, nil
 		}
-		return tools.Result{Content: fmt.Sprintf("deleted directory: %s", path)}, nil
+		return tools.Result{
+			Content: fmt.Sprintf("deleted directory: %s", path),
+			Summary: "deleted",
+		}, nil
 	}
 
 	if err := os.Remove(path); err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to delete file: %v", err)}, nil
 	}
 
-	return tools.Result{Content: fmt.Sprintf("deleted file: %s", path)}, nil
+	return tools.Result{
+		Content: fmt.Sprintf("deleted file: %s", path),
+		Summary: "deleted",
+	}, nil
 }
 
 // MoveFileTool moves or renames a file/directory.
@@ -223,7 +239,10 @@ func (t *MoveFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to move: %v", err)}, nil
 	}
 
-	return tools.Result{Content: fmt.Sprintf("moved %s -> %s", source, dest)}, nil
+	return tools.Result{
+		Content: fmt.Sprintf("moved %s -> %s", source, dest),
+		Summary: "moved",
+	}, nil
 }
 
 // CopyFileTool copies a file or directory.
@@ -304,7 +323,10 @@ func (t *CopyFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 		if err != nil {
 			return tools.Result{IsError: true, Content: fmt.Sprintf("copy failed: %v", err)}, nil
 		}
-		return tools.Result{Content: fmt.Sprintf("copied directory %s -> %s (%d files)", source, dest, count)}, nil
+		return tools.Result{
+			Content: fmt.Sprintf("copied directory %s -> %s (%d files)", source, dest, count),
+			Summary: fmt.Sprintf("copied +%d files", count),
+		}, nil
 	}
 
 	// Copy single file
@@ -312,7 +334,10 @@ func (t *CopyFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 		return tools.Result{IsError: true, Content: fmt.Sprintf("copy failed: %v", err)}, nil
 	}
 
-	return tools.Result{Content: fmt.Sprintf("copied %s -> %s", source, dest)}, nil
+	return tools.Result{
+		Content: fmt.Sprintf("copied %s -> %s", source, dest),
+		Summary: "copied",
+	}, nil
 }
 
 func copyFile(src, dst string, overwrite bool) error {
