@@ -29,7 +29,7 @@ echo "✧ Bootstrapping Automergent Installer for ${OS}/${ARCH}..."
 
 # Get latest installer release tag (e.g., installer/v0.0.1)
 if [ -z "$VERSION" ]; then
-    VERSION=$(curl -s "https://api.github.com/repos/$REPO/tags" | grep '"name": "installer/v' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+    VERSION=$(curl -s "https://api.github.com/repos/$REPO/tags" | grep -o '"name": "installer/v[^"]*"' | head -n 1 | sed 's/"name": "\(.*\)"/\1/')
 fi
 
 if [ -z "$VERSION" ]; then
@@ -37,19 +37,29 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
-# Extract the raw version number (e.g., 0.0.1 from installer/v0.0.1)
-# Note: we need to handle both 'v0.0.1' and 'installer/v0.0.1' formats
-RAW_VER=$(echo $VERSION | sed -E 's|.*v||')
+echo "✧ Detecting release assets..."
+# URL-encode the version (slash to %2F)
+ENCODED_VERSION=$(echo "$VERSION" | sed 's|/|%2F|g')
 
-# Download URL for the TUI Installer
-BINARY_NAME="installer_${RAW_VER}_${OS}_${ARCH}.tar.gz"
-DOWNLOAD_URL="https://github.com/$REPO/releases/download/$VERSION/$BINARY_NAME"
+# Fetch the release information and find the URL of the asset matching our platform
+# We search for the browser_download_url that contains our OS, Arch, and .tar.gz
+DOWNLOAD_URL=$(curl -s "https://api.github.com/repos/$REPO/releases/tags/$ENCODED_VERSION" | \
+    grep -o "https://github.com/[^\"]*${OS}_${ARCH}.tar.gz" | \
+    head -n 1)
+
+if [ -z "$DOWNLOAD_URL" ]; then
+    echo "Error: Could not find installer binary for ${OS}/${ARCH}."
+    exit 1
+fi
 
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
 echo "✧ Downloading Installer $VERSION..."
-curl -sSL "$DOWNLOAD_URL" -o "$TMP_DIR/installer.tar.gz"
+if ! curl -fSL "$DOWNLOAD_URL" -o "$TMP_DIR/installer.tar.gz"; then
+    echo "Error: Failed to download installer from $DOWNLOAD_URL"
+    exit 1
+fi
 
 # Extract only the installer binary
 tar -xzf "$TMP_DIR/installer.tar.gz" -C "$TMP_DIR"
