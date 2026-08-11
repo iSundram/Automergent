@@ -1,0 +1,500 @@
+package git
+
+import (
+	"bytes"
+	"context"
+	"fmt"
+	"os/exec"
+	"strings"
+
+	"github.com/iSundram/Automergent/internal/tools"
+)
+
+// CommitTool creates a git commit.
+type CommitTool struct{}
+
+func (t *CommitTool) Name() string { return "git_commit" }
+func (t *CommitTool) Description() string {
+	return `Create a git commit with the specified message.
+- Automatically adds co-author trailer
+- Use --all to stage all changes before committing
+- Use --amend to amend the previous commit`
+}
+func (t *CommitTool) RequiresConfirmation(mode string) bool {
+	return mode == "edit" || mode == "plan"
+}
+
+func (t *CommitTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"message": map[string]any{
+				"type":        "string",
+				"description": "Commit message.",
+			},
+			"all": map[string]any{
+				"type":        "boolean",
+				"description": "Stage all changes before committing (like git commit -a).",
+			},
+			"amend": map[string]any{
+				"type":        "boolean",
+				"description": "Amend the previous commit.",
+			},
+			"no_verify": map[string]any{
+				"type":        "boolean",
+				"description": "Skip pre-commit and commit-msg hooks.",
+			},
+		},
+		"required": []string{"message"},
+	}
+}
+
+func (t *CommitTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
+	message, ok := tools.StringArg(args, "message")
+	if !ok || message == "" {
+		return tools.Result{IsError: true, Content: "message is required"}, nil
+	}
+
+	// Add co-author trailer
+	message = message + "\n\nCo-authored-by: Automergent <automergent@users.noreply.github.com>"
+
+	cmdArgs := []string{"commit", "-m", message}
+
+	if all, ok := tools.ArgBool(args, "all"); ok && all {
+		cmdArgs = append(cmdArgs, "-a")
+	}
+	if amend, ok := tools.ArgBool(args, "amend"); ok && amend {
+		cmdArgs = append(cmdArgs, "--amend")
+	}
+	if noVerify, ok := tools.ArgBool(args, "no_verify"); ok && noVerify {
+		cmdArgs = append(cmdArgs, "--no-verify")
+	}
+
+	return runGit(ctx, cmdArgs...)
+}
+
+// AddTool stages files for commit.
+type AddTool struct{}
+
+func (t *AddTool) Name() string { return "git_add" }
+func (t *AddTool) Description() string {
+	return `Stage files for commit.
+- Use path to stage specific files/patterns
+- Use all=true to stage all changes
+- Use update=true to only stage modified/deleted files (not new files)`
+}
+func (t *AddTool) RequiresConfirmation(mode string) bool {
+	return mode == "edit" || mode == "plan"
+}
+
+func (t *AddTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"path": map[string]any{
+				"type":        "string",
+				"description": "File or pattern to stage.",
+			},
+			"all": map[string]any{
+				"type":        "boolean",
+				"description": "Stage all changes (git add -A).",
+			},
+			"update": map[string]any{
+				"type":        "boolean",
+				"description": "Only stage modified/deleted files (git add -u).",
+			},
+		},
+	}
+}
+
+func (t *AddTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
+	path, _ := tools.StringArg(args, "path")
+	all, _ := tools.ArgBool(args, "all")
+	update, _ := tools.ArgBool(args, "update")
+
+	cmdArgs := []string{"add"}
+
+	if all {
+		cmdArgs = append(cmdArgs, "-A")
+	} else if update {
+		cmdArgs = append(cmdArgs, "-u")
+	} else if path != "" {
+		cmdArgs = append(cmdArgs, path)
+	} else {
+		return tools.Result{IsError: true, Content: "specify path, all=true, or update=true"}, nil
+	}
+
+	result, err := runGit(ctx, cmdArgs...)
+	if err != nil {
+		return result, err
+	}
+
+	// Show what was staged
+	statusResult, _ := runGit(ctx, "status", "--short")
+	return tools.Result{
+		Content: fmt.Sprintf("staged files\n\n%s", statusResult.Content),
+	}, nil
+}
+
+// CheckoutTool switches branches or restores files.
+type CheckoutTool struct{}
+
+func (t *CheckoutTool) Name() string { return "git_checkout" }
+func (t *CheckoutTool) Description() string {
+	return `Switch branches or restore working tree files.
+- Use branch to switch to a branch
+- Use file to restore a specific file
+- Use create=true with branch to create a new branch`
+}
+func (t *CheckoutTool) RequiresConfirmation(mode string) bool {
+	return mode == "edit" || mode == "plan"
+}
+
+func (t *CheckoutTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"branch": map[string]any{
+				"type":        "string",
+				"description": "Branch name to switch to.",
+			},
+			"file": map[string]any{
+				"type":        "string",
+				"description": "File to restore from HEAD.",
+			},
+			"create": map[string]any{
+				"type":        "boolean",
+				"description": "Create a new branch (git checkout -b).",
+			},
+			"ref": map[string]any{
+				"type":        "string",
+				"description": "Reference (commit, tag) to checkout file from.",
+			},
+		},
+	}
+}
+
+func (t *CheckoutTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
+	branch, _ := tools.StringArg(args, "branch")
+	file, _ := tools.StringArg(args, "file")
+	create, _ := tools.ArgBool(args, "create")
+	ref, _ := tools.StringArg(args, "ref")
+
+	if branch != "" {
+		cmdArgs := []string{"checkout"}
+		if create {
+			cmdArgs = append(cmdArgs, "-b")
+		}
+		cmdArgs = append(cmdArgs, branch)
+		return runGit(ctx, cmdArgs...)
+	}
+
+	if file != "" {
+		cmdArgs := []string{"checkout"}
+		if ref != "" {
+			cmdArgs = append(cmdArgs, ref, "--")
+		} else {
+			cmdArgs = append(cmdArgs, "HEAD", "--")
+		}
+		cmdArgs = append(cmdArgs, file)
+		return runGit(ctx, cmdArgs...)
+	}
+
+	return tools.Result{IsError: true, Content: "specify either branch or file"}, nil
+}
+
+// BranchTool manages git branches.
+type BranchTool struct{}
+
+func (t *BranchTool) Name() string { return "git_branch" }
+func (t *BranchTool) Description() string {
+	return `List, create, or delete branches.
+- list (default): show all branches
+- create: create a new branch
+- delete: delete a branch`
+}
+func (t *BranchTool) RequiresConfirmation(mode string) bool {
+	return mode == "edit" || mode == "plan"
+}
+
+func (t *BranchTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"action": map[string]any{
+				"type":        "string",
+				"enum":        []string{"list", "create", "delete"},
+				"description": "Action to perform.",
+			},
+			"name": map[string]any{
+				"type":        "string",
+				"description": "Branch name (for create/delete).",
+			},
+			"force": map[string]any{
+				"type":        "boolean",
+				"description": "Force delete unmerged branch (-D).",
+			},
+			"all": map[string]any{
+				"type":        "boolean",
+				"description": "Include remote branches in list.",
+			},
+		},
+	}
+}
+
+func (t *BranchTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
+	action := "list"
+	if a, ok := tools.StringArg(args, "action"); ok {
+		action = a
+	}
+
+	name, _ := tools.StringArg(args, "name")
+	force, _ := tools.ArgBool(args, "force")
+	all, _ := tools.ArgBool(args, "all")
+
+	switch action {
+	case "list":
+		if all {
+			return runGit(ctx, "branch", "-a")
+		}
+		return runGit(ctx, "branch")
+
+	case "create":
+		if name == "" {
+			return tools.Result{IsError: true, Content: "name is required for create"}, nil
+		}
+		return runGit(ctx, "branch", name)
+
+	case "delete":
+		if name == "" {
+			return tools.Result{IsError: true, Content: "name is required for delete"}, nil
+		}
+		flag := "-d"
+		if force {
+			flag = "-D"
+		}
+		return runGit(ctx, "branch", flag, name)
+
+	default:
+		return tools.Result{IsError: true, Content: fmt.Sprintf("unknown action: %s", action)}, nil
+	}
+}
+
+// StashTool manages git stash.
+type StashTool struct{}
+
+func (t *StashTool) Name() string { return "git_stash" }
+func (t *StashTool) Description() string {
+	return `Stash changes or restore stashed changes.
+- push: stash current changes
+- pop: apply and remove last stash
+- list: show all stashes
+- apply: apply stash without removing
+- drop: remove a stash`
+}
+func (t *StashTool) RequiresConfirmation(mode string) bool {
+	return mode == "edit" || mode == "plan"
+}
+
+func (t *StashTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"action": map[string]any{
+				"type":        "string",
+				"enum":        []string{"push", "pop", "list", "apply", "drop"},
+				"description": "Stash action to perform.",
+			},
+			"message": map[string]any{
+				"type":        "string",
+				"description": "Message for stash push.",
+			},
+			"index": map[string]any{
+				"type":        "integer",
+				"description": "Stash index for pop/apply/drop (default: 0).",
+			},
+			"include_untracked": map[string]any{
+				"type":        "boolean",
+				"description": "Include untracked files in stash.",
+			},
+		},
+		"required": []string{"action"},
+	}
+}
+
+func (t *StashTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
+	action, _ := tools.StringArg(args, "action")
+	message, _ := tools.StringArg(args, "message")
+	index := 0
+	if i, ok := tools.ArgInt(args, "index"); ok {
+		index = i
+	}
+	includeUntracked, _ := tools.ArgBool(args, "include_untracked")
+
+	stashRef := fmt.Sprintf("stash@{%d}", index)
+
+	switch action {
+	case "push":
+		cmdArgs := []string{"stash", "push"}
+		if includeUntracked {
+			cmdArgs = append(cmdArgs, "-u")
+		}
+		if message != "" {
+			cmdArgs = append(cmdArgs, "-m", message)
+		}
+		return runGit(ctx, cmdArgs...)
+
+	case "pop":
+		return runGit(ctx, "stash", "pop", stashRef)
+
+	case "list":
+		return runGit(ctx, "stash", "list")
+
+	case "apply":
+		return runGit(ctx, "stash", "apply", stashRef)
+
+	case "drop":
+		return runGit(ctx, "stash", "drop", stashRef)
+
+	default:
+		return tools.Result{IsError: true, Content: fmt.Sprintf("unknown action: %s", action)}, nil
+	}
+}
+
+// BlameTool shows line-by-line authorship.
+type BlameTool struct{}
+
+func (t *BlameTool) Name() string                          { return "git_blame" }
+func (t *BlameTool) Description() string                   { return "Show line-by-line authorship for a file." }
+func (t *BlameTool) RequiresConfirmation(mode string) bool { return false }
+
+func (t *BlameTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"file": map[string]any{
+				"type":        "string",
+				"description": "File to show blame for.",
+			},
+			"start_line": map[string]any{
+				"type":        "integer",
+				"description": "Start line number.",
+			},
+			"end_line": map[string]any{
+				"type":        "integer",
+				"description": "End line number.",
+			},
+		},
+		"required": []string{"file"},
+	}
+}
+
+func (t *BlameTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
+	file, ok := tools.StringArg(args, "file")
+	if !ok || file == "" {
+		return tools.Result{IsError: true, Content: "file is required"}, nil
+	}
+
+	cmdArgs := []string{"blame"}
+
+	startLine, hasStart := tools.ArgInt(args, "start_line")
+	endLine, hasEnd := tools.ArgInt(args, "end_line")
+
+	if hasStart || hasEnd {
+		if !hasStart {
+			startLine = 1
+		}
+		if !hasEnd {
+			endLine = startLine + 100
+		}
+		cmdArgs = append(cmdArgs, fmt.Sprintf("-L%d,%d", startLine, endLine))
+	}
+
+	cmdArgs = append(cmdArgs, file)
+	return runGit(ctx, cmdArgs...)
+}
+
+// ShowTool shows commit details.
+type ShowTool struct{}
+
+func (t *ShowTool) Name() string                          { return "git_show" }
+func (t *ShowTool) Description() string                   { return "Show details of a commit, including diff." }
+func (t *ShowTool) RequiresConfirmation(mode string) bool { return false }
+
+func (t *ShowTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"ref": map[string]any{
+				"type":        "string",
+				"description": "Commit SHA, branch, or tag (default: HEAD).",
+			},
+			"file": map[string]any{
+				"type":        "string",
+				"description": "Show only changes to this file.",
+			},
+			"stat": map[string]any{
+				"type":        "boolean",
+				"description": "Show diffstat only (no full diff).",
+			},
+		},
+	}
+}
+
+func (t *ShowTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
+	ref := "HEAD"
+	if r, ok := tools.StringArg(args, "ref"); ok && r != "" {
+		ref = r
+	}
+
+	file, _ := tools.StringArg(args, "file")
+	stat, _ := tools.ArgBool(args, "stat")
+
+	cmdArgs := []string{"show"}
+	if stat {
+		cmdArgs = append(cmdArgs, "--stat")
+	}
+	cmdArgs = append(cmdArgs, ref)
+
+	if file != "" {
+		cmdArgs = append(cmdArgs, "--", file)
+	}
+
+	return runGit(ctx, cmdArgs...)
+}
+
+// Helper to run git commands (enhanced version)
+func runGitCmd(ctx context.Context, args ...string) (string, string, error) {
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	return stdout.String(), stderr.String(), err
+}
+
+// Updated runGit to use the new helper
+func runGitEnhanced(ctx context.Context, args ...string) (tools.Result, error) {
+	stdout, stderr, err := runGitCmd(ctx, args...)
+
+	output := strings.TrimSpace(stdout)
+	if stderr != "" {
+		if output != "" {
+			output += "\n"
+		}
+		output += "[stderr] " + strings.TrimSpace(stderr)
+	}
+
+	if err != nil {
+		return tools.Result{
+			IsError: true,
+			Content: fmt.Sprintf("git %v failed: %v\n%s", args, err, output),
+		}, nil
+	}
+
+	if output == "" {
+		output = "(no output)"
+	}
+
+	return tools.Result{Content: output}, nil
+}
