@@ -911,11 +911,19 @@ func (a *App) layout() {
 }
 
 func (a *App) View() tea.View {
+	// Helper to ensure all views have consistent settings
+	makeView := func(content string) tea.View {
+		v := tea.NewView(content)
+		v.AltScreen = true
+		v.MouseMode = tea.MouseModeCellMotion // Capture mouse to prevent terminal scrollback
+		return v
+	}
+
 	if a.width <= 0 || a.height <= 0 {
-		return tea.NewView("Initializing...")
+		return makeView("Initializing...")
 	}
 	if a.showHelp {
-		return tea.NewView(a.helpOverlay.View())
+		return makeView(a.helpOverlay.View())
 	}
 
 	headerView := a.header.View()
@@ -963,10 +971,7 @@ func (a *App) View() tea.View {
 		sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, footer...))
 	}
 	sections = append(sections, statusView)
-	v := tea.NewView(lipgloss.JoinVertical(lipgloss.Left, sections...))
-	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
-	return v
+	return makeView(lipgloss.JoinVertical(lipgloss.Left, sections...))
 }
 
 func overlayBottom(base, overlay string) string {
