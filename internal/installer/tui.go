@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image/color"
 	"math"
+	"os"
 	"strings"
 	"time"
 
@@ -43,6 +44,10 @@ type Model struct {
 	archive        string
 	startTime      time.Time
 	lastTick       time.Time
+	progressChan   chan float64
+	listenProgress func() tea.Cmd
+	doneTime       time.Time
+	InstallerPath  string
 }
 
 func NewModel() Model {
@@ -68,6 +73,7 @@ type infoMsg *Info
 type downloadProgressMsg float64
 type downloadDoneMsg string
 type extractDoneMsg struct{}
+type finishMsg struct{}
 type errorMsg error
 
 func animTick() tea.Cmd {
@@ -134,7 +140,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case downloadProgressMsg:
 		m.targetProgress = float64(msg)
-		return m, nil
+		return m, m.listenProgress()
 
 	case downloadDoneMsg:
 		m.archive = string(msg)
@@ -151,11 +157,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case extractDoneMsg:
 		m.state = stateFinishing
 		m.status = "Finalizing installation"
+		return m, tea.Batch(
+			func() tea.Msg {
+				if !CheckBinary("automergent") {
+					_ = AddToPath(m.info.DestDir)
+				}
+				time.Sleep(500 * time.Millisecond) // Visual beat
+				return finishMsg{}
+			},
+		)
+
+	case finishMsg:
+		m.state = stateDone
+		m.doneTime = time.Now()
+		m.status = "Installation complete!"
+		// Setup owe command and cleanup
 		return m, func() tea.Msg {
-			if !CheckBinary("automergent") {
-				_ = AddToPath(m.info.DestDir)
+			if err := SetupBinary(m.info.DestDir); err != nil {
+				// Non-fatal, just log
 			}
-			time.Sleep(500 * time.Millisecond) // Visual beat
+
+			// Wait 20 seconds
+			time.Sleep(20 * time.Second)
+
+			// Delete installer binary
+			if m.InstallerPath != "" {
+				os.Remove(m.InstallerPath)
+			}
+
 			return tea.Quit
 		}
 
@@ -172,25 +201,31 @@ func (m Model) checkReady() (Model, tea.Cmd) {
 	if m.version != "" && m.info != nil {
 		m.state = stateDownloading
 		m.status = fmt.Sprintf("Downloading v%s", m.version)
-		progressChan := make(chan float64)
-
-		listenProgress := func() tea.Msg {
-			for p := range progressChan {
-				return downloadProgressMsg(p)
-			}
-			return nil
-		}
+		m.progressChan = make(chan float64)
 
 		download := func() tea.Msg {
-			path, err := DownloadBinary(m.version, m.info, progressChan)
-			close(progressChan)
+			path, err := DownloadBinary(m.version, m.info, m.progressChan)
+			close(m.progressChan)
 			if err != nil {
 				return errorMsg(err)
 			}
 			return downloadDoneMsg(path)
 		}
 
-		return m, tea.Batch(download, listenProgress)
+		m.listenProgress = func() tea.Cmd {
+			return func() tea.Msg {
+				p, ok := <-m.progressChan
+				if !ok {
+					return nil
+				}
+				return downloadProgressMsg(p)
+			}
+		}
+
+		return m, tea.Batch(
+			download,
+			m.listenProgress(),
+		)
 	}
 	return m, nil
 }
@@ -245,44 +280,89 @@ func (m Model) View() tea.View {
 		}
 		body.WriteString(statusLine + "\n\n")
 
-		// Progress Bar with Shimmer
-		if m.state == stateDownloading {
-			barWidth := m.width - 20
-			if barWidth > 40 {
-				barWidth = 40
-			}
-			filled := int(float64(barWidth) * m.progress)
-			empty := barWidth - filled
+		// Success Animation for Done State
+		if m.state == stateDone {
+			doneElapsed := time.Since(m.doneTime).Seconds()
 
-			// Render filled part with shimmer
-			shimmerPos := int(math.Mod(elapsed*20, float64(barWidth+10)))
-			var barStr strings.Builder
-			for i := 0; i < filled; i++ {
-				char := "█"
-				style := lipgloss.NewStyle().Foreground(m.theme.Green)
-				// Shimmer effect
-				if i >= shimmerPos-3 && i <= shimmerPos {
-					style = style.Foreground(m.theme.Blue)
+			// Pulsing success message
+			pulse := math.Sin(doneElapsed * math.Pi)
+			opacityStr := ""
+			if pulse > 0.3 {
+				opacityStr = "█"
+			} else {
+				opacityStr = "░"
+			}
+
+			// Success message
+			thanks := "✨ Thanks for choosing Automergent! ✨"
+			body.WriteString(m.styles.Success.Render(thanks) + "\n\n")
+
+			// Installation summary
+			summaryStyle := m.styles.Dim
+			body.WriteString(summaryStyle.Render("Installation Summary:\n"))
+			body.WriteString(summaryStyle.Render(fmt.Sprintf("  • Binary: %s\n", m.info.DestDir)))
+			body.WriteString(summaryStyle.Render(fmt.Sprintf("  • Command: owe  or  automergent\n")))
+			body.WriteString(summaryStyle.Render(fmt.Sprintf("  • Path: Updated in shell rc\n\n")))
+
+			// How to use
+			body.WriteString(m.styles.Bold.Render("Quick Start:\n"))
+			body.WriteString(m.styles.Dim.Render("  $ owe          # Launch Automergent\n"))
+			body.WriteString(m.styles.Dim.Render("  $ automergent      # Full command\n\n"))
+
+			// Countdown timer
+			remainingTime := 20 - int(doneElapsed)
+			if remainingTime < 0 {
+				remainingTime = 0
+			}
+
+			countdownMsg := fmt.Sprintf("Exiting in %d seconds...", remainingTime)
+			pulseStyle := lipgloss.NewStyle().Foreground(m.theme.Green)
+			body.WriteString(pulseStyle.Render(opacityStr+" "+countdownMsg+" "+opacityStr) + "\n")
+
+			// Cleaning up message
+			if doneElapsed > 19 {
+				body.WriteString("\n" + m.styles.Dim.Render("🧹 Cleaning up installer..."))
+			}
+		} else {
+			// Progress Bar with Shimmer (for non-done states)
+			if m.state == stateDownloading {
+				barWidth := m.width - 20
+				if barWidth > 40 {
+					barWidth = 40
 				}
-				barStr.WriteString(style.Render(char))
+				filled := int(float64(barWidth) * m.progress)
+				empty := barWidth - filled
+
+				// Render filled part with shimmer
+				shimmerPos := int(math.Mod(elapsed*20, float64(barWidth+10)))
+				var barStr strings.Builder
+				for i := 0; i < filled; i++ {
+					char := "█"
+					style := lipgloss.NewStyle().Foreground(m.theme.Green)
+					// Shimmer effect
+					if i >= shimmerPos-3 && i <= shimmerPos {
+						style = style.Foreground(m.theme.Blue)
+					}
+					barStr.WriteString(style.Render(char))
+				}
+
+				track := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render(strings.Repeat("░", empty))
+				body.WriteString(fmt.Sprintf("  [%s%s] %d%%\n\n", barStr.String(), track, int(m.progress*100)))
 			}
 
-			track := lipgloss.NewStyle().Foreground(m.theme.Overlay).Render(strings.Repeat("░", empty))
-			body.WriteString(fmt.Sprintf("  [%s%s] %d%%\n\n", barStr.String(), track, int(m.progress*100)))
-		}
-
-		// Details (Glitch/Typewriter effect simulation)
-		if m.info != nil {
-			infoText := fmt.Sprintf("System: %s/%s\nTarget: %s", m.info.OS, m.info.Arch, m.info.DestDir)
-			// Only show partial text based on time for typewriter effect
-			charsToShow := int((elapsed - 0.8) * 50)
-			if charsToShow < 0 {
-				charsToShow = 0
+			// Details (Glitch/Typewriter effect simulation)
+			if m.info != nil {
+				infoText := fmt.Sprintf("System: %s/%s\nTarget: %s", m.info.OS, m.info.Arch, m.info.DestDir)
+				// Only show partial text based on time for typewriter effect
+				charsToShow := int((elapsed - 0.8) * 50)
+				if charsToShow < 0 {
+					charsToShow = 0
+				}
+				if charsToShow > len(infoText) {
+					charsToShow = len(infoText)
+				}
+				body.WriteString(m.styles.Dim.Render(infoText[:charsToShow]) + "\n")
 			}
-			if charsToShow > len(infoText) {
-				charsToShow = len(infoText)
-			}
-			body.WriteString(m.styles.Dim.Render(infoText[:charsToShow]) + "\n")
 		}
 
 		if m.err != nil {

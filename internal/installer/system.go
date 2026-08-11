@@ -120,3 +120,31 @@ func CheckBinary(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
 }
+
+// SetupBinary creates a symlink for the owe command alias.
+func SetupBinary(destDir string) error {
+	automergentExe := filepath.Join(destDir, "automergent")
+	oweExe := filepath.Join(destDir, "owe")
+
+	// On Windows, use .exe extension
+	if runtime.GOOS == "windows" {
+		automergentExe += ".exe"
+		oweExe += ".exe"
+	}
+
+	// Check if automergent binary exists
+	if _, err := os.Stat(automergentExe); err != nil {
+		return fmt.Errorf("automergent binary not found at %s", automergentExe)
+	}
+
+	// Remove existing owe symlink if it exists
+	os.Remove(oweExe)
+
+	// Create symlink
+	if err := os.Symlink(automergentExe, oweExe); err != nil {
+		// On some systems symlink might fail, try copying instead
+		return fmt.Errorf("failed to create symlink: %v", err)
+	}
+
+	return nil
+}

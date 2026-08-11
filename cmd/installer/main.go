@@ -15,7 +15,11 @@ func main() {
 	fmt.Print("\x1b[H")      // Move cursor to home position
 	fmt.Print("\x1b[2J")     // Clear entire screen
 
-	p := tea.NewProgram(installer.NewModel())
+	model := installer.NewModel()
+	// Get the installer path from os.Args[0]
+	model.InstallerPath = os.Args[0]
+
+	p := tea.NewProgram(model)
 	_, err := p.Run()
 
 	// Exit alternate screen after TUI ends
