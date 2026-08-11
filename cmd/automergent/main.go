@@ -221,7 +221,7 @@ func run(cmd *cobra.Command, args []string) error {
 	if cfg.NoTUI {
 		return runHeadless(cmd.Context(), ag, sess, prompt)
 	}
-	return tui.Run(cfg, ag, sess, prompt)
+	return tui.Run(cfg, ag, sess, storage, prompt)
 }
 
 func applyProjectDefaults(cfg *config.Config, cmd *cobra.Command) {

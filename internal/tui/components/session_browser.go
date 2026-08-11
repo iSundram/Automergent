@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,9 +21,50 @@ type sessionItem struct {
 	sess *session.Session
 }
 
-func (s sessionItem) Title() string       { return s.sess.Title }
-func (s sessionItem) Description() string { return fmt.Sprintf("%d messages", len(s.sess.Messages)) }
+func (s sessionItem) Title() string { return s.sess.Title }
+func (s sessionItem) Description() string {
+	desc := fmt.Sprintf("%d messages", len(s.sess.Messages))
+	if s.sess.Provider != "" {
+		desc += fmt.Sprintf(" | %s", s.sess.Provider)
+		if s.sess.Model != "" {
+			desc += fmt.Sprintf("/%s", s.sess.Model)
+		}
+	}
+	if !s.sess.UpdatedAt.IsZero() {
+		desc += fmt.Sprintf(" | %s", formatRelativeTime(s.sess.UpdatedAt))
+	}
+	return desc
+}
 func (s sessionItem) FilterValue() string { return s.sess.Title }
+
+// formatRelativeTime returns a human-friendly relative time string.
+func formatRelativeTime(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		mins := int(d.Minutes())
+		if mins == 1 {
+			return "1 min ago"
+		}
+		return fmt.Sprintf("%d mins ago", mins)
+	case d < 24*time.Hour:
+		hrs := int(d.Hours())
+		if hrs == 1 {
+			return "1 hour ago"
+		}
+		return fmt.Sprintf("%d hours ago", hrs)
+	case d < 7*24*time.Hour:
+		days := int(d.Hours() / 24)
+		if days == 1 {
+			return "yesterday"
+		}
+		return fmt.Sprintf("%d days ago", days)
+	default:
+		return t.Format("Jan 2, 2006")
+	}
+}
 
 // SessionBrowser shows a list of sessions.
 type SessionBrowser struct {

@@ -115,6 +115,13 @@ func (a *Agent) SetProvider(p ai.Provider) {
 // Session returns the current session.
 func (a *Agent) Session() *session.Session { return a.sess }
 
+// SetSession replaces the current session (e.g., when loading a saved session).
+func (a *Agent) SetSession(sess *session.Session) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.sess = sess
+}
+
 // Run executes the agent loop for the given user prompt.
 func (a *Agent) Run(ctx context.Context, prompt string) error {
 	// In edit mode, check that we are inside a git repository when required.
