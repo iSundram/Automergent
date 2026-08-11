@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/iSundram/Automergent/internal/ai"
 )
@@ -111,6 +112,18 @@ type geminiRequest struct {
 	SystemInstruction *geminiContent    `json:"systemInstruction,omitempty"`
 	Tools             []geminiTool      `json:"tools,omitempty"`
 	ToolConfig        *geminiToolConfig `json:"toolConfig,omitempty"`
+	GenerationConfig  *geminiGenConfig  `json:"generationConfig,omitempty"`
+}
+
+type geminiGenConfig struct {
+	Temperature      *float64 `json:"temperature,omitempty"`
+	MaxOutputTokens  int      `json:"maxOutputTokens,omitempty"`
+	ResponseMimeType string   `json:"responseMimeType,omitempty"`
+	ThinkingConfig   *struct {
+		IncludeThoughts bool   `json:"includeThoughts,omitempty"`
+		ThinkingLevel   string `json:"thinkingLevel,omitempty"`  // "minimal", "low", "medium", "high"
+		ThinkingBudget  int    `json:"thinkingBudget,omitempty"` // Gemini 2.5 models
+	} `json:"thinkingConfig,omitempty"`
 }
 
 type geminiResponsePart struct {
@@ -267,6 +280,38 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 			}{Mode: "AUTO"},
 		}
 	}
+
+	// Configure generation settings including thinking
+	genConfig := &geminiGenConfig{}
+	if req.MaxTokens > 0 {
+		genConfig.MaxOutputTokens = req.MaxTokens
+	}
+	if req.Temperature > 0 {
+		temp := req.Temperature
+		genConfig.Temperature = &temp
+	}
+	// Enable thinking mode if configured
+	if req.Thinking != nil && req.Thinking.Type == "enabled" {
+		tc := &struct {
+			IncludeThoughts bool   `json:"includeThoughts,omitempty"`
+			ThinkingLevel   string `json:"thinkingLevel,omitempty"`
+			ThinkingBudget  int    `json:"thinkingBudget,omitempty"`
+		}{IncludeThoughts: true}
+
+		// Gemini 2.5 uses thinkingBudget; Gemini 3 uses thinkingLevel.
+		if strings.HasPrefix(c.model, "gemini-2.5") {
+			if req.Thinking.BudgetTokens != 0 {
+				tc.ThinkingBudget = req.Thinking.BudgetTokens
+			} else {
+				tc.ThinkingBudget = -1 // Dynamic thinking budget.
+			}
+		} else {
+			tc.ThinkingLevel = "high"
+		}
+
+		genConfig.ThinkingConfig = tc
+	}
+	gr.GenerationConfig = genConfig
 
 	body, err := json.Marshal(gr)
 	if err != nil {

@@ -49,6 +49,17 @@ type CompletionRequest struct {
 	Temperature float64
 	MaxTokens   int
 	Stream      bool
+	// Thinking enables extended thinking for supported models (Gemini).
+	// When enabled, the model uses additional tokens to reason before responding.
+	Thinking *ThinkingConfig
+}
+
+// ThinkingConfig controls extended thinking behavior.
+type ThinkingConfig struct {
+	// Type should be "enabled" to activate extended thinking
+	Type string
+	// BudgetTokens is the maximum tokens allocated for thinking (default: 10000)
+	BudgetTokens int
 }
 
 // CompletionResponse is returned by a provider.
@@ -108,7 +119,7 @@ type ToolSchema struct {
 // Chunk is a streaming token from the model.
 type Chunk struct {
 	Text      string
-	Thought   string
+	Thought   string // Extended thinking content (Gemini)
 	ToolCalls []ToolCall
 	Done      bool
 	Error     error

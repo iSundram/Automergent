@@ -278,37 +278,43 @@ func (c *Conversation) refresh() {
 			sb.WriteString("\n")
 
 		case "assistant":
-			labelStr := " ⟡ Automergent "
-			bubbleStyle := c.styles.AssistantBubble
-
-			if m.IsError {
-				labelStr = " ⟡ Automergent (Error) "
-				bubbleStyle = bubbleStyle.Copy().BorderForeground(c.styles.T.Red)
-			}
-
-			label := c.styles.AssistantLabel.Render(labelStr)
-
-			var rendered strings.Builder
+			// Render thinking separately (if present) without the Automergent label
 			if m.Thought != "" {
-				rendered.WriteString(c.renderThought(m.Thought, msgW) + "\n")
+				thinkingBox := c.renderThoughtBox(m.Thought, msgW)
+				sb.WriteString(thinkingBox + "\n")
 			}
 
-			// Skip expensive markdown rendering during streaming for performance
-			var content string
-			if c.streaming && isLast {
-				// During streaming, just show raw text
-				content = strings.TrimSpace(m.Content)
-			} else {
-				// Render markdown for completed messages
-				content = render.Markdown(strings.TrimSpace(m.Content))
-			}
-			if m.IsError {
-				content = c.styles.Error.Render(strings.TrimSpace(m.Content))
-			}
-			rendered.WriteString(content)
+			// Render the main response bubble if there's actual content
+			if m.Content != "" || m.IsError {
+				labelStr := " ⟡ Automergent "
+				bubbleStyle := c.styles.AssistantBubble
 
-			bubble := bubbleStyle.Width(msgW).Render(rendered.String())
-			sb.WriteString(label + "\n" + bubble + "\n")
+				if m.IsError {
+					labelStr = " ⟡ Automergent (Error) "
+					bubbleStyle = bubbleStyle.Copy().BorderForeground(c.styles.T.Red)
+				}
+
+				label := c.styles.AssistantLabel.Render(labelStr)
+
+				// Skip expensive markdown rendering during streaming for performance
+				var content string
+				if c.streaming && isLast {
+					// During streaming, just show raw text
+					content = strings.TrimSpace(m.Content)
+				} else {
+					// Render markdown for completed messages
+					content = render.Markdown(strings.TrimSpace(m.Content))
+				}
+				if m.IsError {
+					content = c.styles.Error.Render(strings.TrimSpace(m.Content))
+				}
+
+				bubble := bubbleStyle.Width(msgW).Render(content)
+				sb.WriteString(label + "\n" + bubble + "\n")
+			} else if m.Thought != "" {
+				// If we only have thinking (no response yet), add spacing
+				sb.WriteString("\n")
+			}
 
 		case "system":
 			sb.WriteString(c.styles.SystemMsg.Width(msgW).Render("  "+m.Content) + "\n\n")
@@ -320,16 +326,60 @@ func (c *Conversation) refresh() {
 	c.viewport.SetContent(sb.String())
 }
 
+func (c *Conversation) renderThoughtBox(thought string, width int) string {
+	if thought == "" {
+		return ""
+	}
+	trimmed := strings.TrimSpace(thought)
+	if trimmed == "" {
+		return ""
+	}
+
+	// Render thinking header OUTSIDE the box (like ⟡ Automergent label)
+	header := c.styles.Dim.Copy().Bold(true).Render("💭 Thinking")
+
+	// Apply markdown rendering like the main response does
+	renderedContent := render.Markdown(trimmed)
+
+	// Ensure we have content to show
+	if strings.TrimSpace(renderedContent) == "" {
+		renderedContent = trimmed // Fallback to raw text if markdown returns empty
+	}
+
+	// Wrap ONLY the content in the box (use Width like the response bubble does)
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(c.styles.T.BorderNormal).
+		Width(width).
+		Padding(0, 1).
+		Render(renderedContent)
+
+	// Return header above box (matching Automergent label pattern)
+	return header + "\n" + box
+}
+
 func (c *Conversation) renderThought(thought string, width int) string {
 	if thought == "" {
 		return ""
 	}
-	return lipgloss.NewStyle().
-		Foreground(c.styles.T.Muted).
+	maxWidth := width - 2
+	if maxWidth < 1 {
+		maxWidth = 1
+	}
+	trimmed := strings.TrimSpace(thought)
+	if trimmed == "" {
+		return ""
+	}
+
+	// Keep thought text visually aligned with assistant bubble theme.
+	body := c.styles.AssistantMsg.Copy().
+		Foreground(c.styles.T.Subtext).
 		Italic(true).
-		Faint(true).
-		Width(width - 2).
-		Render("  " + strings.TrimSpace(thought))
+		MaxWidth(maxWidth).
+		Render(trimmed)
+
+	header := c.styles.Dim.Copy().Bold(true).Render("Thinking")
+	return lipgloss.JoinVertical(lipgloss.Left, header, body)
 }
 
 func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {

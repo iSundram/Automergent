@@ -153,6 +153,10 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			Temperature: 0.0,
 			MaxTokens:   8192,
 			Stream:      true,
+			Thinking: &ai.ThinkingConfig{
+				Type:         "enabled",
+				BudgetTokens: 10000,
+			},
 		}
 
 		a.Emit(EventStatus, "thinking")
