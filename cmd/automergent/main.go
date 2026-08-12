@@ -188,9 +188,9 @@ func run(cmd *cobra.Command, args []string) error {
 	// Filesystem tools
 	reg.Register(&toolsFS.ViewFileTool{})
 	reg.Register(&toolsFS.ReadFileTool{})
-	reg.Register(&toolsFS.WriteFileTool{})
-	reg.Register(&toolsFS.EditFileTool{})
-	reg.Register(&toolsFS.CreateFileTool{})
+	reg.Register(toolsFS.NewWriteFileTool(cfg))
+	reg.Register(toolsFS.NewEditFileTool(cfg))
+	reg.Register(toolsFS.NewCreateFileTool(cfg))
 	reg.Register(&toolsFS.DeleteFileTool{})
 	reg.Register(&toolsFS.MoveFileTool{})
 	reg.Register(&toolsFS.CopyFileTool{})

@@ -8,11 +8,18 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/tools"
 )
 
 // CreateFileTool creates a new file (fails if file already exists).
-type CreateFileTool struct{}
+type CreateFileTool struct {
+	cfg *config.Config
+}
+
+func NewCreateFileTool(cfg *config.Config) *CreateFileTool {
+	return &CreateFileTool{cfg: cfg}
+}
 
 func (t *CreateFileTool) Name() string { return "create_file" }
 func (t *CreateFileTool) Description() string {
@@ -51,6 +58,13 @@ func (t *CreateFileTool) Execute(_ context.Context, args map[string]any) (tools.
 	content, ok := tools.StringArg(args, "content")
 	if !ok {
 		return tools.Result{IsError: true, Content: "content is required"}, nil
+	}
+
+	// Validate path against security policy
+	if t.cfg != nil {
+		if err := validateWritePath(path, t.cfg.Security.BlockedWritePaths, t.cfg.Security.AllowedWritePaths); err != nil {
+			return tools.Result{IsError: true, Content: err.Error()}, nil
+		}
 	}
 
 	// Check if file already exists

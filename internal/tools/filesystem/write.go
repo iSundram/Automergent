@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/tools"
 )
 
@@ -43,7 +44,13 @@ func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
 }
 
 // WriteFileTool writes content to a file.
-type WriteFileTool struct{}
+type WriteFileTool struct {
+	cfg *config.Config
+}
+
+func NewWriteFileTool(cfg *config.Config) *WriteFileTool {
+	return &WriteFileTool{cfg: cfg}
+}
 
 func (t *WriteFileTool) Name() string { return "write_file" }
 func (t *WriteFileTool) Description() string {
@@ -73,6 +80,14 @@ func (t *WriteFileTool) Execute(_ context.Context, args map[string]any) (tools.R
 	if !ok {
 		return tools.Result{IsError: true, Content: "content is required (string)"}, nil
 	}
+
+	// Validate path against security policy
+	if t.cfg != nil {
+		if err := validateWritePath(path, t.cfg.Security.BlockedWritePaths, t.cfg.Security.AllowedWritePaths); err != nil {
+			return tools.Result{IsError: true, Content: err.Error()}, nil
+		}
+	}
+
 	if err := atomicWriteFile(path, []byte(content), 0o644); err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("write: %v", err)}, nil
 	}
@@ -100,7 +115,13 @@ func (t *WriteFileTool) Execute(_ context.Context, args map[string]any) (tools.R
 }
 
 // EditFileTool applies a string replacement in a file.
-type EditFileTool struct{}
+type EditFileTool struct {
+	cfg *config.Config
+}
+
+func NewEditFileTool(cfg *config.Config) *EditFileTool {
+	return &EditFileTool{cfg: cfg}
+}
 
 func (t *EditFileTool) Name() string        { return "edit_file" }
 func (t *EditFileTool) Description() string { return "Replace a substring in a file." }
@@ -140,6 +161,13 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 	}
 	if !pathOk || path == "" || !oldOk || oldStr == "" || !newOk {
 		return tools.Result{IsError: true, Content: "path, old_str, and new_str are required"}, nil
+	}
+
+	// Validate path against security policy
+	if t.cfg != nil {
+		if err := validateWritePath(path, t.cfg.Security.BlockedWritePaths, t.cfg.Security.AllowedWritePaths); err != nil {
+			return tools.Result{IsError: true, Content: err.Error()}, nil
+		}
 	}
 
 	// Get original file permissions before reading

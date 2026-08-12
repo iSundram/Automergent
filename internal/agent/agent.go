@@ -200,6 +200,17 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		provider := a.Provider()
 
 		// Check context window usage and emit warnings.
+		// If usage is high (e.g., > 80%), perform lightweight compaction.
+		tokens, _ := provider.TokenCount(a.sess.Messages)
+		limit := a.cfg.MaxContextTokens
+		if limit <= 0 {
+			limit = provider.ContextLimit()
+		}
+		if limit > 0 && float64(tokens)/float64(limit) > 0.80 {
+			a.Emit(EventStatus, "Compacting message history to free up context window...")
+			a.sess.Messages = CompactSessionMessages(a.sess.Messages)
+		}
+
 		a.checkContextLimit(provider, a.sess.Messages)
 
 		systemPrompt := buildSystemPrompt(a.cfg, a.tools, a.sess.Messages)
@@ -226,7 +237,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			return fmt.Errorf("agent: complete: %w", err)
 		}
 
-		text, usage, err := a.drainStream(resp)
+		text, thought, usage, err := a.drainStream(resp)
 		if err != nil {
 			a.Emit(EventError, err)
 			a.tryPersist()
@@ -239,6 +250,9 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		msg := ai.Message{
 			Role:     ai.RoleAssistant,
 			Metadata: resp.GetMetadata(),
+		}
+		if thought != "" {
+			msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeThought, Thought: thought})
 		}
 		if text != "" {
 			msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeText, Text: text})
@@ -331,26 +345,28 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 }
 
 // drainStream reads all chunks from the response, emitting EventToken for each text chunk.
-func (a *Agent) drainStream(resp ai.CompletionResponse) (string, ai.Usage, error) {
+func (a *Agent) drainStream(resp ai.CompletionResponse) (string, string, ai.Usage, error) {
 	var text string
+	var thought string
 	ch := resp.Stream()
 	for chunk := range ch {
 		if chunk.Error != nil {
 			a.Emit(EventError, chunk.Error)
-			return text, resp.Usage(), fmt.Errorf("stream chunk: %w", chunk.Error)
+			return text, thought, resp.Usage(), fmt.Errorf("stream chunk: %w", chunk.Error)
 		}
 		if chunk.Done {
 			break
 		}
 		if chunk.Thought != "" {
 			a.Emit(EventThought, chunk.Thought)
+			thought += chunk.Thought
 		}
 		if chunk.Text != "" {
 			a.Emit(EventToken, chunk.Text)
 			text += chunk.Text
 		}
 	}
-	return text, resp.Usage(), nil
+	return text, thought, resp.Usage(), nil
 }
 
 func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, error) {

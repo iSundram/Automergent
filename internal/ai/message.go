@@ -22,9 +22,14 @@ func (m Message) TextContent() string {
 // serialized tool calls and tool results so multi-turn agent history is preserved.
 func (m Message) PlaintextForHistory() string {
 	var sb strings.Builder
-	sb.WriteString(m.TextContent())
 	for _, p := range m.Content {
 		switch p.Type {
+		case ContentTypeText:
+			sb.WriteString(p.Text)
+		case ContentTypeThought:
+			sb.WriteString("\n[thought]\n")
+			sb.WriteString(p.Thought)
+			sb.WriteString("\n[/thought]\n")
 		case ContentTypeToolCall:
 			if p.ToolCall != nil {
 				b, _ := json.Marshal(p.ToolCall)

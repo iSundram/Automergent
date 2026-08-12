@@ -17,6 +17,7 @@ type ContentType string
 
 const (
 	ContentTypeText       ContentType = "text"
+	ContentTypeThought    ContentType = "thought"
 	ContentTypeImage      ContentType = "image"
 	ContentTypeToolCall   ContentType = "tool_call"
 	ContentTypeToolResult ContentType = "tool_result"
@@ -90,6 +91,7 @@ func NewTextMessage(role Role, text string) Message {
 type ContentPart struct {
 	Type       ContentType
 	Text       string
+	Thought    string
 	ImageURL   string
 	ToolCall   *ToolCall
 	ToolResult *ToolResult
