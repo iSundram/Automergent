@@ -56,7 +56,7 @@ func (t *CommitTool) Execute(ctx context.Context, args map[string]any) (tools.Re
 	}
 
 	// Add co-author trailer
-	message = message + "\n\nCo-authored-by: Automergent <automergent@users.noreply.github.com>"
+	message = message + "\n\nCo-authored-by: Automergent <automergent-bot@users.noreply.github.com>"
 
 	cmdArgs := []string{"commit", "-m", message}
 

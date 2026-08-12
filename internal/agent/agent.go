@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -127,6 +128,15 @@ func (a *Agent) SetSession(sess *session.Session) {
 
 // Run executes the agent loop for the given user prompt.
 func (a *Agent) Run(ctx context.Context, prompt string) error {
+	// 1. Initial Triage Phase (Dynamic Workflow)
+	// If this is the very first message, we run a hidden triage loop
+	isFirstMessage := len(a.sess.Messages) == 0
+	if isFirstMessage {
+		a.Emit(EventStatus, "initiating project triage")
+		// Use externalized instruction from triage.go
+		prompt = TriageInstruction + "\n\nUser Request: " + prompt
+	}
+
 	// In edit mode, check that we are inside a git repository when required.
 	if a.cfg.Mode == "edit" && a.cfg.Security.RequireGitForAutoModes {
 		cwd, _ := os.Getwd()
@@ -143,7 +153,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		// Check context window usage and emit warnings.
 		a.checkContextLimit(provider, a.sess.Messages)
 
-		systemPrompt := buildSystemPrompt(a.cfg, a.tools)
+		systemPrompt := buildSystemPrompt(a.cfg, a.tools, a.sess.Messages)
 		toolSchemas := buildToolSchemas(a.tools)
 
 		req := ai.CompletionRequest{
@@ -193,6 +203,17 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		}
 		if len(msg.Content) > 0 {
 			a.sess.AddMessage(msg)
+		}
+
+		// Pruning Logic: If we just finished the first turn which had the Triage instruction,
+		// remove that instruction from the first message but keep the user's intent.
+		if isFirstMessage && len(a.sess.Messages) > 0 {
+			if first := &a.sess.Messages[0]; first.Role == ai.RoleUser {
+				if parts := strings.Split(first.TextContent(), "User Request: "); len(parts) > 1 {
+					first.Content[0].Text = parts[1] // Keep only the user request
+				}
+			}
+			isFirstMessage = false // Only prune once
 		}
 
 		if stop != ai.StopReasonTools || len(toolCalls) == 0 {

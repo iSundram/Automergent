@@ -53,6 +53,8 @@ type Styles struct {
 	ToolResult      lipgloss.Style
 	ToolBox         lipgloss.Style
 	ToolName        lipgloss.Style
+	ToolHeader      lipgloss.Style
+	ToolBody        lipgloss.Style
 	ToolStatus      lipgloss.Style
 	ToolDuration    lipgloss.Style
 	ToolIcon        lipgloss.Style
@@ -66,6 +68,10 @@ type Styles struct {
 	Warning         lipgloss.Style
 	Timestamp       lipgloss.Style
 	ConfirmBox      lipgloss.Style
+	ConfirmAllow    lipgloss.Style
+	ConfirmAlways   lipgloss.Style
+	ConfirmReject   lipgloss.Style
+	ConfirmFeedback lipgloss.Style
 	HelpBox         lipgloss.Style
 	FileTree        lipgloss.Style
 	FileTreeDir     lipgloss.Style
@@ -169,6 +175,13 @@ func NewStyles(t *Theme) *Styles {
 		Foreground(t.Text).
 		Bold(true)
 
+	s.ToolHeader = lipgloss.NewStyle().
+		Padding(0, 1)
+
+	s.ToolBody = lipgloss.NewStyle().
+		Padding(0, 1).
+		MarginTop(1)
+
 	s.ToolStatus = lipgloss.NewStyle().
 		Faint(true).
 		MarginLeft(1)
@@ -215,8 +228,19 @@ func NewStyles(t *Theme) *Styles {
 	s.ConfirmBox = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Accent).
-		Padding(1, 2).
-		Width(50)
+		Padding(1, 2)
+
+	buttonBase := lipgloss.NewStyle().
+		Foreground(t.Background).
+		Bold(true).
+		Padding(0, 1).
+		MarginRight(1)
+
+	s.ConfirmAllow = buttonBase.Copy().Background(t.Green)
+	s.ConfirmAlways = buttonBase.Copy().Background(t.Accent)
+	s.ConfirmReject = buttonBase.Copy().Background(t.Red)
+	s.ConfirmFeedback = buttonBase.Copy().Background(t.Yellow)
+
 	s.HelpBox = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Accent).

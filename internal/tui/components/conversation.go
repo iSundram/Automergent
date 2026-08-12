@@ -1,6 +1,8 @@
 package components
 
 import (
+	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -241,6 +243,16 @@ func (c Conversation) ReviewMode() bool {
 	return c.reviewMode
 }
 
+func (c *Conversation) UpdateToolContent(id, content string) {
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		if c.messages[i].ToolID == id {
+			c.messages[i].Content = content
+			c.refresh()
+			return
+		}
+	}
+}
+
 func (c *Conversation) refresh() {
 	var sb strings.Builder
 	w := c.width
@@ -383,125 +395,278 @@ func (c *Conversation) renderThought(thought string, width int) string {
 }
 
 func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
-	icon := " 󱓞 " // Executing icon
+	// 1. Status & Color Logic
 	statusColor := c.styles.T.Yellow
-	statusText := "running"
-
-	// Fallback icons if not using Nerd Fonts (simulated check via a config or just provide clean characters)
-	// For Automergent, we will use characters that look good in all terminals but still unique.
-
-	switch m.Status {
-	case "done":
-		icon = " 󰄬 "
-		statusText = "done"
+	statusText := "󱓞 RUNNING"
+	if m.Status == "done" {
 		statusColor = c.styles.T.Green
-	case "error":
-		icon = " 󱄊 "
-		statusText = "failed"
+		statusText = "󰄬 COMPLETED"
+	} else if m.Status == "error" {
 		statusColor = c.styles.T.Red
+		statusText = "󰅙 FAILED"
 	}
 
-	// Simple check: if we are in a basic terminal environment, use standard brackets
-	// In some environments, we might want to check an env var like AUTOMERGENT_NO_NERD_FONTS
-	// But here we'll ensure the icon string is at least printable.
+	// 2. Tool-Specific Branding & Pretty Naming
+	icon := "󰆍"
+	accentColor := c.styles.T.Accent
+	prettyName := m.ToolName
 
-	// Icon with background
-	iconStyled := lipgloss.NewStyle().
-		Foreground(c.styles.T.Background).
-		Background(statusColor).
-		Render(icon)
-
-	// Tool name and context
-	nameStyled := c.styles.ToolName.Render(" " + m.ToolName)
-	if m.ToolContext != "" {
-		// If we have context, make it the primary description for better readability
-		desc := m.ToolContext
-		if m.Status == "done" {
-			switch m.ToolName {
-			case "view", "read_file":
-				desc = "viewed " + desc
-			case "write_file", "create_file":
-				desc = "wrote " + desc
-			case "edit_file":
-				desc = "edited " + desc
-			case "delete_file":
-				desc = "deleted " + desc
-			case "move_file":
-				desc = "moved " + desc
-			case "copy_file":
-				desc = "copied " + desc
-			case "list_directory":
-				desc = "listed " + desc
-			}
-		}
-		nameStyled = c.styles.ToolName.Render(" " + desc)
+	switch m.ToolName {
+	case "read_file", "view":
+		prettyName = "Readfile"
+		icon = "󰈔"
+		accentColor = c.styles.T.Blue
+	case "write_file", "create_file":
+		prettyName = "Write"
+		icon = "󱇧"
+		accentColor = c.styles.T.Green
+	case "edit_file":
+		prettyName = "Edit"
+		icon = "󰛓"
+		accentColor = c.styles.T.Yellow
+	case "delete_file":
+		prettyName = "Delete"
+		icon = "󰆴"
+		accentColor = c.styles.T.Red
+	case "move_file":
+		prettyName = "Move"
+		icon = "󰪹"
+		accentColor = c.styles.T.Blue
+	case "copy_file":
+		prettyName = "Copy"
+		icon = "󰪹"
+		accentColor = c.styles.T.Blue
+	case "list_directory":
+		prettyName = "List directory"
+		icon = "󰉋"
+		accentColor = c.styles.T.Blue
+	case "structure":
+		prettyName = "Structure"
+		icon = "󰙅"
+		accentColor = c.styles.T.Blue
+	case "search":
+		prettyName = "Deep Search"
+		icon = "󰍉"
+		accentColor = c.styles.T.Magenta
+	case "glob":
+		prettyName = "Glob"
+		icon = "󰈞"
+		accentColor = c.styles.T.Blue
+	case "grep", "grep_search":
+		prettyName = "Search"
+		icon = "󰍉"
+		accentColor = c.styles.T.Magenta
+	case "run_shell_command", "run_command", "bash":
+		prettyName = "Run"
+		icon = "󰆍"
+		accentColor = c.styles.T.Yellow
+	case "read_shell":
+		prettyName = "Read shell"
+		icon = "󰇯"
+		accentColor = c.styles.T.Yellow
+	case "write_shell":
+		prettyName = "Write shell"
+		icon = "󰇰"
+		accentColor = c.styles.T.Yellow
+	case "stop_shell":
+		prettyName = "Stop shell"
+		icon = "󰅙"
+		accentColor = c.styles.T.Red
+	case "git_commit":
+		prettyName = "Git commit"
+		icon = "󰊢"
+		accentColor = c.styles.T.Red
+	case "git_add":
+		prettyName = "Git stage"
+		icon = "󰊢"
+		accentColor = c.styles.T.Green
+	case "git_checkout":
+		prettyName = "Git checkout"
+		icon = "󰊢"
+		accentColor = c.styles.T.Blue
+	case "git_branch":
+		prettyName = "Git branch"
+		icon = "󰊢"
+		accentColor = c.styles.T.Magenta
+	case "git_stash":
+		prettyName = "Git stash"
+		icon = "󰊢"
+		accentColor = c.styles.T.Yellow
+	case "git_status":
+		prettyName = "Git status"
+		icon = "󰊢"
+		accentColor = c.styles.T.Cyan
+	case "git_diff":
+		prettyName = "Git diff"
+		icon = "󰊢"
+		accentColor = c.styles.T.Yellow
+	case "git_log":
+		prettyName = "Git log"
+		icon = "󰊢"
+		accentColor = c.styles.T.Blue
+	case "lsp_diagnostics", "lsp_symbols":
+		prettyName = "LSP"
+		icon = "󰘦"
+		accentColor = c.styles.T.Cyan
+	case "web_fetch", "web_search":
+		prettyName = "Web"
+		icon = "󰖟"
+		accentColor = c.styles.T.Magenta
+	case "sql":
+		prettyName = "SQL"
+		icon = "󰆼"
+		accentColor = c.styles.T.Blue
+	case "run_tests":
+		prettyName = "Tests"
+		icon = "󰙨"
+		accentColor = c.styles.T.Green
+	case "test_coverage":
+		prettyName = "Coverage"
+		icon = "󰗡"
+		accentColor = c.styles.T.Blue
+	case "secrets_scan":
+		prettyName = "Secrets scan"
+		icon = "󰦝"
+		accentColor = c.styles.T.Red
+	case "dependency_audit":
+		prettyName = "Audit"
+		icon = "󰒺"
+		accentColor = c.styles.T.Yellow
+	case "task":
+		prettyName = "Task"
+		icon = "󰒋"
+		accentColor = c.styles.T.Accent
+	case "read_agent":
+		prettyName = "Read agent"
+		icon = "󰒋"
+		accentColor = c.styles.T.Accent
 	}
 
-	// Status and duration
-	statusTextDisp := statusText
-	if m.ToolSummary != "" {
-		statusTextDisp = m.ToolSummary
-	}
+	// 3. Styles
+	iconStyle := lipgloss.NewStyle().Foreground(c.styles.T.Background).Background(accentColor).Padding(0, 1).Bold(true)
+	statusStyle := lipgloss.NewStyle().Foreground(statusColor).Bold(true).Padding(0, 1)
+	dimLabel := c.styles.Dim.Copy().Bold(true).SetString(" ")
 
-	// Hide redundant "done" if we have a descriptive summary
-	if m.Status == "done" && m.ToolSummary != "" {
-		statusTextDisp = m.ToolSummary
-	} else if m.Status == "done" {
-		statusTextDisp = "completed"
-	}
+	// 4. Header Construction
+	nameStyled := c.styles.ToolName.Copy().Foreground(c.styles.T.Text).Render(" " + prettyName)
+	headerLeft := lipgloss.JoinHorizontal(lipgloss.Center, iconStyle.Render(icon), nameStyled, statusStyle.Render(statusText))
 
-	statusStyled := c.styles.ToolStatus.Foreground(statusColor).Render(statusTextDisp)
-	duration := ""
+	// Extract and Truncate Path for the right side
+	pathText := m.ToolContext
+	durationText := ""
 	if m.Duration > 0 {
-		duration = c.styles.ToolDuration.Render(m.Duration.Round(time.Millisecond).String())
+		durationText = " " + c.styles.ToolDuration.Render(m.Duration.Round(time.Millisecond).String())
 	}
 
-	// Build a cleaner header: [ICON] [ACTION/CONTEXT] [SUMMARY] [DURATION]
-	header := iconStyled + nameStyled + " " + statusStyled
-	if duration != "" {
-		header += " " + duration
-	}
+	availableWidth := width - 6
+	leftWidth := lipgloss.Width(headerLeft)
+	maxPathWidth := availableWidth - leftWidth - lipgloss.Width(durationText) - 2
 
-	var body strings.Builder
-	body.WriteString(header)
-
-	// Tool Arguments (only show if reviewMode is ON or it's running)
-	if c.reviewMode {
-		argText := m.ToolArgs
-		if argText != "" && argText != "{}" {
-			body.WriteString("\n\n" + lipgloss.NewStyle().Foreground(c.styles.T.Subtext).Bold(true).Render(" ARGS"))
-			body.WriteString("\n" + render.Code(argText, "json"))
+	if maxPathWidth > 5 && pathText != "" {
+		if utf8.RuneCountInString(pathText) > maxPathWidth {
+			runes := []rune(pathText)
+			pathText = "…" + string(runes[len(runes)-maxPathWidth+1:])
 		}
+		pathText = c.styles.Dim.Render(pathText)
+	} else {
+		pathText = ""
 	}
 
-	// Tool Result/Content
-	if m.Content != "" {
-		if c.reviewMode {
-			body.WriteString("\n\n" + lipgloss.NewStyle().Foreground(statusColor).Bold(true).Render(" RESULTS"))
-			body.WriteString("\n" + m.Content)
-		} else if m.Status == "running" && (m.ToolName == "write_file" || m.ToolName == "edit_file") {
-			// Show stylized diff box only while running/previewing
-			body.WriteString("\n\n")
-			lines := strings.Split(strings.TrimSpace(m.Content), "\n")
-			for _, line := range lines {
-				style := lipgloss.NewStyle()
-				if strings.HasPrefix(line, "+") {
-					style = style.Foreground(c.styles.T.Green)
-				} else if strings.HasPrefix(line, "-") {
-					style = style.Foreground(c.styles.T.Red)
-				} else {
-					style = style.Foreground(c.styles.T.Muted)
+	spacerWidth := availableWidth - leftWidth - lipgloss.Width(pathText) - lipgloss.Width(durationText)
+	if spacerWidth < 1 {
+		spacerWidth = 1
+	}
+	header := headerLeft + strings.Repeat(" ", spacerWidth) + pathText + durationText
+
+	// 5. Detailed Body Construction
+	var body strings.Builder
+	hasBody := false
+
+	isLightweight := m.ToolName == "read_file" || m.ToolName == "view" || m.ToolName == "list_directory"
+	showDetails := c.reviewMode || !isLightweight
+
+	// Section: Parameters
+	if showDetails && m.ToolArgs != "" && m.ToolArgs != "{}" {
+		hasBody = true
+		body.WriteString("\n" + dimLabel.Render("󰧑 PARAMETERS"))
+		var args map[string]any
+		if err := json.Unmarshal([]byte(m.ToolArgs), &args); err == nil {
+			for k, v := range args {
+				if k == "path" || k == "command" || k == "pattern" || k == "url" || k == "query" {
+					body.WriteString(fmt.Sprintf("\n  %s: %v", c.styles.Dim.Render(strings.ToUpper(k)), v))
 				}
-				body.WriteString(style.Render(line) + "\n")
 			}
 		}
+		if c.reviewMode {
+			body.WriteString("\n" + render.Code(m.ToolArgs, "json"))
+		}
 	}
 
-	// Apply side accent and padding
-	return c.styles.ToolAccent.
-		BorderForeground(statusColor).
+	// Section: Output / Summary
+	if showDetails && (m.Status == "done" || m.Status == "error") {
+		hasBody = true
+		body.WriteString("\n\n" + dimLabel.Render("󰗡 EXECUTION RESULT"))
+		if m.ToolSummary != "" {
+			body.WriteString("\n  " + c.styles.Dim.Italic(true).Render(m.ToolSummary))
+		}
+
+		if m.Content != "" {
+			resultText := m.Content
+			if !c.reviewMode {
+				lines := strings.Split(strings.TrimSpace(resultText), "\n")
+				if len(lines) > 3 {
+					resultText = strings.Join(lines[:3], "\n") + "\n  " + c.styles.Dim.Render("... (truncated, use Ctrl+R for full)")
+				}
+			}
+			body.WriteString("\n" + lipgloss.NewStyle().PaddingLeft(2).Faint(true).Render(resultText))
+		}
+	} else if m.Status == "running" && (m.ToolName == "write_file" || m.ToolName == "edit_file") && m.Content != "" {
+		hasBody = true
+		body.WriteString("\n\n" + dimLabel.Render("󰗡 PROPOSED CHANGES"))
+		lines := strings.Split(strings.TrimSpace(m.Content), "\n")
+
+		// Smart Fitting Logic:
+		// Calculate a limit based on screen height (e.g., 20% of viewport height, min 5, max 15)
+		limit := c.height / 5
+		if limit < 5 {
+			limit = 5
+		}
+		if limit > 15 {
+			limit = 15
+		}
+
+		for i, line := range lines {
+			if i >= limit {
+				body.WriteString(fmt.Sprintf("\n  %s", c.styles.Dim.Render(fmt.Sprintf("... (%d more lines, see Diff pane)", len(lines)-i))))
+				break
+			}
+			style := lipgloss.NewStyle().PaddingLeft(2)
+			if strings.HasPrefix(line, "+") {
+				style = style.Foreground(c.styles.T.Green)
+			} else if strings.HasPrefix(line, "-") {
+				style = style.Foreground(c.styles.T.Red)
+			} else {
+				style = style.Foreground(c.styles.T.Muted)
+			}
+			body.WriteString("\n" + style.Render(line))
+		}
+	}
+
+	// 6. Assembly
+	cardContent := header
+	if hasBody {
+		sep := lipgloss.NewStyle().Foreground(c.styles.T.BorderNormal).Faint(true).Render(strings.Repeat("─", availableWidth))
+		cardContent += "\n" + sep + body.String()
+	}
+
+	return lipgloss.NewStyle().
+		Background(c.styles.T.Surface).
+		Border(lipgloss.ThickBorder(), false, false, false, true).
+		BorderForeground(accentColor).
+		Padding(0, 1).
+		MarginBottom(1).
 		Width(width - 2).
-		Render(body.String())
+		Render(cardContent)
 }
 
 func (c Conversation) Update(msg tea.Msg) (Conversation, tea.Cmd) {

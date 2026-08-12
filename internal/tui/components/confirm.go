@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/tui/themes"
@@ -124,16 +125,17 @@ func (c Confirm) View() string {
 		return ""
 	}
 
-	var content string
+	var content strings.Builder
+
 	if c.mode == modeFeedback {
-		content = fmt.Sprintf(
-			" %s\n\n %s\n\n %s",
-			c.styles.Bold.Render("Reject with feedback:"),
-			c.feedback.View(),
-			c.styles.Dim.Render("[enter] Submit  [esc] Back"),
-		)
+		content.WriteString(c.styles.Bold.Foreground(c.styles.T.Yellow).Render("󰙺 REJECT WITH FEEDBACK") + "\n\n")
+		content.WriteString(c.feedback.View() + "\n\n")
+		content.WriteString(c.styles.Dim.Render("[enter] Submit  [esc] Cancel"))
 	} else {
-		// Highlight the tool name in the prompt (usually after 'Allow ')
+		// Header with warning icon
+		content.WriteString(c.styles.Bold.Foreground(c.styles.T.Accent).Render("󱈸 ACTION REQUIRED") + "\n\n")
+
+		// Highlight the tool name in the prompt
 		promptDisp := c.prompt
 		if strings.HasPrefix(promptDisp, "Allow ") {
 			parts := strings.SplitN(promptDisp, "Allow ", 2)
@@ -147,27 +149,26 @@ func (c Confirm) View() string {
 				toolName = rest
 				rest = ""
 			}
-			promptDisp = "Allow " + c.styles.Bold.Copy().Foreground(c.styles.T.Blue).Render(toolName) + rest
+			promptDisp = "Allow " + c.styles.Bold.Copy().Foreground(c.styles.T.AccentAlt).Render(toolName) + rest
 		}
+		content.WriteString(promptDisp + "\n\n")
 
-		content = fmt.Sprintf(
-			" %s\n %s\n\n %s  %s  %s  %s",
-			c.styles.Bold.Render("Tool Confirmation Required:"),
-			promptDisp,
-			c.renderKey("y", "Allow Once"),
-			c.renderKey("a", "Always for Session"),
-			c.renderKey("n", "Reject"),
-			c.renderKey("f", "Reject w/ Feedback"),
+		// Render "Buttons" row
+		buttons := lipgloss.JoinHorizontal(lipgloss.Top,
+			c.renderButton("y", "Allow", c.styles.ConfirmAllow),
+			c.renderButton("a", "Always", c.styles.ConfirmAlways),
+			c.renderButton("n", "Reject", c.styles.ConfirmReject),
+			c.renderButton("f", "Feedback", c.styles.ConfirmFeedback),
 		)
+		content.WriteString(buttons)
 	}
 
 	return c.styles.ConfirmBox.
 		Width(c.width / 2).
-		Render(content)
+		Render(content.String())
 }
 
-func (c Confirm) renderKey(key, desc string) string {
-	// Use a color from the theme for the key highlight
-	keyStyle := c.styles.Bold.Copy().Foreground(c.styles.T.Accent)
-	return fmt.Sprintf("%s %s ", keyStyle.Render("["+key+"]"), desc)
+func (c Confirm) renderButton(key, desc string, style lipgloss.Style) string {
+	keyText := lipgloss.NewStyle().Underline(true).Render(key)
+	return style.Render(fmt.Sprintf("%s %s", keyText, desc))
 }

@@ -61,6 +61,7 @@ type App struct {
 	statusMsg      string
 	showFileTree   bool
 	showHelp       bool
+	focusMode      bool // When true, show Diff on top and Confirm on bottom
 	ctx            context.Context
 	cancel         context.CancelFunc
 	initialPrompt  string
@@ -246,6 +247,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				a.statusBar.SetStatus("Session loaded")
 			}
+			a.layout()
 		}
 	case modelsFetchedMsg:
 		a.availableModels = m
@@ -662,9 +664,30 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventConfirm:
 		if payload, ok := ev.Payload.(map[string]any); ok {
 			if tc, ok := payload["tool_call"].(ai.ToolCall); ok {
-				prompt := fmt.Sprintf("Allow %s?", tc.Name)
+				// Use pretty name if possible
+				name := tc.Name
+				switch tc.Name {
+				case "read_file", "view":
+					name = "Readfile"
+				case "write_file", "create_file":
+					name = "Write"
+				case "edit_file":
+					name = "Edit"
+				case "delete_file":
+					name = "Delete"
+				case "move_file":
+					name = "Move"
+				case "copy_file":
+					name = "Copy"
+				case "list_directory":
+					name = "List directory"
+				case "run_shell_command", "run_command", "bash":
+					name = "Run"
+				}
+
+				prompt := fmt.Sprintf("Allow %s?", name)
 				if ctx := extractToolContext(tc.Name, tc.Args); ctx != "" {
-					prompt = fmt.Sprintf("Allow %s: %s?", tc.Name, ctx)
+					prompt = fmt.Sprintf("Allow %s: %s?", name, ctx)
 				}
 
 				// Special handling for file edits: show diff
@@ -690,6 +713,9 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 					oldData, _ := os.ReadFile(path)
 					diff := computeSimpleDiff(path, string(oldData), newContent)
 					a.diffPane.SetContent(diff)
+					a.conversation.UpdateToolContent(tc.ID, diff)
+					a.diffPane.HideActions = true
+					a.focusMode = true // Enter Focus Mode
 					if !a.diffPane.Visible() {
 						a.diffPane.Toggle()
 					}
@@ -709,6 +735,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 					a.confirm.SetReply(wrapped)
 					go func() {
 						res := <-wrapped
+						a.focusMode = false // Exit Focus Mode on reply
 						replyCh <- res
 					}()
 				}
@@ -905,6 +932,7 @@ func (a *App) layout() {
 	headerH := lipgloss.Height(a.header.View())
 	statusH := lipgloss.Height(a.statusBar.View())
 	footerH := 0
+
 	if a.confirm.Visible() {
 		footerH = lipgloss.Height(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
 	} else {
@@ -919,37 +947,43 @@ func (a *App) layout() {
 		mainH = 1
 	}
 
-	mainW := a.width
-	if a.showFileTree {
-		treeW := 25
-		if a.width > 80 {
-			treeW = a.width / 5
-		}
-		a.fileTree.SetSize(treeW, mainH)
-		mainW = a.width - treeW - 1
-	}
-	if a.diffPane.Visible() {
-		convW := mainW * 45 / 100
-		diffW := mainW - convW - 1
-		if a.lspPanel.Visible() {
-			diffW = diffW * 60 / 100
-			lspW := mainW - convW - diffW - 2
-			if lspW < 20 {
-				lspW = 20
-				diffW = mainW - convW - lspW - 2
-			}
-			a.lspPanel.SetSize(lspW, mainH)
-		}
-		a.conversation.SetSize(convW, mainH)
-		a.diffPane.SetSize(diffW, mainH)
+	if a.focusMode {
+		// Focus Mode: Full width Diff on top, Confirm on bottom (via View)
+		a.diffPane.SetSize(a.width, mainH)
+		a.conversation.SetSize(0, 0) // Hide conversation
 	} else {
-		if a.lspPanel.Visible() {
-			convW := mainW * 70 / 100
-			lspW := mainW - convW - 1
+		mainW := a.width
+		if a.showFileTree {
+			treeW := 25
+			if a.width > 80 {
+				treeW = a.width / 5
+			}
+			a.fileTree.SetSize(treeW, mainH)
+			mainW = a.width - treeW - 1
+		}
+		if a.diffPane.Visible() {
+			convW := mainW * 45 / 100
+			diffW := mainW - convW - 1
+			if a.lspPanel.Visible() {
+				diffW = diffW * 60 / 100
+				lspW := mainW - convW - diffW - 2
+				if lspW < 20 {
+					lspW = 20
+					diffW = mainW - convW - lspW - 2
+				}
+				a.lspPanel.SetSize(lspW, mainH)
+			}
 			a.conversation.SetSize(convW, mainH)
-			a.lspPanel.SetSize(lspW, mainH)
+			a.diffPane.SetSize(diffW, mainH)
 		} else {
-			a.conversation.SetSize(mainW, mainH)
+			if a.lspPanel.Visible() {
+				convW := mainW * 70 / 100
+				lspW := mainW - convW - 1
+				a.conversation.SetSize(convW, mainH)
+				a.lspPanel.SetSize(lspW, mainH)
+			} else {
+				a.conversation.SetSize(mainW, mainH)
+			}
 		}
 	}
 	a.sessionBrowser.SetSize(a.width*3/4, a.height*3/4)
@@ -980,6 +1014,9 @@ func (a *App) View() tea.View {
 
 	if a.sessionBrowser.Visible() {
 		sections = append(sections, a.sessionBrowser.View())
+	} else if a.focusMode {
+		// Focus Mode: Full width Diff on top
+		sections = append(sections, a.diffPane.View())
 	} else {
 		var mainRow string
 		convView := a.conversation.View()
@@ -1041,7 +1078,10 @@ func computeSimpleDiff(filename, old, new string) string {
 	oldLines := strings.Split(old, "\n")
 	newLines := strings.Split(new, "\n")
 
-	// Very simple line-based diff
+	// Simplified hunk generation: treat the whole change as one hunk for now
+	// but add the standard @@ marker so the Diff component can parse it properly.
+	sb.WriteString(fmt.Sprintf("@@ -1,%d +1,%d @@\n", len(oldLines), len(newLines)))
+
 	max := len(oldLines)
 	if len(newLines) > max {
 		max = len(newLines)
@@ -1050,8 +1090,6 @@ func computeSimpleDiff(filename, old, new string) string {
 	for i := 0; i < max; i++ {
 		if i < len(oldLines) && i < len(newLines) {
 			if oldLines[i] == newLines[i] {
-				// Context line (only show around changes?)
-				// For now just show all for simplicity
 				sb.WriteString(" " + oldLines[i] + "\n")
 			} else {
 				sb.WriteString("-" + oldLines[i] + "\n")
@@ -1192,31 +1230,62 @@ func extractToolContext(name string, args map[string]any) string {
 		return ""
 	}
 	switch name {
-	case "read_file", "write_file", "edit_file", "list_directory", "lsp_diagnostics":
+	case "read_file", "view":
 		if path, ok := args["path"].(string); ok {
-			return filepath.Base(path)
+			return "reading " + filepath.Base(path)
 		}
-		if path, ok := args["file"].(string); ok {
-			return filepath.Base(path)
+	case "write_file", "create_file":
+		if path, ok := args["path"].(string); ok {
+			return "writing " + filepath.Base(path)
 		}
-	case "run_command":
+	case "edit_file":
+		if path, ok := args["path"].(string); ok {
+			return "editing " + filepath.Base(path)
+		}
+	case "delete_file":
+		if path, ok := args["path"].(string); ok {
+			return "deleting " + filepath.Base(path)
+		}
+	case "move_file":
+		src, _ := args["source"].(string)
+		dst, _ := args["destination"].(string)
+		return "moving " + filepath.Base(src) + " -> " + filepath.Base(dst)
+	case "copy_file":
+		src, _ := args["source"].(string)
+		dst, _ := args["destination"].(string)
+		return "copying " + filepath.Base(src) + " -> " + filepath.Base(dst)
+	case "list_directory":
+		if path, ok := args["path"].(string); ok {
+			return "listing " + filepath.Base(path)
+		}
+	case "structure":
+		path, _ := args["path"].(string)
+		if path == "" {
+			path = "."
+		}
+		return "mapping " + path
+	case "run_shell_command", "run_command":
 		if cmd, ok := args["command"].(string); ok {
-			if len(cmd) > 30 {
-				return cmd[:27] + "..."
+			if len(cmd) > 40 {
+				return "exec: " + cmd[:37] + "..."
 			}
-			return cmd
+			return "exec: " + cmd
 		}
-	case "grep":
+	case "grep_search", "search":
 		if pattern, ok := args["pattern"].(string); ok {
-			return pattern
+			return "search: " + pattern
 		}
 	case "web_fetch":
 		if u, ok := args["url"].(string); ok {
-			return u
+			return "fetch: " + u
 		}
 	case "web_search":
 		if q, ok := args["query"].(string); ok {
-			return q
+			return "web: " + q
+		}
+	case "lsp_diagnostics":
+		if path, ok := args["path"].(string); ok {
+			return "diagnostics: " + filepath.Base(path)
 		}
 	}
 	return ""
