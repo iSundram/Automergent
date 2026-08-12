@@ -20,19 +20,19 @@ LDFLAGS_INSTALLER := -s -w \
 all: build build-installer
 
 build:
-	go build -ldflags "$(LDFLAGS_AUTOMERGENT)" -o bin/$(BINARY) ./cmd/automergent
+	CGO_ENABLED=1 go build -ldflags "$(LDFLAGS_AUTOMERGENT)" -o bin/$(BINARY) ./cmd/automergent
 
 build-installer:
 	go build -ldflags "$(LDFLAGS_INSTALLER)" -o bin/installer ./cmd/installer
 
 install:
-	go install -ldflags "$(LDFLAGS_AUTOMERGENT)" ./cmd/automergent
+	CGO_ENABLED=1 go install -ldflags "$(LDFLAGS_AUTOMERGENT)" ./cmd/automergent
 
 clean:
 	rm -rf bin/
 
 test:
-	go test ./...
+	CGO_ENABLED=1 go test ./...
 
 lint:
 	golangci-lint run ./...
@@ -46,7 +46,4 @@ tidy:
 
 .PHONY: release
 release:
-	GOOS=linux   GOARCH=amd64 go build -ldflags "$(LDFLAGS_AUTOMERGENT)" -o bin/$(BINARY)-linux-amd64   ./cmd/automergent
-	GOOS=darwin  GOARCH=amd64 go build -ldflags "$(LDFLAGS_AUTOMERGENT)" -o bin/$(BINARY)-darwin-amd64  ./cmd/automergent
-	GOOS=darwin  GOARCH=arm64 go build -ldflags "$(LDFLAGS_AUTOMERGENT)" -o bin/$(BINARY)-darwin-arm64  ./cmd/automergent
-	GOOS=windows GOARCH=amd64 go build -ldflags "$(LDFLAGS_AUTOMERGENT)" -o bin/$(BINARY)-windows-amd64.exe ./cmd/automergent
+	AUTOMERGENT_VERSION=$(VERSION) goreleaser release --snapshot --clean --skip=validate -f dist/goreleaser-automergent.yaml

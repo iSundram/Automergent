@@ -115,6 +115,14 @@ func Default() *Config {
 			Bell:           true,
 			ContextWarning: true,
 		},
+		Diagnostics: DiagnosticsConfig{
+			Enabled:          true,
+			ShowInRead:       true,
+			BlockOnError:     true,
+			BlockOnWarning:   false,
+			MaxFileSizeBytes: 1 << 20, // 1 MB
+			CacheDurationSec: 30,
+		},
 	}
 }
 

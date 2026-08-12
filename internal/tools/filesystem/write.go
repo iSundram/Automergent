@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/iSundram/Automergent/internal/config"
+	"github.com/iSundram/Automergent/internal/diagnostics"
 	"github.com/iSundram/Automergent/internal/tools"
 )
 
@@ -185,6 +186,7 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 	if !strings.Contains(original, oldStr) {
 		return tools.Result{IsError: true, Content: "old_str not found in file"}, nil
 	}
+
 	var result string
 	replaced := 1
 	if replaceAll {
@@ -193,6 +195,30 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 	} else {
 		result = strings.Replace(original, oldStr, newStr, 1)
 	}
+
+	// NEW: Pre-flight validation with diagnostics
+	beforeDiags := diagnostics.Analyze(path, original)
+	afterDiags := diagnostics.Analyze(path, result)
+	delta := diagnostics.Compare(beforeDiags, afterDiags)
+
+	if delta.IntroducedCount > 0 {
+		// Block the edit - it would introduce new errors
+		var msg strings.Builder
+		msg.WriteString("═══════════════════════════════════\n")
+		msg.WriteString("[VALIDATION FAILED ✗]\n\n")
+		msg.WriteString("Impact:\n")
+		msg.WriteString(fmt.Sprintf("  Fixed:      %d error(s)\n", delta.FixedCount))
+		msg.WriteString(fmt.Sprintf("  Introduced: %d NEW error(s)\n", delta.IntroducedCount))
+		for _, d := range delta.Introduced {
+			msg.WriteString(fmt.Sprintf("    Line %d: %s - %s\n", d.Line, d.Code, d.Message))
+		}
+		msg.WriteString("\nChange was NOT applied. File unchanged.\n")
+		msg.WriteString("Try again with a different edit.\n")
+		msg.WriteString("═══════════════════════════════════\n")
+		return tools.Result{IsError: true, Content: msg.String()}, nil
+	}
+
+	// Safe to write
 	if err := atomicWriteFile(path, []byte(result), originalPerm); err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("write: %v", err)}, nil
 	}
@@ -205,24 +231,14 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 
 	// Build a simple diff snippet
 	var diff strings.Builder
-	oldL := strings.Split(oldStr, "\n")
-	newL := strings.Split(newStr, "\n")
-
-	maxLines := 5
-	for i, line := range oldL {
-		if i >= maxLines {
-			diff.WriteString(fmt.Sprintf("... (%d more removed lines)\n", len(oldL)-maxLines))
-			break
-		}
-		diff.WriteString("- " + line + "\n")
-	}
-	for i, line := range newL {
-		if i >= maxLines {
-			diff.WriteString(fmt.Sprintf("... (%d more added lines)\n", len(newL)-maxLines))
-			break
-		}
-		diff.WriteString("+ " + line + "\n")
-	}
+	diff.WriteString("═══════════════════════════════════\n")
+	diff.WriteString("[VALIDATION PASSED ✓]\n\n")
+	diff.WriteString("Impact:\n")
+	diff.WriteString(fmt.Sprintf("  Fixed:      %d error(s)\n", delta.FixedCount))
+	diff.WriteString(fmt.Sprintf("  Introduced: %d error(s)\n", delta.IntroducedCount))
+	diff.WriteString(fmt.Sprintf("  Remaining:  %d error(s) in file\n", len(afterDiags)))
+	diff.WriteString("\nChange has been applied to disk.\n")
+	diff.WriteString("═══════════════════════════════════\n")
 
 	return tools.Result{
 		Content: diff.String(),

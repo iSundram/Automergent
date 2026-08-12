@@ -46,6 +46,9 @@ type Config struct {
 	Log       LogConfig                 `mapstructure:"log" yaml:"log"`
 	Providers map[string]ProviderConfig `mapstructure:"providers" yaml:"providers"`
 
+	// Diagnostics holds error detection configuration
+	Diagnostics DiagnosticsConfig `mapstructure:"diagnostics" yaml:"diagnostics"`
+
 	ContextFiles []string `mapstructure:"contextFiles" yaml:"contextFiles,omitempty"`
 	SkillsDir    string   `mapstructure:"skillsDir" yaml:"skillsDir,omitempty"`
 
@@ -220,4 +223,14 @@ type NotificationConfig struct {
 	Desktop        bool `mapstructure:"desktop" yaml:"desktop"`
 	Bell           bool `mapstructure:"bell" yaml:"bell"`
 	ContextWarning bool `mapstructure:"contextWarning" yaml:"contextWarning"`
+}
+
+// DiagnosticsConfig holds error detection configuration.
+type DiagnosticsConfig struct {
+	Enabled          bool  `mapstructure:"enabled" yaml:"enabled"`
+	ShowInRead       bool  `mapstructure:"showInRead" yaml:"showInRead"`
+	BlockOnError     bool  `mapstructure:"blockOnError" yaml:"blockOnError"`
+	BlockOnWarning   bool  `mapstructure:"blockOnWarning" yaml:"blockOnWarning"`
+	MaxFileSizeBytes int64 `mapstructure:"maxFileSizeBytes" yaml:"maxFileSizeBytes"`
+	CacheDurationSec int   `mapstructure:"cacheDurationSec" yaml:"cacheDurationSec"`
 }

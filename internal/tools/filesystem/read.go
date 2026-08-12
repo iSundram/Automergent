@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/iSundram/Automergent/internal/diagnostics"
 	"github.com/iSundram/Automergent/internal/tools"
 )
 
@@ -99,6 +100,19 @@ func (t *ReadFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 	}
 
 	content := string(data)
+
+	// NEW: Analyze diagnostics and prepend header if errors found
+	diags := diagnostics.Analyze(path, content)
+	if len(diags) > 0 {
+		var header strings.Builder
+		header.WriteString("═══════════════════════════════════\n")
+		header.WriteString(fmt.Sprintf("[DIAGNOSTICS: %d error(s) found]\n", len(diags)))
+		for _, d := range diags {
+			header.WriteString(fmt.Sprintf("ERROR Line %d: %s - %s\n", d.Line, d.Code, d.Message))
+		}
+		header.WriteString("═══════════════════════════════════\n")
+		content = header.String() + content
+	}
 
 	// Optional line range filtering (accepts JSON int or float)
 	var hasStart, hasEnd bool
