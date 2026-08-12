@@ -1,11 +1,14 @@
 package lsp
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"os/exec"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -102,18 +105,50 @@ func (c *Client) send(v any) error {
 }
 
 func (c *Client) readLoop() {
-	dec := json.NewDecoder(c.stdout)
+	reader := bufio.NewReader(c.stdout)
 	for {
+		// 1. Read headers
+		var contentLength int
+		for {
+			line, err := reader.ReadString('\n')
+			if err != nil {
+				return
+			}
+			line = strings.TrimSpace(line)
+			if line == "" {
+				break // End of headers
+			}
+			if strings.HasPrefix(line, "Content-Length:") {
+				parts := strings.Split(line, ":")
+				if len(parts) == 2 {
+					contentLength, _ = strconv.Atoi(strings.TrimSpace(parts[1]))
+				}
+			}
+		}
+
+		if contentLength <= 0 {
+			continue
+		}
+
+		// 2. Read body
+		body := make([]byte, contentLength)
+		if _, err := io.ReadFull(reader, body); err != nil {
+			return
+		}
+
+		// 3. Decode message (notifications or responses)
 		var msg struct {
 			ID     *int64          `json:"id"`
 			Result json.RawMessage `json:"result"`
 		}
-		if err := dec.Decode(&msg); err != nil {
-			return
+		if err := json.Unmarshal(body, &msg); err != nil {
+			continue
 		}
+
 		if msg.ID == nil {
 			continue
 		}
+
 		c.mu.Lock()
 		ch, ok := c.pending[*msg.ID]
 		if ok {

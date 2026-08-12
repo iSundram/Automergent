@@ -5,61 +5,83 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
-// PaletteItem is a single entry in the command palette.
+// PaletteItem represents an entry in the command palette.
 type PaletteItem struct {
-	Name        string
+	Label       string
+	Value       string
 	Description string
-	Value       string // The value to autocomplete
-	Icon        string // Optional icon
+	Icon        string
+	Category    string
 }
 
-// CommandPalette is a floating dropdown for commands and files.
+// CommandPalette renders the "/" and "?" overlay.
 type CommandPalette struct {
 	styles  *themes.Styles
-	items   []PaletteItem
-	cursor  int
-	visible bool
 	width   int
+	height  int
+	cursor  int
+	items   []PaletteItem
+	visible bool
+	query   string
 }
 
-// NewCommandPalette creates a new Palette component.
+// NewCommandPalette creates a new CommandPalette.
 func NewCommandPalette(styles *themes.Styles) CommandPalette {
 	return CommandPalette{styles: styles}
 }
 
-// SetItems updates the list of items.
+// SetSize updates the palette dimensions.
+func (p *CommandPalette) SetSize(w, h int) {
+	p.width = w
+	p.height = h
+}
+
+// Show makes the palette visible with a set of items.
+func (p *CommandPalette) Show(items []PaletteItem, query string) {
+	p.items = items
+	p.query = query
+	p.cursor = 0
+	p.visible = true
+}
+
+// SetItems updates the items in the palette.
 func (p *CommandPalette) SetItems(items []PaletteItem) {
 	p.items = items
-	if p.cursor >= len(items) {
-		p.cursor = 0
+	if p.cursor >= len(p.items) && len(p.items) > 0 {
+		p.cursor = len(p.items) - 1
 	}
 }
 
-// Show makes the palette visible.
-func (p *CommandPalette) Show() { p.visible = true }
+// SetWidth updates the palette width.
+func (p *CommandPalette) SetWidth(w int) {
+	p.width = w
+}
+
+// Items returns the current items in the palette.
+func (p CommandPalette) Items() []PaletteItem { return p.items }
 
 // Hide hides the palette.
-func (p *CommandPalette) Hide() { p.visible = false; p.cursor = 0 }
+func (p *CommandPalette) Hide() {
+	p.visible = false
+}
 
-// Visible reports whether the palette is shown.
+// Visible returns whether the palette is visible.
 func (p CommandPalette) Visible() bool { return p.visible }
 
 // Selected returns the currently highlighted item.
 func (p CommandPalette) Selected() *PaletteItem {
-	if len(p.items) == 0 || p.cursor < 0 || p.cursor >= len(p.items) {
+	if len(p.items) == 0 {
 		return nil
 	}
 	return &p.items[p.cursor]
 }
 
-// SetWidth updates the component width.
-func (p *CommandPalette) SetWidth(w int) { p.width = w }
-
-// Update handles keyboard navigation.
+// Update handles key events.
 func (p CommandPalette) Update(msg tea.Msg) (CommandPalette, tea.Cmd) {
 	if !p.visible || len(p.items) == 0 {
 		return p, nil
@@ -74,64 +96,128 @@ func (p CommandPalette) Update(msg tea.Msg) (CommandPalette, tea.Cmd) {
 			} else {
 				p.cursor = len(p.items) - 1
 			}
-		case "down", "tab", "ctrl+n":
+		case "down", "ctrl+n", "tab":
 			if p.cursor < len(p.items)-1 {
 				p.cursor++
 			} else {
 				p.cursor = 0
 			}
-		case "esc":
-			p.Hide()
 		}
 	}
+
 	return p, nil
 }
 
-// View renders the palette.
+// View renders the "Spotlight" command palette.
 func (p CommandPalette) View() string {
-	if !p.visible || len(p.items) == 0 {
+	if !p.visible || p.width <= 0 || p.height <= 0 {
 		return ""
 	}
 
-	const maxItems = 7
-	itemsToRender := p.items
-	truncated := false
-	if len(itemsToRender) > maxItems {
-		itemsToRender = itemsToRender[:maxItems]
-		truncated = true
+	// 1. Calculate palette dimensions
+	palWidth := int(float64(p.width) * 0.7)
+	if palWidth < 50 {
+		palWidth = p.width - 4
+	}
+	if palWidth > 100 {
+		palWidth = 100
 	}
 
-	var lines []string
-	contentW := p.width - 4
-	if contentW < 20 {
-		contentW = 20
+	// 2. Search Header
+	searchIcon := lipgloss.NewStyle().Foreground(p.styles.T.Accent).Render("󰍉 ")
+	queryText := p.query
+	if queryText == "" {
+		queryText = lipgloss.NewStyle().Foreground(p.styles.T.Muted).Render("Search commands...")
+	} else {
+		queryText = lipgloss.NewStyle().Foreground(p.styles.T.Text).Bold(true).Render(queryText)
 	}
 
-	for i, item := range itemsToRender {
-		// Clean alignment: Icon + Name (20 chars) + Description
-		icon := item.Icon
-		if icon == "" {
-			icon = "  "
-		}
-		name := item.Name
-		if len(name) > 18 {
-			name = name[:15] + "..."
-		}
+	header := lipgloss.NewStyle().
+		Padding(0, 1).
+		Border(lipgloss.NormalBorder(), false, false, true, false).
+		BorderForeground(p.styles.T.BorderNormal).
+		Width(palWidth - 2).
+		Render(searchIcon + queryText)
 
-		line := fmt.Sprintf("%s %-20s %s", icon, name, item.Description)
-		styledLine := p.styles.PaletteItem.Width(contentW).Render(line)
-		if i == p.cursor {
-			styledLine = p.styles.PaletteSelect.Width(contentW).Render(line)
-		}
-		lines = append(lines, styledLine)
+	// 3. Items List
+	var rows []string
+	maxItems := 10
+	if len(p.items) < maxItems {
+		maxItems = len(p.items)
 	}
 
-	if truncated {
-		more := fmt.Sprintf(" ... (+%d more)", len(p.items)-maxItems)
-		lines = append(lines, p.styles.PaletteDim.Width(contentW).Render(more))
+	for i := 0; i < maxItems; i++ {
+		rows = append(rows, p.renderItem(p.items[i], i == p.cursor, palWidth-2))
 	}
 
-	// Join with actual newlines and wrap in border ONCE
-	content := strings.Join(lines, "\n")
-	return p.styles.Palette.Width(p.width).Render(content)
+	list := lipgloss.JoinVertical(lipgloss.Left, rows...)
+
+	// 4. Footer (Modern Badge Style)
+	footerLabel := lipgloss.NewStyle().
+		Foreground(p.styles.T.Background).
+		Background(p.styles.T.Accent).
+		Bold(true).
+		Padding(0, 1).
+		Render(fmt.Sprintf("%d of %d", p.cursor+1, len(p.items)))
+
+	footer := lipgloss.NewStyle().
+		Align(lipgloss.Right).
+		Width(palWidth-2).
+		Padding(0, 1).
+		Render(footerLabel)
+
+	// 5. Final Assembly
+	content := lipgloss.JoinVertical(lipgloss.Left, header, list, footer)
+
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(p.styles.T.Accent).
+		Background(p.styles.T.Background).
+		Padding(0).
+		Render(content)
+
+	// Center the palette on the screen buffer
+	return lipgloss.Place(p.width, p.height, lipgloss.Center, lipgloss.Center, box)
+}
+
+func (p CommandPalette) renderItem(item PaletteItem, selected bool, width int) string {
+	icon := item.Icon
+	if icon == "" {
+		icon = "󰘳"
+	}
+
+	label := item.Label
+	desc := item.Description
+
+	// Styles
+	itemStyle := lipgloss.NewStyle().Padding(0, 1).Width(width)
+	labelStyle := lipgloss.NewStyle().Foreground(p.styles.T.Text)
+	descStyle := lipgloss.NewStyle().Foreground(p.styles.T.Muted).Italic(true)
+	iconStyle := lipgloss.NewStyle().Foreground(p.styles.T.Accent)
+
+	if selected {
+		itemStyle = itemStyle.Background(p.styles.T.Accent)
+		labelStyle = labelStyle.Foreground(p.styles.T.Background).Bold(true)
+		descStyle = descStyle.Foreground(p.styles.T.Background).Faint(true)
+		iconStyle = iconStyle.Foreground(p.styles.T.Background)
+	}
+
+	// Calculate Gap
+	iconPart := iconStyle.Render(icon + " ")
+	labelPart := labelStyle.Render(label)
+	descPart := descStyle.Render(desc)
+
+	gapWidth := width - lipgloss.Width(iconPart) - lipgloss.Width(labelPart) - lipgloss.Width(descPart) - 2
+	if gapWidth < 1 {
+		gapWidth = 1
+	}
+
+	content := lipgloss.JoinHorizontal(lipgloss.Center,
+		iconPart,
+		labelPart,
+		strings.Repeat(" ", gapWidth),
+		descPart,
+	)
+
+	return itemStyle.Render(content)
 }

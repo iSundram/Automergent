@@ -255,6 +255,8 @@ func run(cmd *cobra.Command, args []string) error {
 	ag := agent.New(cfg, provider, sess, reg)
 	ag.SetSessionPersist(func() { _ = storage.Save(sess) })
 
+	// Set the main agent as the executor for sub-agent tools.
+	toolsAgent.GetAgentManager().SetExecutor(ag)
 	// Re-register ask_user with agent-aware responder for TUI
 	reg.Register(toolsInteraction.NewAskUserTool(func(question string) (string, error) {
 		if cfg.NoTUI {

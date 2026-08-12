@@ -13,6 +13,7 @@ import (
 	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
+	subagent "github.com/iSundram/Automergent/internal/tools/agent"
 )
 
 // Agent is the core AI coding agent.
@@ -25,6 +26,54 @@ type Agent struct {
 	sessionPersist      func()
 	mu                  sync.RWMutex
 	sessionAllowedTools map[string]bool
+}
+
+// Execute implements the AgentExecutor interface for sub-agents.
+func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, prompt string, model string) (string, error) {
+	// 1. Create a child configuration and provider if a specific model is requested.
+	childCfg := *a.cfg
+	if model != "" {
+		childCfg.Model = model
+	}
+
+	// 2. Create a clean child session.
+	childSess := session.New()
+	childSess.Metadata["parent_id"] = a.sess.ID
+	childSess.Metadata["agent_type"] = string(agentType)
+
+	// 3. Create a child agent.
+	childAgent := New(&childCfg, a.provider, childSess, a.tools)
+
+	// 4. Run the child agent.
+	done := make(chan bool)
+	var finalResponse string
+	var finalErr error
+
+	go func() {
+		// Drain events to avoid blocking child agent
+		go func() {
+			for range childAgent.Events() {
+			}
+		}()
+
+		finalErr = childAgent.Run(ctx, prompt)
+
+		// Extract the last assistant message as the result
+		if len(childSess.Messages) > 0 {
+			lastMsg := childSess.Messages[len(childSess.Messages)-1]
+			if lastMsg.Role == ai.RoleAssistant {
+				finalResponse = lastMsg.TextContent()
+			}
+		}
+		done <- true
+	}()
+
+	select {
+	case <-done:
+		return finalResponse, finalErr
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
 }
 
 type ConfirmationResponse struct {

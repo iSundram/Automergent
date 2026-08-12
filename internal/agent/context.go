@@ -192,20 +192,12 @@ func renderProjectContext(cfg *config.Config) string {
 	return sb.String()
 }
 
-// detectPromptOptions analyzes the current state to configure the builder.
-func detectPromptOptions(cfg *config.Config, messages []ai.Message) PromptOptions {
-	opts := PromptOptions{
-		Config:       cfg,
-		MessageCount: len(messages),
-		Phase:        PhaseResearch, // Default to research
-		Intent:       "exploration", // Default intent
-	}
-
+// DetectPhase analyzes the current state to determine the agent phase.
+func DetectPhase(messages []ai.Message) AgentPhase {
 	if len(messages) == 0 {
-		return opts
+		return PhaseResearch
 	}
 
-	// Simple heuristic: if we've already done searches/reads, move to plan/execute
 	hasResearched := false
 	for _, m := range messages {
 		if m.Role == ai.RoleTool {
@@ -218,6 +210,34 @@ func detectPromptOptions(cfg *config.Config, messages []ai.Message) PromptOption
 				}
 			}
 		}
+	}
+
+	if hasResearched {
+		// Check if a plan file was created
+		cwd, _ := os.Getwd()
+		if _, err := os.Stat(filepath.Join(cwd, "AUTOMERGENT_PLAN.md")); err == nil {
+			return PhaseExecute
+		}
+		return PhasePlan
+	}
+
+	return PhaseResearch
+}
+
+// detectPromptOptions analyzes the current state to configure the builder.
+func detectPromptOptions(cfg *config.Config, messages []ai.Message) PromptOptions {
+	opts := PromptOptions{
+		Config:       cfg,
+		MessageCount: len(messages),
+		Phase:        DetectPhase(messages),
+		Intent:       "exploration", // Default intent
+	}
+
+	if len(messages) == 0 {
+		return opts
+	}
+
+	for _, m := range messages {
 		// If the user mentions "bug" or "fix", set intent
 		text := strings.ToLower(m.TextContent())
 		if strings.Contains(text, "bug") || strings.Contains(text, "fix") || strings.Contains(text, "error") {
@@ -225,16 +245,6 @@ func detectPromptOptions(cfg *config.Config, messages []ai.Message) PromptOption
 		} else if strings.Contains(text, "add") || strings.Contains(text, "feature") || strings.Contains(text, "implement") {
 			opts.Intent = "feature"
 		}
-	}
-
-	// Determine phase
-	if hasResearched {
-		opts.Phase = PhasePlan
-	}
-	// Check if a plan file was created
-	cwd, _ := os.Getwd()
-	if _, err := os.Stat(filepath.Join(cwd, "AUTOMERGENT_PLAN.md")); err == nil {
-		opts.Phase = PhaseExecute
 	}
 
 	return opts

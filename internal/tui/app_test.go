@@ -185,11 +185,11 @@ func TestCtrlRTogglesReviewMode(t *testing.T) {
 	if app.conversation.ReviewMode() {
 		t.Fatalf("expected review mode off initially")
 	}
-	app.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	app.handleKey(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	if !app.conversation.ReviewMode() {
 		t.Fatalf("expected review mode on after ctrl+r")
 	}
-	app.handleKey(tea.KeyMsg{Type: tea.KeyCtrlR})
+	app.handleKey(tea.KeyPressMsg{Code: 'r', Mod: tea.ModCtrl})
 	if app.conversation.ReviewMode() {
 		t.Fatalf("expected review mode off after second ctrl+r")
 	}
@@ -302,7 +302,7 @@ func TestEscInterruptsActiveRun(t *testing.T) {
 	app := newTestApp(t)
 	app.thinking = true
 	app.spin.Start()
-	app.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
+	app.handleKey(tea.KeyPressMsg{Code: tea.KeyEsc})
 	if app.thinking {
 		t.Fatalf("expected esc to interrupt active run")
 	}
@@ -312,7 +312,7 @@ func TestCtrlCSingleInterruptsAndDoubleExits(t *testing.T) {
 	app := newTestApp(t)
 	app.thinking = true
 	app.spin.Start()
-	cmd := app.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	cmd := app.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd != nil {
 		t.Fatalf("expected first ctrl+c to interrupt but not quit")
 	}
@@ -320,7 +320,7 @@ func TestCtrlCSingleInterruptsAndDoubleExits(t *testing.T) {
 		t.Fatalf("expected interrupted run after first ctrl+c")
 	}
 	app.lastCtrlCAt = time.Now()
-	cmd = app.handleKey(tea.KeyMsg{Type: tea.KeyCtrlC})
+	cmd = app.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatalf("expected second ctrl+c to quit")
 	}

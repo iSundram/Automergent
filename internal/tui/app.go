@@ -116,6 +116,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	app.header.SetModel(cfg.Model)
 	app.header.SetProvider(cfg.Provider)
 	app.header.SetMode(cfg.Mode)
+	app.header.SetPhase(string(agent.DetectPhase(sess.Messages)))
 	return app
 }
 
@@ -453,8 +454,8 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		a.input = inp
 		trigger := a.input.TriggerType()
 		if trigger != "" {
-			a.palette.Show()
 			a.updatePalette()
+			a.palette.Show(a.palette.Items(), a.input.TriggerValue())
 			a.layout()
 			if trigger == "model" && len(a.availableModels) == 0 {
 				return a.fetchModels()
@@ -488,21 +489,21 @@ func (a *App) updatePalette() {
 	switch trigger {
 	case "help", "command":
 		allCmds := []components.PaletteItem{
-			{Name: "model", Description: "Switch AI model", Value: "model", Icon: "🤖"},
-			{Name: "provider", Description: "Switch provider", Value: "provider", Icon: "🔌"},
-			{Name: "mode", Description: "Change approval mode", Value: "mode", Icon: "⚙️"},
-			{Name: "api-key", Description: "Set API key for active provider", Value: "api-key", Icon: "🔑"},
-			{Name: "base-url", Description: "Set base URL for active provider", Value: "base-url", Icon: "🌐"},
-			{Name: "provider-api-key", Description: "Set API key for a provider", Value: "provider-api-key", Icon: "🔐"},
-			{Name: "provider-base-url", Description: "Set base URL for a provider", Value: "provider-base-url", Icon: "🔗"},
-			{Name: "clear", Description: "Clear screen", Value: "clear", Icon: "🧹"},
-			{Name: "reset", Description: "Reset history", Value: "reset", Icon: "🔄"},
-			{Name: "sessions", Description: "Browse sessions", Value: "sessions", Icon: "📁"},
-			{Name: "diff", Description: "Toggle diff pane", Value: "diff", Icon: "🔍"},
-			{Name: "tree", Description: "Toggle file tree", Value: "tree", Icon: "🌳"},
-			{Name: "lsp", Description: "Toggle LSP pane", Value: "lsp", Icon: "📐"},
-			{Name: "stats", Description: "Show statistics", Value: "stats", Icon: "📈"},
-			{Name: "quit", Description: "Exit Automergent", Value: "quit", Icon: "🚪"},
+			{Label: "model", Description: "Switch AI model", Value: "model", Icon: "🤖"},
+			{Label: "provider", Description: "Switch provider", Value: "provider", Icon: "🔌"},
+			{Label: "mode", Description: "Change approval mode", Value: "mode", Icon: "⚙️"},
+			{Label: "api-key", Description: "Set API key for active provider", Value: "api-key", Icon: "🔑"},
+			{Label: "base-url", Description: "Set base URL for active provider", Value: "base-url", Icon: "🌐"},
+			{Label: "provider-api-key", Description: "Set API key for a provider", Value: "provider-api-key", Icon: "🔐"},
+			{Label: "provider-base-url", Description: "Set base URL for a provider", Value: "provider-base-url", Icon: "🔗"},
+			{Label: "clear", Description: "Clear screen", Value: "clear", Icon: "🧹"},
+			{Label: "reset", Description: "Reset history", Value: "reset", Icon: "🔄"},
+			{Label: "sessions", Description: "Browse sessions", Value: "sessions", Icon: "📁"},
+			{Label: "diff", Description: "Toggle diff pane", Value: "diff", Icon: "🔍"},
+			{Label: "tree", Description: "Toggle file tree", Value: "tree", Icon: "🌳"},
+			{Label: "lsp", Description: "Toggle LSP pane", Value: "lsp", Icon: "📐"},
+			{Label: "stats", Description: "Show statistics", Value: "stats", Icon: "📈"},
+			{Label: "quit", Description: "Exit Automergent", Value: "quit", Icon: "🚪"},
 		}
 		items = a.fuzzyFilter(allCmds, filter)
 
@@ -510,14 +511,14 @@ func (a *App) updatePalette() {
 		var modelItems []components.PaletteItem
 		for _, m := range a.availableModels {
 			modelItems = append(modelItems, components.PaletteItem{
-				Name:        m.ID,
+				Label:       m.ID,
 				Description: fmt.Sprintf("Model (Limit: %d)", m.ContextLimit),
 				Value:       m.ID,
 				Icon:        "🤖",
 			})
 		}
 		if len(modelItems) == 0 && a.fetchingModels {
-			items = []components.PaletteItem{{Name: "Loading...", Description: "Fetching models from provider", Value: "", Icon: "⏳"}}
+			items = []components.PaletteItem{{Label: "Loading...", Description: "Fetching models from provider", Value: "", Icon: "⏳"}}
 		} else {
 			items = a.fuzzyFilter(modelItems, filter)
 		}
@@ -525,7 +526,7 @@ func (a *App) updatePalette() {
 		var providerItems []components.PaletteItem
 		for _, p := range a.availableProviders {
 			providerItems = append(providerItems, components.PaletteItem{
-				Name: p, Description: "AI provider", Value: p, Icon: "🔌",
+				Label: p, Description: "AI provider", Value: p, Icon: "🔌",
 			})
 		}
 		items = a.fuzzyFilter(providerItems, filter)
@@ -535,7 +536,7 @@ func (a *App) updatePalette() {
 		for _, item := range a.fileTree.Items() {
 			if !item.IsDir {
 				fileItems = append(fileItems, components.PaletteItem{
-					Name:        item.Name,
+					Label:       item.Name,
 					Description: item.Path,
 					Value:       item.Path,
 					Icon:        "📄",
@@ -554,7 +555,7 @@ func (a *App) fuzzyFilter(items []components.PaletteItem, filter string) []compo
 	}
 	var targets []string
 	for _, item := range items {
-		targets = append(targets, item.Name)
+		targets = append(targets, item.Label)
 	}
 	matches := fuzzy.Find(filter, targets)
 	var filtered []components.PaletteItem
@@ -637,6 +638,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
 		a.header.SetTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
+		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
 		if text, ok := ev.Payload.(string); ok && strings.TrimSpace(text) != "" && !a.streamedReply {
 			a.conversation.AddMessage("assistant", text, false)
 		}
@@ -926,7 +928,7 @@ func (a *App) layout() {
 	a.header.SetWidth(a.width)
 	a.statusBar.SetWidth(a.width)
 	a.input.SetWidth(a.width)
-	a.palette.SetWidth(a.width / 2)
+	a.palette.SetSize(a.width, a.height)
 	a.confirm.SetSize(a.width, a.height)
 
 	headerH := lipgloss.Height(a.header.View())
@@ -1036,12 +1038,9 @@ func (a *App) View() tea.View {
 		if a.lspPanel.Visible() {
 			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", a.lspPanel.View())
 		}
-		if a.palette.Visible() {
-			paletteView := lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.palette.View())
-			mainRow = overlayBottom(mainRow, paletteView)
-		}
 		sections = append(sections, mainRow)
 	}
+
 	if a.confirm.Visible() {
 		sections = append(sections, lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
 	} else {
@@ -1053,21 +1052,27 @@ func (a *App) View() tea.View {
 		sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, footer...))
 	}
 	sections = append(sections, statusView)
-	return makeView(lipgloss.JoinVertical(lipgloss.Left, sections...))
+
+	fullView := lipgloss.JoinVertical(lipgloss.Left, sections...)
+
+	// If palette is visible, overlay it on top of EVERYTHING
+	if a.palette.Visible() {
+		fullView = overlay(fullView, a.palette.View())
+	}
+
+	return makeView(fullView)
 }
 
-func overlayBottom(base, overlay string) string {
-	if strings.TrimSpace(overlay) == "" {
+func overlay(base, over string) string {
+	if strings.TrimSpace(over) == "" {
 		return base
 	}
-	baseLines := strings.Split(base, "\n")
-	overlayLines := strings.Split(overlay, "\n")
-	if len(baseLines) < len(overlayLines) {
-		return overlay
-	}
-	start := len(baseLines) - len(overlayLines)
-	copy(baseLines[start:], overlayLines)
-	return strings.Join(baseLines, "\n")
+
+	// We've already centered the palette in its own View() using lipgloss.Place(width, height, center, center, box)
+	// So paletteView is exactly a.width x a.height.
+	// We can just use lipgloss.Place to overlay the palette content over the screen.
+	// A simpler way for a TUI with AltScreen is just to return the palette view if it's already full-screen centered.
+	return over
 }
 
 func computeSimpleDiff(filename, old, new string) string {

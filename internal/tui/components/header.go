@@ -2,99 +2,184 @@ package components
 
 import (
 	"fmt"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
-// Header renders the top bar.
+// Header renders the top bar with a modern HUD look.
 type Header struct {
-	styles   *themes.Styles
-	width    int
-	model    string
-	provider string
-	mode     string
-	tokens   int
-	cost     float64
+	styles    *themes.Styles
+	width     int
+	model     string
+	provider  string
+	mode      string
+	phase     string // "research", "plan", "execute"
+	tokens    int
+	maxTokens int
 }
 
 // NewHeader creates a new Header component.
 func NewHeader(styles *themes.Styles) Header {
-	return Header{styles: styles}
-}
-
-// SetWidth updates the header width.
-func (h *Header) SetWidth(w int) { h.width = w }
-
-// SetModel updates the model name displayed.
-func (h *Header) SetModel(m string) { h.model = m }
-
-// SetProvider updates the provider name displayed.
-func (h *Header) SetProvider(p string) { h.provider = p }
-
-// SetMode updates the mode displayed.
-func (h *Header) SetMode(m string) { h.mode = m }
-
-// SetTokens updates the token count displayed.
-func (h *Header) SetTokens(n int) { h.tokens = n }
-
-// SetCost updates the cost displayed.
-func (h *Header) SetCost(c float64) { h.cost = c }
-
-// modeColor returns a color indicator for the mode.
-func (h *Header) modeIcon() string {
-	switch h.mode {
-	case "edit":
-		return "✏️ "
-	case "plan":
-		return "📋"
-	default:
-		return "💬"
+	return Header{
+		styles:    styles,
+		maxTokens: 200000,
 	}
 }
 
-// View renders the header bar as a floating pill.
+func (h *Header) SetWidth(w int)       { h.width = w }
+func (h *Header) SetModel(m string)    { h.model = m }
+func (h *Header) SetProvider(p string) { h.provider = p }
+func (h *Header) SetMode(m string)     { h.mode = m }
+func (h *Header) SetPhase(p string)    { h.phase = p }
+func (h *Header) SetTokens(n int)      { h.tokens = n }
+func (h *Header) SetMaxTokens(n int)   { h.maxTokens = n }
+
+func (h *Header) getPhaseStyle() lipgloss.Style {
+	base := lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(h.styles.T.Background)
+	switch strings.ToLower(h.phase) {
+	case "research":
+		return base.Background(h.styles.T.Blue)
+	case "plan":
+		return base.Background(h.styles.T.Yellow)
+	case "execute":
+		return base.Background(h.styles.T.Green)
+	default:
+		return base.Background(h.styles.T.Accent)
+	}
+}
+
+func (h *Header) getProviderIcon() string {
+	p := strings.ToLower(h.provider)
+	switch {
+	case strings.Contains(p, "google") || strings.Contains(p, "gemini"):
+		return "󰊭"
+	default:
+		return "󰩩"
+	}
+}
+
+func (h *Header) renderProgressBar(width int) string {
+	if h.maxTokens <= 0 || width <= 0 {
+		return ""
+	}
+	ratio := float64(h.tokens) / float64(h.maxTokens)
+	if ratio > 1.0 {
+		ratio = 1.0
+	}
+	blocks := int(float64(width) * ratio)
+
+	barStyle := lipgloss.NewStyle().Foreground(h.styles.T.Accent)
+	if ratio > 0.8 {
+		barStyle = lipgloss.NewStyle().Foreground(h.styles.T.Red)
+	} else if ratio > 0.5 {
+		barStyle = lipgloss.NewStyle().Foreground(h.styles.T.Yellow)
+	}
+
+	full := strings.Repeat("█", blocks)
+	empty := strings.Repeat("░", width-blocks)
+
+	return barStyle.Render(full) + lipgloss.NewStyle().Foreground(h.styles.T.Muted).Render(empty)
+}
+
+// View renders the header bar as an adaptive modern HUD.
 func (h Header) View() string {
 	if h.width <= 0 {
 		return ""
 	}
+
+	// 1. Left Section: Brand & Phase
+	brandText := "⟡ AUTOMERGENT"
+	if h.width < 70 {
+		brandText = "⟡"
+	}
+	brand := h.styles.HeaderBrand.Render(brandText)
+
+	phaseLabel := ""
+	if h.width > 50 {
+		phaseText := strings.ToUpper(h.phase)
+		if phaseText == "" {
+			phaseText = "IDLE"
+		}
+		phaseLabel = " " + h.getPhaseStyle().Render(phaseText)
+	}
+	left := lipgloss.JoinHorizontal(lipgloss.Center, brand, phaseLabel)
+
+	// 2. Center Section: Provider & Model
+	providerIcon := h.getProviderIcon()
+	providerName := ""
+	if h.width > 110 {
+		providerName = h.provider + " "
+	}
+
 	modelStr := h.model
 	if modelStr == "" {
-		modelStr = "gemini-3.6-flash"
+		modelStr = "detecting..."
 	}
-	modeStr := h.mode
-	if modeStr == "" {
-		modeStr = "edit"
-	}
-
-	brand := h.styles.HeaderBrand.Render(" ⟡ Automergent ")
-	modelInfo := h.styles.HeaderCenter.Render(fmt.Sprintf("[ %s ]", modelStr))
-	modeInfo := h.styles.Header.Render(fmt.Sprintf("%s %s ", h.modeIcon(), modeStr))
-
-	tokenStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)
-	if h.tokens > 100000 {
-		tokenStyle = lipgloss.NewStyle().Foreground(h.styles.T.Red)
-	} else if h.tokens > 50000 {
-		tokenStyle = lipgloss.NewStyle().Foreground(h.styles.T.Yellow)
+	if h.width < 60 && len(modelStr) > 10 {
+		modelStr = modelStr[:7] + "..."
 	}
 
-	tokenStr := tokenStyle.Render(fmt.Sprintf("%s tokens", formatTokens(h.tokens)))
-	costStr := lipgloss.NewStyle().Foreground(h.styles.T.Subtext).Render(fmt.Sprintf("$%.3f", h.cost))
+	center := lipgloss.JoinHorizontal(lipgloss.Center,
+		lipgloss.NewStyle().Foreground(h.styles.T.Accent).Render(providerIcon+" "),
+		lipgloss.NewStyle().Foreground(h.styles.T.Muted).Render(providerName),
+		lipgloss.NewStyle().Foreground(h.styles.T.Text).Render(modelStr),
+	)
 
-	rightInfo := lipgloss.JoinHorizontal(lipgloss.Center, " │ ", costStr, "   ", tokenStr, " ")
-	content := lipgloss.JoinHorizontal(lipgloss.Center, brand, " │ ", modelInfo, " │ ", modeInfo, " │ ", rightInfo)
+	// 3. Right Section: Tokens & Bar
+	tokenStr := formatTokens(h.tokens)
+	usageInfo := lipgloss.NewStyle().Foreground(h.styles.T.Subtext).Render(tokenStr)
 
-	pill := h.styles.HeaderPill.Render(content)
-
-	// Ensure pill is not wider than width
-	pillWidth := lipgloss.Width(pill)
-	if pillWidth > h.width {
-		// If too wide, just render content without pill style or with reduced padding
-		return content
+	barWidth := 0
+	if h.width > 120 {
+		barWidth = 15
+	} else if h.width > 90 {
+		barWidth = 10
 	}
 
-	return lipgloss.PlaceHorizontal(h.width, lipgloss.Center, pill)
+	contextBar := ""
+	if barWidth > 0 {
+		contextBar = h.renderProgressBar(barWidth) + "  "
+	}
+	right := lipgloss.JoinHorizontal(lipgloss.Center, contextBar, usageInfo)
+
+	// 4. Composition using Flex-style gaps
+	leftWidth := lipgloss.Width(left)
+	centerWidth := lipgloss.Width(center)
+	rightWidth := lipgloss.Width(right)
+
+	// Subtract padding (2 on each side = 4)
+	availableWidth := h.width - 4
+
+	gap1 := (availableWidth/2 - centerWidth/2) - leftWidth
+	gap2 := availableWidth - (leftWidth + gap1 + centerWidth) - rightWidth
+
+	if gap1 < 1 {
+		gap1 = 1
+	}
+	if gap2 < 1 {
+		gap2 = 1
+	}
+
+	content := lipgloss.JoinHorizontal(lipgloss.Center,
+		left,
+		strings.Repeat(" ", gap1),
+		center,
+		strings.Repeat(" ", gap2),
+		right,
+	)
+
+	// Apply the theme background to the entire bar to prevent black gaps
+	return lipgloss.NewStyle().
+		Background(h.styles.T.Background).
+		Foreground(h.styles.T.Text).
+		Padding(0, 2).
+		Width(h.width).
+		Border(lipgloss.NormalBorder(), false, false, true, false).
+		BorderForeground(h.styles.T.BorderNormal).
+		Render(content)
 }
 
 func formatTokens(n int) string {
