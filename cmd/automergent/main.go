@@ -197,6 +197,8 @@ func run(cmd *cobra.Command, args []string) error {
 	reg.Register(&toolsFS.ListDirectoryTool{})
 	reg.Register(&toolsFS.GlobTool{})
 	reg.Register(&toolsFS.GrepTool{})
+	reg.Register(&toolsFS.StructureTool{})
+	reg.Register(&toolsFS.RefinedSearchTool{})
 
 	// Shell tools (async-capable)
 	reg.Register(toolsShell.NewAsyncRunnerTool(0))
