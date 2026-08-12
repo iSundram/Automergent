@@ -215,6 +215,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+	case tea.PasteMsg:
+		if a.focus == "input" {
+			inp, cmd := a.input.Update(msg)
+			a.input = inp
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+		}
 	case agentEventMsg:
 		cmd = a.handleAgentEvent(m.ev)
 		if cmd != nil {
@@ -627,6 +635,11 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 				return nil
 			}
 			a.statusBar.SetStatus(s)
+		}
+		return a.waitForAgentEvent()
+	case agent.EventThinking:
+		if thinkingText, ok := ev.Payload.(string); ok {
+			a.statusBar.SetStatus(thinkingText)
 		}
 		return a.waitForAgentEvent()
 	case agent.EventDone:

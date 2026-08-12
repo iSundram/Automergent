@@ -26,6 +26,7 @@ type Release struct {
 type Asset struct {
 	Name               string `json:"name"`
 	BrowserDownloadURL string `json:"browser_download_url"`
+	Size               int64  `json:"size"`
 }
 
 // GetLatestVersion fetches the latest agent version string (v*) from GitHub tags.

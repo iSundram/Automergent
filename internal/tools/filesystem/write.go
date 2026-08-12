@@ -60,6 +60,22 @@ func (t *WriteFileTool) Description() string {
 func (t *WriteFileTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
 }
+func (t *WriteFileTool) IsConcurrencySafe(args map[string]any) bool {
+	// Writing to files is not safe if the same file is being written elsewhere
+	return false
+}
+func (t *WriteFileTool) IsReadOnly(args map[string]any) bool { return false }
+func (t *WriteFileTool) IsDestructive(args map[string]any) bool {
+	path, ok := tools.StringArg(args, "path")
+	if !ok || path == "" {
+		return false
+	}
+	_, err := os.Stat(path)
+	return err == nil
+}
+func (t *WriteFileTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 200, LatencyMs: 100, RiskLevel: "medium"}
+}
 
 func (t *WriteFileTool) Schema() map[string]any {
 	return map[string]any{
@@ -128,6 +144,22 @@ func (t *EditFileTool) Name() string        { return "edit_file" }
 func (t *EditFileTool) Description() string { return "Replace a substring in a file." }
 func (t *EditFileTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
+}
+func (t *EditFileTool) IsConcurrencySafe(args map[string]any) bool {
+	// Editing is not safe if the same file is being edited elsewhere
+	return false
+}
+func (t *EditFileTool) IsReadOnly(args map[string]any) bool { return false }
+func (t *EditFileTool) IsDestructive(args map[string]any) bool {
+	// Check if removing substantial code
+	if oldStr, ok := tools.StringArg(args, "old_str"); ok {
+		lines := strings.Count(oldStr, "\n")
+		return lines > 10 // Removing more than 10 lines is destructive
+	}
+	return false
+}
+func (t *EditFileTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 150, LatencyMs: 80, RiskLevel: "medium"}
 }
 
 func (t *EditFileTool) Schema() map[string]any {
@@ -200,6 +232,7 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 	beforeDiags := diagnostics.Analyze(path, original)
 	afterDiags := diagnostics.Analyze(path, result)
 	delta := diagnostics.Compare(beforeDiags, afterDiags)
+	recoveryReport := diagnostics.RecoverDiagnostics(afterDiags)
 
 	if delta.IntroducedCount > 0 {
 		// Block the edit - it would introduce new errors
@@ -211,6 +244,11 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 		msg.WriteString(fmt.Sprintf("  Introduced: %d NEW error(s)\n", delta.IntroducedCount))
 		for _, d := range delta.Introduced {
 			msg.WriteString(fmt.Sprintf("    Line %d: %s - %s\n", d.Line, d.Code, d.Message))
+		}
+		if recoveryReport.UserMessage != "" {
+			msg.WriteString("\nRecovery guidance:\n")
+			msg.WriteString(recoveryReport.UserMessage)
+			msg.WriteString("\n")
 		}
 		msg.WriteString("\nChange was NOT applied. File unchanged.\n")
 		msg.WriteString("Try again with a different edit.\n")

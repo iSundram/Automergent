@@ -97,3 +97,8 @@ func htmlToText(s string) string {
 	).Replace(out)
 	return strings.TrimSpace(spaceRe.ReplaceAllString(out, " "))
 }
+
+// EstimatedCost returns cost estimates for the search tool.
+func (t *SearchTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 300, LatencyMs: 800, RiskLevel: "low"}
+}

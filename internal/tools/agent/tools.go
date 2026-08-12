@@ -439,3 +439,18 @@ func joinStrings(strs []string, sep string) string {
 	}
 	return result
 }
+
+// EstimatedCost returns cost estimates for the task tool.
+func (t *TaskTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 2000, LatencyMs: 30000, RiskLevel: "medium"}
+}
+
+// EstimatedCost returns cost estimates for the read agent tool.
+func (t *ReadAgentTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 500, LatencyMs: 100, RiskLevel: "low"}
+}
+
+// EstimatedCost returns cost estimates for the list agents tool.
+func (t *ListAgentsTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 100, LatencyMs: 50, RiskLevel: "low"}
+}

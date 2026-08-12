@@ -13,9 +13,19 @@ import (
 // StatusTool returns the current git status.
 type StatusTool struct{}
 
-func (t *StatusTool) Name() string                          { return "git_status" }
-func (t *StatusTool) Description() string                   { return "Get the current git status of the repository." }
-func (t *StatusTool) RequiresConfirmation(mode string) bool { return false }
+func (t *StatusTool) Name() string                               { return "git_status" }
+func (t *StatusTool) Description() string                        { return "Get the current git status of the repository." }
+func (t *StatusTool) RequiresConfirmation(mode string) bool      { return false }
+func (t *StatusTool) IsConcurrencySafe(args map[string]any) bool { return true }
+func (t *StatusTool) IsReadOnly(args map[string]any) bool        { return true }
+func (t *StatusTool) IsDestructive(args map[string]any) bool     { return false }
+func (t *StatusTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 100,
+		LatencyMs:    50,
+		RiskLevel:    "low",
+	}
+}
 
 func (t *StatusTool) Schema() map[string]any {
 	return map[string]any{
@@ -64,9 +74,19 @@ func (t *StatusTool) Execute(ctx context.Context, _ map[string]any) (tools.Resul
 // DiffTool shows the current diff.
 type DiffTool struct{}
 
-func (t *DiffTool) Name() string                          { return "git_diff" }
-func (t *DiffTool) Description() string                   { return "Show the current git diff." }
-func (t *DiffTool) RequiresConfirmation(mode string) bool { return false }
+func (t *DiffTool) Name() string                               { return "git_diff" }
+func (t *DiffTool) Description() string                        { return "Show the current git diff." }
+func (t *DiffTool) RequiresConfirmation(mode string) bool      { return false }
+func (t *DiffTool) IsConcurrencySafe(args map[string]any) bool { return true }
+func (t *DiffTool) IsReadOnly(args map[string]any) bool        { return true }
+func (t *DiffTool) IsDestructive(args map[string]any) bool     { return false }
+func (t *DiffTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 200,
+		LatencyMs:    150,
+		RiskLevel:    "low",
+	}
+}
 
 func (t *DiffTool) Schema() map[string]any {
 	return map[string]any{
@@ -100,9 +120,19 @@ func (t *DiffTool) Execute(ctx context.Context, args map[string]any) (tools.Resu
 // LogTool shows recent git log entries.
 type LogTool struct{}
 
-func (t *LogTool) Name() string                          { return "git_log" }
-func (t *LogTool) Description() string                   { return "Show recent git commit history." }
-func (t *LogTool) RequiresConfirmation(mode string) bool { return false }
+func (t *LogTool) Name() string                               { return "git_log" }
+func (t *LogTool) Description() string                        { return "Show recent git commit history." }
+func (t *LogTool) RequiresConfirmation(mode string) bool      { return false }
+func (t *LogTool) IsConcurrencySafe(args map[string]any) bool { return true }
+func (t *LogTool) IsReadOnly(args map[string]any) bool        { return true }
+func (t *LogTool) IsDestructive(args map[string]any) bool     { return false }
+func (t *LogTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 150,
+		LatencyMs:    100,
+		RiskLevel:    "low",
+	}
+}
 
 func (t *LogTool) Schema() map[string]any {
 	return map[string]any{

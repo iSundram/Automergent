@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/iSundram/Automergent/internal/diagnostics"
+	"github.com/iSundram/Automergent/internal/diagnostics/compiler"
 )
 
 // ─── Registry tests ───────────────────────────────────────────────────────────
@@ -302,6 +303,27 @@ func main() {}
 
 	if len(first) != len(second) {
 		t.Errorf("cache returned different results: %d vs %d", len(first), len(second))
+	}
+}
+
+func TestRecoverMessage(t *testing.T) {
+	msg := diagnostics.RecoveryMessage("test.go", `func main() {`)
+	if msg == "" {
+		t.Fatal("expected recovery message")
+	}
+	if !strings.Contains(strings.ToLower(msg), "root cause") {
+		t.Fatalf("expected root cause guidance, got %q", msg)
+	}
+}
+
+func TestRecoverCompilerOutput(t *testing.T) {
+	out := `main.go:1:1: syntax error: unexpected EOF`
+	report := diagnostics.RecoverCompilerOutput(out, compiler.LangGo)
+	if report.UserMessage == "" {
+		t.Fatal("expected user-facing recovery message")
+	}
+	if len(report.ActionItems) == 0 {
+		t.Fatal("expected action items")
 	}
 }
 

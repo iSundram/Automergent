@@ -19,6 +19,7 @@ import (
 	aiPkg "github.com/iSundram/Automergent/internal/ai"
 	googleProvider "github.com/iSundram/Automergent/internal/ai/google"
 	"github.com/iSundram/Automergent/internal/config"
+	planningPkg "github.com/iSundram/Automergent/internal/planning"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
 	toolsAgent "github.com/iSundram/Automergent/internal/tools/agent"
@@ -241,6 +242,8 @@ func run(cmd *cobra.Command, args []string) error {
 	reg.Register(&toolsAgent.TaskTool{})
 	reg.Register(&toolsAgent.ReadAgentTool{})
 	reg.Register(&toolsAgent.ListAgentsTool{})
+	reg.Register(planningPkg.NewTool("."))
+	reg.Register(planningPkg.NewReplanTool("."))
 
 	// Interaction tools
 	reg.Register(&toolsInteraction.NotifyTool{})

@@ -32,6 +32,14 @@ func (t *CreateFileTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
 }
 
+func (t *CreateFileTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 120,
+		LatencyMs:    150,
+		RiskLevel:    "medium",
+	}
+}
+
 func (t *CreateFileTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -108,6 +116,14 @@ func (t *DeleteFileTool) Description() string {
 }
 func (t *DeleteFileTool) RequiresConfirmation(mode string) bool {
 	return true // Always require confirmation for deletes
+}
+
+func (t *DeleteFileTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 100,
+		LatencyMs:    120,
+		RiskLevel:    "high",
+	}
 }
 
 func (t *DeleteFileTool) Schema() map[string]any {
@@ -191,6 +207,14 @@ func (t *MoveFileTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
 }
 
+func (t *MoveFileTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 100,
+		LatencyMs:    120,
+		RiskLevel:    "medium",
+	}
+}
+
 func (t *MoveFileTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -270,6 +294,14 @@ func (t *CopyFileTool) Description() string {
 }
 func (t *CopyFileTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
+}
+
+func (t *CopyFileTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 120,
+		LatencyMs:    150,
+		RiskLevel:    "medium",
+	}
 }
 
 func (t *CopyFileTool) Schema() map[string]any {

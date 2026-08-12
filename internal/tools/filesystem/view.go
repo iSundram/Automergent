@@ -25,6 +25,14 @@ func (t *ViewFileTool) Description() string {
 }
 func (t *ViewFileTool) RequiresConfirmation(mode string) bool { return false }
 
+func (t *ViewFileTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 150,
+		LatencyMs:    100,
+		RiskLevel:    "low",
+	}
+}
+
 func (t *ViewFileTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",

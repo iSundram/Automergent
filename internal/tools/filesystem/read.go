@@ -49,9 +49,15 @@ func isBinaryFile(path string) (bool, error) {
 // ReadFileTool reads the contents of a file.
 type ReadFileTool struct{}
 
-func (t *ReadFileTool) Name() string                          { return "read_file" }
-func (t *ReadFileTool) Description() string                   { return "Read the contents of a file from disk." }
-func (t *ReadFileTool) RequiresConfirmation(mode string) bool { return false }
+func (t *ReadFileTool) Name() string                               { return "read_file" }
+func (t *ReadFileTool) Description() string                        { return "Read the contents of a file from disk." }
+func (t *ReadFileTool) RequiresConfirmation(mode string) bool      { return false }
+func (t *ReadFileTool) IsConcurrencySafe(args map[string]any) bool { return true }
+func (t *ReadFileTool) IsReadOnly(args map[string]any) bool        { return true }
+func (t *ReadFileTool) IsDestructive(args map[string]any) bool     { return false }
+func (t *ReadFileTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 100, LatencyMs: 50, RiskLevel: "low"}
+}
 
 func (t *ReadFileTool) Schema() map[string]any {
 	return map[string]any{
@@ -104,11 +110,16 @@ func (t *ReadFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 	// NEW: Analyze diagnostics and prepend header if errors found
 	diags := diagnostics.Analyze(path, content)
 	if len(diags) > 0 {
+		recoveryMsg := diagnostics.RecoveryMessage(path, content)
 		var header strings.Builder
 		header.WriteString("═══════════════════════════════════\n")
 		header.WriteString(fmt.Sprintf("[DIAGNOSTICS: %d error(s) found]\n", len(diags)))
 		for _, d := range diags {
 			header.WriteString(fmt.Sprintf("ERROR Line %d: %s - %s\n", d.Line, d.Code, d.Message))
+		}
+		if recoveryMsg != "" {
+			header.WriteString("\n")
+			header.WriteString(recoveryMsg)
 		}
 		header.WriteString("═══════════════════════════════════\n")
 		content = header.String() + content
@@ -153,9 +164,15 @@ func (t *ReadFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 // ListDirectoryTool lists the files in a directory.
 type ListDirectoryTool struct{}
 
-func (t *ListDirectoryTool) Name() string                          { return "list_directory" }
-func (t *ListDirectoryTool) Description() string                   { return "List files and directories at a path." }
-func (t *ListDirectoryTool) RequiresConfirmation(mode string) bool { return false }
+func (t *ListDirectoryTool) Name() string                               { return "list_directory" }
+func (t *ListDirectoryTool) Description() string                        { return "List files and directories at a path." }
+func (t *ListDirectoryTool) RequiresConfirmation(mode string) bool      { return false }
+func (t *ListDirectoryTool) IsConcurrencySafe(args map[string]any) bool { return true }
+func (t *ListDirectoryTool) IsReadOnly(args map[string]any) bool        { return true }
+func (t *ListDirectoryTool) IsDestructive(args map[string]any) bool     { return false }
+func (t *ListDirectoryTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 50, LatencyMs: 20, RiskLevel: "low"}
+}
 
 func (t *ListDirectoryTool) Schema() map[string]any {
 	return map[string]any{

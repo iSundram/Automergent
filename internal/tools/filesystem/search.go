@@ -25,6 +25,14 @@ func (t *GrepTool) Description() string {
 }
 func (t *GrepTool) RequiresConfirmation(mode string) bool { return false }
 
+func (t *GrepTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 200,
+		LatencyMs:    500,
+		RiskLevel:    "low",
+	}
+}
+
 func (t *GrepTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",

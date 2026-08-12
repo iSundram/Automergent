@@ -106,6 +106,19 @@ type ToolDoneEvent struct {
 	Result     tools.Result
 }
 
+type toolCallBatch struct {
+	calls    []ai.ToolCall
+	parallel bool
+}
+
+type executedToolCall struct {
+	call       ai.ToolCall
+	context    string
+	startedAt  time.Time
+	finishedAt time.Time
+	result     tools.Result
+}
+
 const (
 	EventToken     = "token"
 	EventThought   = "thought"
@@ -117,11 +130,12 @@ const (
 	EventConfirm   = "confirm"
 	EventAskUser   = "ask_user"
 	EventStatus    = "status"
+	EventThinking  = "thinking"
 )
 
 // New creates a new Agent.
 func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *tools.Registry) *Agent {
-	return &Agent{
+	agent := &Agent{
 		cfg:                 cfg,
 		provider:            provider,
 		sess:                sess,
@@ -129,6 +143,8 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 		events:              make(chan Event, 8192),
 		sessionAllowedTools: make(map[string]bool),
 	}
+
+	return agent
 }
 
 // SetSessionPersist registers a callback invoked after meaningful session updates
@@ -177,6 +193,7 @@ func (a *Agent) SetSession(sess *session.Session) {
 
 // Run executes the agent loop for the given user prompt.
 func (a *Agent) Run(ctx context.Context, prompt string) error {
+
 	// 1. Initial Triage Phase (Dynamic Workflow)
 	// If this is the very first message, we run a hidden triage loop
 	isFirstMessage := len(a.sess.Messages) == 0
@@ -208,7 +225,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		}
 		if limit > 0 && float64(tokens)/float64(limit) > 0.80 {
 			a.Emit(EventStatus, "Compacting message history to free up context window...")
-			a.sess.Messages = CompactSessionMessages(a.sess.Messages)
+			a.sess.Messages = a.CompactSessionMessages(ctx, a.sess.Messages)
 		}
 
 		a.checkContextLimit(provider, a.sess.Messages)
@@ -285,63 +302,147 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			return nil
 		}
 
-		for _, tc := range toolCalls {
-			startedAt := time.Now()
-
-			// Extract context for display (e.g. filename, command)
-			var context string
-			if path, ok := tc.Args["path"].(string); ok {
-				context = path
-			} else if cmd, ok := tc.Args["command"].(string); ok {
-				context = cmd
-			} else if pattern, ok := tc.Args["pattern"].(string); ok {
-				context = pattern
-			} else if dir, ok := tc.Args["dir"].(string); ok {
-				context = dir
-			}
-
-			a.Emit(EventToolCall, ToolCallEvent{
-				ID:        tc.ID,
-				Name:      tc.Name,
-				Context:   context,
-				Args:      tc.Args,
-				StartedAt: startedAt,
-			})
-
-			status := fmt.Sprintf("running %s", tc.Name)
-			if context != "" {
-				status = fmt.Sprintf("running %s (%s)", tc.Name, context)
-			}
-			a.Emit(EventStatus, status)
-
-			result, err := a.executeTool(ctx, tc)
-			if err != nil {
-				result = tools.Result{IsError: true, Content: err.Error()}
-			}
-			finishedAt := time.Now()
+		for _, executed := range a.executeToolCallsParallel(ctx, toolCalls) {
 			a.Emit(EventToolDone, ToolDoneEvent{
-				ID:         tc.ID,
-				Name:       tc.Name,
-				Context:    context,
-				StartedAt:  startedAt,
-				FinishedAt: finishedAt,
-				Duration:   finishedAt.Sub(startedAt),
-				Result:     result,
+				ID:         executed.call.ID,
+				Name:       executed.call.Name,
+				Context:    executed.context,
+				StartedAt:  executed.startedAt,
+				FinishedAt: executed.finishedAt,
+				Duration:   executed.finishedAt.Sub(executed.startedAt),
+				Result:     executed.result,
 			})
 
 			toolMsg := ai.Message{Role: ai.RoleTool}
 			toolMsg.Content = append(toolMsg.Content, ai.ContentPart{
 				Type: ai.ContentTypeToolResult,
 				ToolResult: &ai.ToolResult{
-					ToolCallID: tc.ID,
-					Content:    result.Content,
-					IsError:    result.IsError,
+					ToolCallID: executed.call.ID,
+					Content:    executed.result.Content,
+					IsError:    executed.result.IsError,
 				},
 			})
 			a.sess.AddMessage(toolMsg)
 		}
 		a.tryPersist()
 	}
+}
+
+func (a *Agent) partitionToolCalls(toolCalls []ai.ToolCall) []toolCallBatch {
+	batches := make([]toolCallBatch, 0, len(toolCalls))
+	var current toolCallBatch
+
+	flush := func() {
+		if len(current.calls) == 0 {
+			return
+		}
+		batches = append(batches, current)
+		current = toolCallBatch{}
+	}
+
+	for _, tc := range toolCalls {
+		tool, ok := a.tools.Get(tc.Name)
+		canParallelize := ok && tool.IsReadOnly(tc.Args) && tool.IsConcurrencySafe(tc.Args) && !tool.RequiresConfirmation(a.cfg.Mode)
+
+		if !canParallelize {
+			flush()
+			batches = append(batches, toolCallBatch{
+				calls:    []ai.ToolCall{tc},
+				parallel: false,
+			})
+			continue
+		}
+
+		if !current.parallel {
+			flush()
+			current.parallel = true
+		}
+		if len(current.calls) == 10 {
+			flush()
+			current.parallel = true
+		}
+		current.calls = append(current.calls, tc)
+	}
+
+	flush()
+	return batches
+}
+
+func (a *Agent) executeToolCallsParallel(ctx context.Context, toolCalls []ai.ToolCall) []executedToolCall {
+	batches := a.partitionToolCalls(toolCalls)
+	results := make([]executedToolCall, 0, len(toolCalls))
+
+	for _, batch := range batches {
+		if !batch.parallel {
+			for _, tc := range batch.calls {
+				results = append(results, a.executeSingleToolCall(ctx, tc))
+			}
+			continue
+		}
+
+		batchResults := make([]executedToolCall, len(batch.calls))
+		var wg sync.WaitGroup
+		wg.Add(len(batch.calls))
+		for i, tc := range batch.calls {
+			i, tc := i, tc
+			go func() {
+				defer wg.Done()
+				batchResults[i] = a.executeSingleToolCall(ctx, tc)
+			}()
+		}
+		wg.Wait()
+		results = append(results, batchResults...)
+	}
+
+	return results
+}
+
+func (a *Agent) executeSingleToolCall(ctx context.Context, tc ai.ToolCall) executedToolCall {
+	startedAt := time.Now()
+	context := toolCallContext(tc)
+
+	a.Emit(EventToolCall, ToolCallEvent{
+		ID:        tc.ID,
+		Name:      tc.Name,
+		Context:   context,
+		Args:      tc.Args,
+		StartedAt: startedAt,
+	})
+
+	status := fmt.Sprintf("running %s", tc.Name)
+	if context != "" {
+		status = fmt.Sprintf("running %s (%s)", tc.Name, context)
+	}
+	a.Emit(EventStatus, status)
+
+	result, err := a.executeTool(ctx, tc)
+	if err != nil {
+		result = tools.Result{IsError: true, Content: err.Error()}
+	}
+
+	return executedToolCall{
+		call:       tc,
+		context:    context,
+		startedAt:  startedAt,
+		finishedAt: time.Now(),
+		result:     result,
+	}
+}
+
+func toolCallContext(tc ai.ToolCall) string {
+	if path, ok := tc.Args["path"].(string); ok {
+		return path
+	}
+	if cmd, ok := tc.Args["command"].(string); ok {
+		return cmd
+	}
+	if pattern, ok := tc.Args["pattern"].(string); ok {
+		return pattern
+	}
+	if dir, ok := tc.Args["dir"].(string); ok {
+		return dir
+	}
+	return ""
 }
 
 // drainStream reads all chunks from the response, emitting EventToken for each text chunk.
@@ -359,6 +460,8 @@ func (a *Agent) drainStream(resp ai.CompletionResponse) (string, string, ai.Usag
 		}
 		if chunk.Thought != "" {
 			a.Emit(EventThought, chunk.Thought)
+			formatted := formatThinking(chunk.Thought)
+			a.Emit(EventThinking, formatted)
 			thought += chunk.Thought
 		}
 		if chunk.Text != "" {
@@ -367,6 +470,17 @@ func (a *Agent) drainStream(resp ai.CompletionResponse) (string, string, ai.Usag
 		}
 	}
 	return text, thought, resp.Usage(), nil
+}
+
+// formatThinking formats thinking chunks for display.
+func formatThinking(thought string) string {
+	const maxRunes = 100
+	runes := []rune(strings.TrimSpace(thought))
+	if len(runes) > maxRunes {
+		runes = runes[:maxRunes]
+		return "💭 " + string(runes) + "..."
+	}
+	return "💭 " + string(runes)
 }
 
 func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, error) {
@@ -475,4 +589,8 @@ func gitIsRepo(ctx context.Context, dir string) bool {
 	cmd := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--is-inside-work-tree")
 	cmd.Env = os.Environ()
 	return cmd.Run() == nil
+}
+
+func (a *Agent) Shutdown() error {
+	return nil
 }

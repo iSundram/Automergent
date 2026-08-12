@@ -24,6 +24,14 @@ Returns matches with surrounding lines (above and below) to help understand the 
 
 func (t *RefinedSearchTool) RequiresConfirmation(mode string) bool { return false }
 
+func (t *RefinedSearchTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 250,
+		LatencyMs:    600,
+		RiskLevel:    "low",
+	}
+}
+
 func (t *RefinedSearchTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",

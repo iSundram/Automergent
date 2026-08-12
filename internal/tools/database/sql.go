@@ -163,3 +163,8 @@ func GetReadyTodos() ([]string, error) {
 	// In production, this would query the SQLite database
 	return []string{}, nil
 }
+
+// EstimatedCost returns cost estimates for the SQL tool.
+func (t *SQLTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 100, LatencyMs: 50, RiskLevel: "low"}
+}

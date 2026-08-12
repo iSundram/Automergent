@@ -96,6 +96,39 @@ func (t *RunnerTool) Description() string { return "Execute a shell command and 
 func (t *RunnerTool) RequiresConfirmation(mode string) bool {
 	return mode == "plan" || mode == "edit"
 }
+func (t *RunnerTool) IsConcurrencySafe(args map[string]any) bool {
+	return false
+}
+func (t *RunnerTool) IsReadOnly(args map[string]any) bool {
+	// Analyze command for write operations
+	if command, ok := tools.StringArg(args, "command"); ok {
+		cmdLower := strings.ToLower(command)
+		writePatterns := []string{"rm", "mkdir", "touch", "mv", "cp", "git commit", "git push", ">", ">>"}
+		for _, pattern := range writePatterns {
+			if strings.Contains(cmdLower, pattern) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+func (t *RunnerTool) IsDestructive(args map[string]any) bool {
+	// Check for destructive commands
+	if command, ok := tools.StringArg(args, "command"); ok {
+		cmdLower := strings.ToLower(command)
+		destructivePatterns := []string{"rm -rf", "rm -r", "delete", "drop table", "truncate", "format"}
+		for _, pattern := range destructivePatterns {
+			if strings.Contains(cmdLower, pattern) {
+				return true
+			}
+		}
+	}
+	return false
+}
+func (t *RunnerTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 300, LatencyMs: 200, RiskLevel: "medium"}
+}
 
 func (t *RunnerTool) Schema() map[string]any {
 	return map[string]any{

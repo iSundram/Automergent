@@ -37,7 +37,7 @@ func (s *StatusBar) getStatusStyle() lipgloss.Style {
 	base := lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(s.styles.T.Background)
 	status := strings.ToLower(s.status)
 	switch {
-	case strings.Contains(status, "thinking"):
+	case strings.Contains(status, "thinking") || strings.Contains(status, "💭"):
 		return base.Background(s.styles.T.Yellow)
 	case strings.Contains(status, "error") || strings.Contains(status, "fail"):
 		return base.Background(s.styles.T.Red)

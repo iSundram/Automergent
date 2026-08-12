@@ -106,3 +106,8 @@ func (t *FetchTool) Execute(ctx context.Context, args map[string]any) (tools.Res
 	}
 	return tools.Result{Content: string(body)}, nil
 }
+
+// EstimatedCost returns cost estimates for the fetch tool.
+func (t *FetchTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 500, LatencyMs: 1000, RiskLevel: "low"}
+}

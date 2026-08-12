@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -180,15 +181,101 @@ func renderProjectContext(cfg *config.Config, messages []ai.Message) string {
 	return sb.String()
 }
 
-// CompactSessionMessages provides a lightweight way to summarize older tool interactions.
+// isImportantMessage reports whether a message should be preserved during compaction.
+func (a *Agent) isImportantMessage(msg ai.Message) bool {
+	if msg.Role == ai.RoleUser {
+		text := strings.ToLower(msg.TextContent())
+		return strings.Contains(text, "confirm") ||
+			strings.Contains(text, "constraint") ||
+			strings.Contains(text, "must") ||
+			strings.Contains(text, "should")
+	}
+
+	if msg.Role == ai.RoleTool {
+		for _, part := range msg.Content {
+			if part.Type == ai.ContentTypeToolResult && part.ToolResult != nil && part.ToolResult.IsError {
+				return true
+			}
+		}
+		return false
+	}
+
+	if msg.Role == ai.RoleAssistant {
+		text := strings.ToLower(msg.TextContent())
+		if strings.Contains(text, "plan") || strings.Contains(text, "approach") || strings.Contains(text, "strategy") {
+			return true
+		}
+		for _, tc := range msg.ToolCallParts() {
+			if tc.Name == "edit_file" || tc.Name == "create_file" || tc.Name == "write_file" {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// identifyImportantMessages filters messages that should be preserved during compaction.
+func (a *Agent) identifyImportantMessages(messages []ai.Message) []ai.Message {
+	important := make([]ai.Message, 0, len(messages))
+	for _, msg := range messages {
+		if a.isImportantMessage(msg) {
+			important = append(important, msg)
+		}
+	}
+	return important
+}
+
+// summarizeWithLLM uses the AI provider to generate a concise summary of messages.
+// It formats the messages as text and calls the provider with a specialized summarization prompt.
+func (a *Agent) summarizeWithLLM(ctx context.Context, messages []ai.Message, prompt string) string {
+	// Format messages as text for summarization
+	var sb strings.Builder
+	for i, msg := range messages {
+		sb.WriteString(fmt.Sprintf("=== Message %d (%s) ===\n", i+1, msg.Role))
+		sb.WriteString(msg.PlaintextForHistory())
+		sb.WriteString("\n\n")
+	}
+
+	// Create summarization request
+	req := ai.CompletionRequest{
+		Messages: []ai.Message{
+			ai.NewTextMessage(ai.RoleUser, fmt.Sprintf("%s\n\nConversation history:\n%s", prompt, sb.String())),
+		},
+		System:      "You are a precise technical summarizer. Extract and condense key information without adding interpretation.",
+		Temperature: 0.3,
+		MaxTokens:   1000,
+		Stream:      false,
+	}
+
+	// Call provider
+	resp, err := a.provider.Complete(ctx, req)
+	if err != nil {
+		// Fallback to simple count if LLM fails
+		return fmt.Sprintf("[LLM summarization unavailable: %v. Messages in compacted range: %d]", err, len(messages))
+	}
+
+	// Extract summary text from response
+	var summary strings.Builder
+	for chunk := range resp.Stream() {
+		if chunk.Error != nil {
+			return fmt.Sprintf("[Summarization error: %v]", chunk.Error)
+		}
+		summary.WriteString(chunk.Text)
+	}
+
+	return summary.String()
+}
+
+// CompactSessionMessages provides intelligent context compaction with LLM-based summarization.
 // This should be called by the Agent loop when context usage is high.
-func CompactSessionMessages(messages []ai.Message) []ai.Message {
+func (a *Agent) CompactSessionMessages(ctx context.Context, messages []ai.Message) []ai.Message {
 	if len(messages) <= 10 {
 		return messages
 	}
 
 	compacted := make([]ai.Message, 0)
-	// Keep the first message (initial prompt)
+	// Keep the first message (system prompt)
 	compacted = append(compacted, messages[0])
 
 	// Determine the range to compact
@@ -197,48 +284,42 @@ func CompactSessionMessages(messages []ai.Message) []ai.Message {
 		startIdx = 1
 	}
 
-	// Build a structured snapshot from the compacted messages
-	var filesChanged []string
-	var unresolvedIssues []string
-	var toolsUsed int
+	// Extract messages to be compacted (middle section)
+	messagesToCompact := messages[1:startIdx]
 
-	for i := 1; i < startIdx; i++ {
-		msg := messages[i]
-		if msg.Role == ai.RoleAssistant {
-			toolsUsed += len(msg.ToolCallParts())
-		}
-		if msg.Role == ai.RoleTool {
-			for _, part := range msg.Content {
-				if part.Type == ai.ContentTypeToolResult && part.ToolResult != nil {
-					if part.ToolResult.IsError {
-						unresolvedIssues = append(unresolvedIssues, "Error from "+part.ToolResult.ToolCallID)
-					}
-					// Basic heuristic to capture file changes (e.g., from write_file, edit_file tools)
-					if strings.Contains(part.ToolResult.Content, "Successfully") && strings.Contains(part.ToolResult.Content, "file") {
-						filesChanged = append(filesChanged, "Modified file")
-					}
-				}
-			}
+	// Identify important messages from the range to compact
+	importantMessages := a.identifyImportantMessages(messagesToCompact)
+
+	// Prepare remaining messages for summarization
+	var messagesToSummarize []ai.Message
+	for _, msg := range messagesToCompact {
+		if !a.isImportantMessage(msg) {
+			messagesToSummarize = append(messagesToSummarize, msg)
 		}
 	}
 
-	snapshotText := fmt.Sprintf("[System: Older interactions compacted to save context.\n- Tools used in compacted history: %d\n", toolsUsed)
-	if len(filesChanged) > 0 {
-		snapshotText += fmt.Sprintf("- Notable actions: %d file modifications.\n", len(filesChanged))
-	}
-	if len(unresolvedIssues) > 0 {
-		snapshotText += fmt.Sprintf("- Note: Encountered %d errors during compacted steps.\n", len(unresolvedIssues))
-	}
-	snapshotText += "Previous research and edits are reflected in the current file state.]"
+	// Generate LLM-based summary if there are messages to summarize
+	var summaryText string
+	if len(messagesToSummarize) > 0 {
+		prompt := "Summarize key actions, decisions, context. Focus on files modified, problems solved, constraints. Max 500 words."
 
+		summaryText = a.summarizeWithLLM(ctx, messagesToSummarize, prompt)
+	} else {
+		summaryText = "[No additional messages required summarization]"
+	}
+
+	// Add the LLM-generated summary as a system message
 	summaryMsg := ai.Message{
 		Role: ai.RoleSystem,
 		Content: []ai.ContentPart{{
 			Type: ai.ContentTypeText,
-			Text: snapshotText,
+			Text: fmt.Sprintf("[Context Compaction Summary]\n%s\n\nThe following important messages from the compacted history are preserved below.", summaryText),
 		}},
 	}
 	compacted = append(compacted, summaryMsg)
+
+	// Add important messages
+	compacted = append(compacted, importantMessages...)
 
 	// Keep the most recent 6 messages
 	compacted = append(compacted, messages[startIdx:]...)

@@ -23,6 +23,14 @@ func (t *GlobTool) Description() string {
 }
 func (t *GlobTool) RequiresConfirmation(mode string) bool { return false }
 
+func (t *GlobTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 100,
+		LatencyMs:    200,
+		RiskLevel:    "low",
+	}
+}
+
 func (t *GlobTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",

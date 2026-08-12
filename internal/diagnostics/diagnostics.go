@@ -13,12 +13,17 @@ import (
 
 	sitter "github.com/smacker/go-tree-sitter"
 
+	"github.com/iSundram/Automergent/internal/diagnostics/compiler"
 	"github.com/iSundram/Automergent/internal/diagnostics/parsers"
+	"github.com/iSundram/Automergent/internal/diagnostics/recovery"
 	"github.com/iSundram/Automergent/internal/diagnostics/types"
 )
 
 // Diagnostic is re-exported from types for convenience.
 type Diagnostic = types.Diagnostic
+
+// RecoveryReport summarizes diagnostics into actionable recovery guidance.
+type RecoveryReport = recovery.Report
 
 // Analyze parses content as the language inferred from path and returns all
 // detected diagnostics.  It returns nil when the language is unsupported or
@@ -107,6 +112,26 @@ func analyze(lang parsers.Language, content string) []Diagnostic {
 	diags = append(diags, languageRules(lang, pr)...)
 
 	return dedup(diags)
+}
+
+// Recover analyzes diagnostics and returns an actionable recovery report.
+func Recover(path, content string) RecoveryReport {
+	return recovery.Summarize(Analyze(path, content))
+}
+
+// RecoverDiagnostics converts diagnostics into actionable recovery guidance.
+func RecoverDiagnostics(diags []Diagnostic) RecoveryReport {
+	return recovery.Summarize(diags)
+}
+
+// RecoverCompilerOutput analyzes compiler output and returns actionable recovery guidance.
+func RecoverCompilerOutput(output string, lang compiler.Language) RecoveryReport {
+	return recovery.SummarizeCompiler(compiler.ParseOutput(output, lang))
+}
+
+// RecoveryMessage returns a user-facing message for the diagnostics.
+func RecoveryMessage(path, content string) string {
+	return Recover(path, content).Render()
 }
 
 // languageRules runs language-specific semantic checks on top of syntax-tree

@@ -61,6 +61,8 @@ type ThinkingConfig struct {
 	Type string
 	// BudgetTokens is the maximum tokens allocated for thinking (default: 10000)
 	BudgetTokens int
+	// Stream enables streaming thought chunks when supported by the provider.
+	Stream bool
 }
 
 // CompletionResponse is returned by a provider.

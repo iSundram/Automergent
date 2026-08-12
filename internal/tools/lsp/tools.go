@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/iSundram/Automergent/internal/diagnostics"
 	"github.com/iSundram/Automergent/internal/tools"
 )
 
@@ -53,7 +54,7 @@ func goBuildDiagnostics(ctx context.Context, file string) tools.Result {
 	if dir == "" {
 		dir = "."
 	}
-	tmp, err := os.CreateTemp("", "automergent-gobuild-*")
+	tmp, err := os.CreateTemp(dir, ".automergent-gobuild-*")
 	if err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("temp file: %v", err)}
 	}
@@ -82,7 +83,21 @@ func goBuildDiagnostics(ctx context.Context, file string) tools.Result {
 		}
 	}
 	if len(focused) > 0 {
-		return tools.Result{Content: strings.Join(focused, "\n")}
+		content := strings.Join(focused, "\n")
+		return tools.Result{Content: content + recoverySuffix(content)}
 	}
-	return tools.Result{Content: msg}
+	return tools.Result{Content: msg + recoverySuffix(msg)}
+}
+
+func recoverySuffix(output string) string {
+	report := diagnostics.RecoverCompilerOutput(output, "")
+	if report.UserMessage == "" {
+		return ""
+	}
+	return "\n\n" + report.Render()
+}
+
+// EstimatedCost returns cost estimates for the diagnostics tool.
+func (t *DiagnosticsTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 200, LatencyMs: 500, RiskLevel: "low"}
 }

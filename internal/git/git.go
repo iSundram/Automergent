@@ -68,3 +68,17 @@ func StagedDiff(ctx context.Context, dir string) (string, error) {
 	}
 	return out.String(), nil
 }
+
+// runGit executes a git command in the specified directory.
+func runGit(ctx context.Context, dir string, args ...string) (string, error) {
+	var out bytes.Buffer
+	var stderr bytes.Buffer
+	cmdArgs := append([]string{"-C", dir}, args...)
+	cmd := exec.CommandContext(ctx, "git", cmdArgs...)
+	cmd.Stdout = &out
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%s: %w", stderr.String(), err)
+	}
+	return out.String(), nil
+}

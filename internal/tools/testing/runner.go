@@ -416,3 +416,13 @@ func runPytestCoverage(ctx context.Context, path, format string) (tools.Result, 
 
 	return tools.Result{Content: string(output)}, nil
 }
+
+// EstimatedCost returns cost estimates for the run tests tool.
+func (t *RunTestsTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 1000, LatencyMs: 5000, RiskLevel: "low"}
+}
+
+// EstimatedCost returns cost estimates for the test coverage tool.
+func (t *TestCoverageTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 500, LatencyMs: 3000, RiskLevel: "low"}
+}

@@ -23,6 +23,14 @@ Supports depth limiting, items-per-directory limiting, and automatic ignoring of
 
 func (t *StructureTool) RequiresConfirmation(mode string) bool { return false }
 
+func (t *StructureTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 150,
+		LatencyMs:    300,
+		RiskLevel:    "low",
+	}
+}
+
 func (t *StructureTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",

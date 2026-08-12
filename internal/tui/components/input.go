@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -11,12 +12,13 @@ import (
 
 // Input is a multi-line text input component with history.
 type Input struct {
-	ta      textarea.Model
-	styles  *themes.Styles
-	history []string
-	histIdx int
-	focused bool
-	width   int
+	ta            textarea.Model
+	styles        *themes.Styles
+	history       []string
+	histIdx       int
+	focused       bool
+	width         int
+	pastedContent string
 }
 
 // NewInput creates a new Input component.
@@ -43,17 +45,23 @@ func (i *Input) SetWidth(w int) {
 }
 
 // Value returns the current input text.
-func (i Input) Value() string { return i.ta.Value() }
+func (i Input) Value() string {
+	if i.pastedContent != "" {
+		return i.pastedContent
+	}
+	return i.ta.Value()
+}
 
 // SetValue updates the input text.
 func (i *Input) SetValue(v string) {
 	i.ta.SetValue(v)
+	i.pastedContent = ""
 	// i.ta.SetCursor(len(v)) // TODO: Fix for Bubble Tea v2
 }
 
 // Reset clears the input.
 func (i *Input) Reset() {
-	val := i.ta.Value()
+	val := i.Value()
 	if val != "" {
 		i.history = append(i.history, val)
 		if len(i.history) > 100 {
@@ -63,6 +71,7 @@ func (i *Input) Reset() {
 	i.ta.Reset()
 	i.ta.SetHeight(1)
 	i.histIdx = -1
+	i.pastedContent = ""
 }
 
 // Focus gives the input focus.
@@ -155,7 +164,46 @@ func (i *Input) InsertValue(v string) {
 
 // Update handles key events and auto-resizing.
 func (i Input) Update(msg tea.Msg) (Input, tea.Cmd) {
+	// Handle paste events specially - allow multi-line content
+	if pm, ok := msg.(tea.PasteMsg); ok {
+		lines := strings.Split(pm.Content, "\n")
+		if len(lines) > 5 && i.ta.Value() == "" {
+			i.pastedContent = pm.Content
+			i.ta.SetValue(fmt.Sprintf("[Pasted content: %d lines]", len(lines)))
+			i.ta.SetHeight(1)
+			return i, nil
+		}
+
+		i.ta.InsertString(pm.Content)
+
+		// Auto-expand to fit pasted content
+		lineCount := i.ta.LineCount()
+		if lineCount > i.ta.MaxHeight {
+			lineCount = i.ta.MaxHeight
+		}
+		if lineCount < 1 {
+			lineCount = 1
+		}
+		i.ta.SetHeight(lineCount)
+		return i, nil
+	}
+
 	if km, ok := msg.(tea.KeyMsg); ok {
+		// If we are showing a placeholder, expand it back to full content on any edit
+		if i.pastedContent != "" && km.String() != "enter" {
+			i.ta.SetValue(i.pastedContent)
+			lines := strings.Split(i.pastedContent, "\n")
+			lineCount := len(lines)
+			if lineCount > i.ta.MaxHeight {
+				lineCount = i.ta.MaxHeight
+			}
+			if lineCount < 1 {
+				lineCount = 1
+			}
+			i.ta.SetHeight(lineCount)
+			i.pastedContent = ""
+		}
+
 		switch km.String() {
 		case "alt+up", "ctrl+p":
 			if len(i.history) > 0 {

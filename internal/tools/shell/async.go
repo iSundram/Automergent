@@ -135,6 +135,14 @@ func (t *AsyncRunnerTool) RequiresConfirmation(mode string) bool {
 	return mode == "plan" || mode == "edit"
 }
 
+func (t *AsyncRunnerTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 100,
+		LatencyMs:    300,
+		RiskLevel:    "medium",
+	}
+}
+
 func (t *AsyncRunnerTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -365,6 +373,14 @@ func (t *ReadShellTool) Description() string {
 }
 func (t *ReadShellTool) RequiresConfirmation(mode string) bool { return false }
 
+func (t *ReadShellTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 100,
+		LatencyMs:    50,
+		RiskLevel:    "low",
+	}
+}
+
 func (t *ReadShellTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -455,6 +471,14 @@ func (t *WriteShellTool) Description() string {
 - Can send text and special keys: {enter}, {up}, {down}, {left}, {right}, {backspace}`
 }
 func (t *WriteShellTool) RequiresConfirmation(mode string) bool { return false }
+
+func (t *WriteShellTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 80,
+		LatencyMs:    100,
+		RiskLevel:    "low",
+	}
+}
 
 func (t *WriteShellTool) Schema() map[string]any {
 	return map[string]any{
@@ -570,6 +594,14 @@ func (t *StopShellTool) Description() string {
 }
 func (t *StopShellTool) RequiresConfirmation(mode string) bool { return false }
 
+func (t *StopShellTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 50,
+		LatencyMs:    100,
+		RiskLevel:    "low",
+	}
+}
+
 func (t *StopShellTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -623,6 +655,14 @@ type ListShellsTool struct{}
 func (t *ListShellsTool) Name() string                          { return "list_shells" }
 func (t *ListShellsTool) Description() string                   { return "List all active shell sessions." }
 func (t *ListShellsTool) RequiresConfirmation(mode string) bool { return false }
+
+func (t *ListShellsTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 50,
+		LatencyMs:    50,
+		RiskLevel:    "low",
+	}
+}
 
 func (t *ListShellsTool) Schema() map[string]any {
 	return map[string]any{

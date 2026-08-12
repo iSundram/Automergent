@@ -24,6 +24,14 @@ func (t *CommitTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
 }
 
+func (t *CommitTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 100,
+		LatencyMs:    100,
+		RiskLevel:    "medium",
+	}
+}
+
 func (t *CommitTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -104,6 +112,14 @@ func (t *AddTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
 }
 
+func (t *AddTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 80,
+		LatencyMs:    80,
+		RiskLevel:    "low",
+	}
+}
+
 func (t *AddTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -177,6 +193,14 @@ func (t *CheckoutTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
 }
 
+func (t *CheckoutTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 100,
+		LatencyMs:    150,
+		RiskLevel:    "medium",
+	}
+}
+
 func (t *CheckoutTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -242,6 +266,14 @@ func (t *BranchTool) Description() string {
 }
 func (t *BranchTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
+}
+
+func (t *BranchTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 80,
+		LatencyMs:    100,
+		RiskLevel:    "medium",
+	}
 }
 
 func (t *BranchTool) Schema() map[string]any {
@@ -323,6 +355,14 @@ func (t *StashTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
 }
 
+func (t *StashTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 100,
+		LatencyMs:    150,
+		RiskLevel:    "medium",
+	}
+}
+
 func (t *StashTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -395,6 +435,14 @@ func (t *BlameTool) Name() string                          { return "git_blame" 
 func (t *BlameTool) Description() string                   { return "Show line-by-line authorship for a file." }
 func (t *BlameTool) RequiresConfirmation(mode string) bool { return false }
 
+func (t *BlameTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 150,
+		LatencyMs:    200,
+		RiskLevel:    "low",
+	}
+}
+
 func (t *BlameTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -447,6 +495,14 @@ type ShowTool struct{}
 func (t *ShowTool) Name() string                          { return "git_show" }
 func (t *ShowTool) Description() string                   { return "Show details of a commit, including diff." }
 func (t *ShowTool) RequiresConfirmation(mode string) bool { return false }
+
+func (t *ShowTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{
+		TokensApprox: 150,
+		LatencyMs:    100,
+		RiskLevel:    "low",
+	}
+}
 
 func (t *ShowTool) Schema() map[string]any {
 	return map[string]any{

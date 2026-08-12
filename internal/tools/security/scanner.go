@@ -373,3 +373,13 @@ func summarizeNpmAudit(output string) string {
 	}
 	return output
 }
+
+// EstimatedCost returns cost estimates for the secrets scan tool.
+func (t *SecretsScanTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 200, LatencyMs: 2000, RiskLevel: "low"}
+}
+
+// EstimatedCost returns cost estimates for the dependency audit tool.
+func (t *DependencyAuditTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 300, LatencyMs: 3000, RiskLevel: "low"}
+}
