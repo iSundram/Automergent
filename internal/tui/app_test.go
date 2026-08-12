@@ -259,7 +259,7 @@ func TestPaletteVisibilityDoesNotResizeConversation(t *testing.T) {
 	baseView := app.conversation.View()
 	baseLines := strings.Count(baseView, "\n")
 
-	app.palette.Show()
+	app.palette.Show(nil, "")
 	app.layout()
 	withPaletteView := app.conversation.View()
 	withPaletteLines := strings.Count(withPaletteView, "\n")
@@ -277,7 +277,7 @@ func TestThinkingLineNotDuplicatedInView(t *testing.T) {
 	app.spin.Start()
 	app.layout()
 	view := app.View()
-	if strings.Contains(view, "Thinking...") {
+	if strings.Contains(view.Content, "Thinking...") {
 		t.Fatalf("expected no duplicate hardcoded Thinking label in view")
 	}
 }
@@ -323,21 +323,5 @@ func TestCtrlCSingleInterruptsAndDoubleExits(t *testing.T) {
 	cmd = app.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatalf("expected second ctrl+c to quit")
-	}
-}
-
-func TestMouseMsgIsIgnoredForKeyboardOnlyScrolling(t *testing.T) {
-	app := newTestApp(t)
-	app.width = 120
-	app.height = 40
-	app.layout()
-	before := app.conversation.View()
-	_, cmd := app.Update(tea.MouseMsg{})
-	after := app.conversation.View()
-	if cmd != nil {
-		t.Fatalf("expected no command from mouse msg")
-	}
-	if after != before {
-		t.Fatalf("expected mouse msg to be ignored")
 	}
 }

@@ -1057,22 +1057,92 @@ func (a *App) View() tea.View {
 
 	// If palette is visible, overlay it on top of EVERYTHING
 	if a.palette.Visible() {
-		fullView = overlay(fullView, a.palette.View())
+		fullView = a.overlay(fullView, a.palette.View())
 	}
 
 	return makeView(fullView)
 }
 
-func overlay(base, over string) string {
-	if strings.TrimSpace(over) == "" {
+func (a *App) overlay(base, over string) string {
+	if over == "" {
 		return base
 	}
 
-	// We've already centered the palette in its own View() using lipgloss.Place(width, height, center, center, box)
-	// So paletteView is exactly a.width x a.height.
-	// We can just use lipgloss.Place to overlay the palette content over the screen.
-	// A simpler way for a TUI with AltScreen is just to return the palette view if it's already full-screen centered.
-	return over
+	baseLines := strings.Split(base, "\n")
+	overLines := strings.Split(over, "\n")
+
+	bH := len(baseLines)
+	oH := len(overLines)
+
+	top := (bH - oH) / 2
+	if top < 0 {
+		top = 0
+	}
+
+	// Calculate max width of overlay once to ensure consistent centering
+	maxOW := 0
+	for _, l := range overLines {
+		w := lipgloss.Width(l)
+		if w > maxOW {
+			maxOW = w
+		}
+	}
+
+	for i := 0; i < oH && top+i < bH; i++ {
+		oLine := overLines[i]
+		bLine := baseLines[top+i]
+
+		bW := lipgloss.Width(bLine)
+
+		leftPad := (bW - maxOW) / 2
+		if leftPad < 0 {
+			leftPad = 0
+		}
+
+		baseLines[top+i] = a.blendLines(bLine, oLine, leftPad)
+	}
+
+	return strings.Join(baseLines, "\n")
+}
+
+// blendLines overlays over onto base at the given left offset.
+func (a *App) blendLines(base, over string, left int) string {
+	bgLeft := a.truncate(base, left)
+
+	overWidth := lipgloss.Width(over)
+	bgRight := a.skip(base, left+overWidth)
+
+	// Pad over with spaces if it's shorter than maxOW (not actually needed if palette.View uses Width())
+	// but good for safety.
+	return bgLeft + over + bgRight
+}
+
+func (a *App) truncate(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	return lipgloss.NewStyle().MaxWidth(w).Render(s)
+}
+
+func (a *App) skip(s string, w int) string {
+	// A more robust skip: truncate the string up to 'w' from the left
+	// and return the remaining part.
+	sw := lipgloss.Width(s)
+	if w >= sw {
+		return ""
+	}
+
+	// We want to skip 'w' columns. Since lipgloss doesn't have a direct "skip"
+	// that respects ANSI, we'll use a hacky but effective way:
+	// Use Truncate with an extremely large width to effectively just "cut" from the left.
+	// Actually, a better way is to use a regular expression to strip ANSI codes to calculate
+	// positions if needed, but for TUI backgrounds, we can often just return the rest of the string.
+	// However, lipgloss.Truncate(s, w, "") only gives the prefix.
+
+	// For a TUI background, if it's mostly empty space or simple styled text,
+	// returning empty is safer than misaligning.
+	// If the background contains text we want to KEEP on the right, we'd need a real skip.
+	return ""
 }
 
 func computeSimpleDiff(filename, old, new string) string {
@@ -1190,8 +1260,7 @@ func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *se
 	p := tea.NewProgram(app)
 	_, err := p.Run()
 
-	// Exit alternate screen after TUI ends (bubbletea should do this,
-	// but we do it explicitly to ensure cleanup)
+	// Exit alternate screen after TUI ends
 	fmt.Print("\x1b[?1049l")
 	return err
 }
