@@ -9,11 +9,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/iSundram/Automergent/internal/tools"
 )
 
 // SecretPatterns defines regex patterns for detecting secrets.
+// Patterns are kept simple and line-length-based guards are used to mitigate ReDoS.
 var SecretPatterns = []struct {
 	Name    string
 	Pattern *regexp.Regexp
@@ -25,11 +27,12 @@ var SecretPatterns = []struct {
 	{"GitHub App Token", regexp.MustCompile(`(ghu|ghs)_[0-9a-zA-Z]{36}`)},
 	{"GitLab Token", regexp.MustCompile(`glpat-[0-9a-zA-Z\-]{20}`)},
 	{"Slack Token", regexp.MustCompile(`xox[baprs]-[0-9a-zA-Z]{10,48}`)},
-	{"Slack Webhook", regexp.MustCompile(`https://hooks\.slack\.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8,12}/[a-zA-Z0-9_]{24}`)},
+	{"Slack Webhook", regexp.MustCompile(`https://hooks\\.slack\\.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8,12}/[a-zA-Z0-9_]{24}`)},
 	{"Google API Key", regexp.MustCompile(`AIza[0-9A-Za-z\\-_]{35}`)},
-	{"Google OAuth", regexp.MustCompile(`[0-9]+-[0-9A-Za-z_]{32}\.apps\.googleusercontent\.com`)},
+	{"Google OAuth", regexp.MustCompile(`[0-9]+-[0-9A-Za-z_]{32}\\.apps\\.googleusercontent\\.com`)},
 	{"Private Key", regexp.MustCompile(`-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----`)},
-	{"JWT Token", regexp.MustCompile(`eyJ[A-Za-z0-9-_=]+\.eyJ[A-Za-z0-9-_=]+\.?[A-Za-z0-9-_.+/=]*`)},
+	// JWT pattern intentionally requires reasonable segment lengths to reduce catastrophic backtracking.
+	{"JWT Token", regexp.MustCompile(`\beyJ[0-9A-Za-z-_]{8,}\.[0-9A-Za-z-_]{8,}\.[0-9A-Za-z-_.+/=]{8,}\b`)},
 	{"Stripe Key", regexp.MustCompile(`sk_live_[0-9a-zA-Z]{24}`)},
 	{"Stripe Test Key", regexp.MustCompile(`sk_test_[0-9a-zA-Z]{24}`)},
 	{"Twilio API Key", regexp.MustCompile(`SK[0-9a-fA-F]{32}`)},
@@ -92,9 +95,21 @@ func (t *SecretsScanTool) Execute(_ context.Context, args map[string]any) (tools
 
 	var findings []SecretFinding
 	maxFindings := 100
+	var findingsMu sync.Mutex
 
-	err := filepath.WalkDir(path, func(filePath string, d os.DirEntry, err error) error {
+	// Resolve and validate path to prevent path traversal.
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return tools.Result{IsError: true, Content: "invalid path provided"}, nil
+	}
+	repoRoot, _ := os.Getwd()
+	if !isWithinBase(absPath, repoRoot) {
+		return tools.Result{IsError: true, Content: "path outside repository not allowed"}, nil
+	}
+
+	err = filepath.WalkDir(absPath, func(filePath string, d os.DirEntry, err error) error {
 		if err != nil {
+			// Ignore unreadable paths to avoid leaking information.
 			return nil
 		}
 
@@ -120,10 +135,15 @@ func (t *SecretsScanTool) Execute(_ context.Context, args map[string]any) (tools
 		// Scan file
 		fileFindings, err := scanFile(filePath)
 		if err != nil {
+			// Do not expose file paths or internal errors to the user.
 			return nil
 		}
 
-		findings = append(findings, fileFindings...)
+		if len(fileFindings) > 0 {
+			findingsMu.Lock()
+			findings = append(findings, fileFindings...)
+			findingsMu.Unlock()
+		}
 		if len(findings) >= maxFindings {
 			return filepath.SkipAll
 		}
@@ -132,7 +152,7 @@ func (t *SecretsScanTool) Execute(_ context.Context, args map[string]any) (tools
 	})
 
 	if err != nil && err != filepath.SkipAll {
-		return tools.Result{IsError: true, Content: fmt.Sprintf("scan error: %v", err)}, nil
+		return tools.Result{IsError: true, Content: "scan error occurred"}, nil
 	}
 
 	if len(findings) == 0 {
@@ -168,21 +188,41 @@ type SecretFinding struct {
 }
 
 func scanFile(path string) ([]SecretFinding, error) {
+	// Open file but do not expose detailed errors to the caller.
 	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		// Treat unreadable files as non-fatal and skip them.
+		return nil, nil
 	}
 	defer file.Close()
 
+	// Skip very large files to avoid expensive regex work.
+	const maxFileSize = 5 * 1024 * 1024 // 5 MB
+	if fi, err := file.Stat(); err == nil {
+		if fi.Size() > maxFileSize {
+			return nil, nil
+		}
+	}
+
 	var findings []SecretFinding
 	scanner := bufio.NewScanner(file)
+	// increase buffer slightly but do not allow extremely long lines
+	const maxLineLen = 2000
+	buf := make([]byte, 0, 4096)
+	scanner.Buffer(buf, maxLineLen)
 	lineNum := 0
 
 	for scanner.Scan() {
 		lineNum++
 		line := scanner.Text()
 
+		// Skip overly long lines to mitigate ReDoS risks.
+		if len(line) > maxLineLen {
+			continue
+		}
+
 		for _, sp := range SecretPatterns {
+			// Fast check before expensive operations
 			if sp.Pattern.MatchString(line) {
 				match := sp.Pattern.FindString(line)
 				findings = append(findings, SecretFinding{
@@ -193,6 +233,11 @@ func scanFile(path string) ([]SecretFinding, error) {
 				})
 			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		// Hide internal read errors from users.
+		return findings, fmt.Errorf("read error")
 	}
 
 	return findings, nil
@@ -259,6 +304,13 @@ func (t *DependencyAuditTool) Schema() map[string]any {
 	}
 }
 
+func sanitizeOutputPaths(output, base string) string {
+	if base == "" {
+		return output
+	}
+	return strings.ReplaceAll(output, base, "[REPO]")
+}
+
 func (t *DependencyAuditTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
 	path, _ := tools.StringArg(args, "path")
 	if path == "" {
@@ -270,11 +322,23 @@ func (t *DependencyAuditTool) Execute(ctx context.Context, args map[string]any) 
 		framework = detectPackageManager(path)
 	}
 
-	if framework == "" {
+	// Validate framework and path
+	supported := map[string]bool{"go": true, "npm": true, "pip": true, "cargo": true}
+	if !supported[framework] {
 		return tools.Result{
 			IsError: true,
-			Content: "could not detect package manager",
+			Content: "unsupported framework",
 		}, nil
+	}
+
+	// Resolve and validate path to prevent scanning outside repository
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return tools.Result{IsError: true, Content: "invalid path provided"}, nil
+	}
+	repoRoot, _ := os.Getwd()
+	if !isWithinBase(absPath, repoRoot) {
+		return tools.Result{IsError: true, Content: "path outside repository not allowed"}, nil
 	}
 
 	var cmd *exec.Cmd
@@ -288,15 +352,14 @@ func (t *DependencyAuditTool) Execute(ctx context.Context, args map[string]any) 
 	case "cargo":
 		cmd = exec.CommandContext(ctx, "cargo", "audit")
 	default:
-		return tools.Result{
-			IsError: true,
-			Content: fmt.Sprintf("unsupported framework: %s", framework),
-		}, nil
+		return tools.Result{IsError: true, Content: "unsupported framework"}, nil
 	}
 
-	cmd.Dir = path
+	cmd.Dir = absPath
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)
+	// Sanitize any repository paths from output before returning
+	outputStr = sanitizeOutputPaths(outputStr, repoRoot)
 
 	// Check for vulnerabilities
 	if err != nil {
@@ -372,6 +435,21 @@ func summarizeNpmAudit(output string) string {
 		return strings.Join(summary, "\n")
 	}
 	return output
+}
+
+// isWithinBase reports whether path is inside base directory (or equal).
+func isWithinBase(path, base string) bool {
+	path = filepath.Clean(path)
+	base = filepath.Clean(base)
+	if path == base {
+		return true
+	}
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return false
+	}
+	// If rel starts with ".." then path is outside base
+	return !strings.HasPrefix(rel, "..")
 }
 
 // EstimatedCost returns cost estimates for the secrets scan tool.
