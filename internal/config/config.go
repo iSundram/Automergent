@@ -45,6 +45,7 @@ type Config struct {
 	MCP       MCPConfig                 `mapstructure:"mcp" yaml:"mcp"`
 	Log       LogConfig                 `mapstructure:"log" yaml:"log"`
 	Providers map[string]ProviderConfig `mapstructure:"providers" yaml:"providers"`
+	Git       GitConfig                 `mapstructure:"git" yaml:"git"`
 
 	// Diagnostics holds error detection configuration
 	Diagnostics DiagnosticsConfig `mapstructure:"diagnostics" yaml:"diagnostics"`
@@ -233,4 +234,19 @@ type DiagnosticsConfig struct {
 	BlockOnWarning   bool  `mapstructure:"blockOnWarning" yaml:"blockOnWarning"`
 	MaxFileSizeBytes int64 `mapstructure:"maxFileSizeBytes" yaml:"maxFileSizeBytes"`
 	CacheDurationSec int   `mapstructure:"cacheDurationSec" yaml:"cacheDurationSec"`
+}
+
+// GitConfig holds git-related settings.
+type GitConfig struct {
+	CoAuthor string `mapstructure:"coAuthor" yaml:"coAuthor"` // "always", "never", "ask"
+}
+
+// CoAuthorMode returns the validated co-author mode.
+func (g GitConfig) CoAuthorMode() string {
+	switch g.CoAuthor {
+	case "always", "never", "ask":
+		return g.CoAuthor
+	default:
+		return "ask" // default to ask
+	}
 }

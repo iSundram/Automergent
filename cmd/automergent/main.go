@@ -212,7 +212,7 @@ func run(cmd *cobra.Command, args []string) error {
 	reg.Register(&toolsGit.StatusTool{})
 	reg.Register(&toolsGit.DiffTool{})
 	reg.Register(&toolsGit.LogTool{})
-	reg.Register(&toolsGit.CommitTool{})
+	reg.Register(toolsGit.NewCommitTool(cfg))
 	reg.Register(&toolsGit.AddTool{})
 	reg.Register(&toolsGit.CheckoutTool{})
 	reg.Register(&toolsGit.BranchTool{})

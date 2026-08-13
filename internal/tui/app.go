@@ -36,37 +36,38 @@ type clearCtrlCStatusMsg struct{}
 type hideDiffPaneMsg struct{} // Message to safely hide diff pane from main loop
 
 type App struct {
-	cfg            *config.Config
-	ag             *agent.Agent
-	sess           *session.Session
-	storage        *session.Storage
-	keys           *keys.Bindings
-	styles         *themes.Styles
-	theme          *themes.Theme
-	conversation   components.Conversation
-	diffPane       components.Diff
-	input          components.Input
-	header         components.Header
-	statusBar      components.StatusBar
-	spin           components.Spinner
-	confirm        components.Confirm
-	sessionBrowser components.SessionBrowser
-	lspPanel       components.LSPPanel
-	stats          components.Stats
-	helpOverlay    components.HelpOverlay
-	fileTree       components.FileTree
-	palette        components.CommandPalette
-	width          int
-	height         int
-	thinking       bool
-	statusMsg      string
-	showFileTree   bool
-	showHelp       bool
-	focusMode      bool // When true, show Diff on top and Confirm on bottom
-	ctx            context.Context
-	cancel         context.CancelFunc
-	initialPrompt  string
-	focus          string
+	cfg             *config.Config
+	ag              *agent.Agent
+	sess            *session.Session
+	storage         *session.Storage
+	keys            *keys.Bindings
+	styles          *themes.Styles
+	theme           *themes.Theme
+	conversation    components.Conversation
+	diffPane        components.Diff
+	input           components.Input
+	header          components.Header
+	statusBar       components.StatusBar
+	spin            components.Spinner
+	confirm         components.Confirm
+	coAuthorConfirm components.CoAuthorConfirm
+	sessionBrowser  components.SessionBrowser
+	lspPanel        components.LSPPanel
+	stats           components.Stats
+	helpOverlay     components.HelpOverlay
+	fileTree        components.FileTree
+	palette         components.CommandPalette
+	width           int
+	height          int
+	thinking        bool
+	statusMsg       string
+	showFileTree    bool
+	showHelp        bool
+	focusMode       bool // When true, show Diff on top and Confirm on bottom
+	ctx             context.Context
+	cancel          context.CancelFunc
+	initialPrompt   string
+	focus           string
 
 	availableModels    []ai.Model
 	fetchingModels     bool
@@ -77,6 +78,10 @@ type App struct {
 
 	// pendingDiffHide is set when confirmation completes and diff should be hidden
 	pendingDiffHide bool
+
+	// pendingCommitToolCall stores the tool call when waiting for co-author confirmation
+	pendingCommitToolCall *ai.ToolCall
+	pendingCommitReplyCh  chan agent.ConfirmationResponse
 }
 
 func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string) *App {
@@ -100,6 +105,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		statusBar:          components.NewStatusBar(styles),
 		spin:               components.NewSpinner(styles),
 		confirm:            components.NewConfirm(styles),
+		coAuthorConfirm:    components.NewCoAuthorConfirm(styles, cfg),
 		sessionBrowser:     components.NewSessionBrowser(styles),
 		lspPanel:           components.NewLSPPanel(styles),
 		stats:              components.NewStats(styles),
@@ -210,7 +216,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case tea.KeyMsg:
 		// When diff is visible (fullscreen), route events to diff first
-		if a.diffPane.Visible() && !a.confirm.Visible() {
+		if a.diffPane.Visible() && !a.confirm.Visible() && !a.coAuthorConfirm.Visible() {
 			diff, cmd := a.diffPane.Update(msg)
 			a.diffPane = diff
 			if cmd != nil {
@@ -223,7 +229,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(cmds...)
 		}
 		// When confirmation modal is visible, route key events only to the modal.
-		if !a.confirm.Visible() {
+		if !a.confirm.Visible() && !a.coAuthorConfirm.Visible() {
 			cmd = a.handleKey(m)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -306,6 +312,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.diffPane.Toggle()
 				a.pendingDiffHide = false
 			}
+			a.layout()
+		}
+	}
+	if a.coAuthorConfirm.Visible() {
+		c, cmd := a.coAuthorConfirm.Update(msg)
+		a.coAuthorConfirm = c
+		cmds = append(cmds, cmd)
+		if !a.coAuthorConfirm.Visible() {
 			a.layout()
 		}
 	}
@@ -707,6 +721,47 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventConfirm:
 		if payload, ok := ev.Payload.(map[string]any); ok {
 			if tc, ok := payload["tool_call"].(ai.ToolCall); ok {
+				// Special handling for git_commit with "ask" co-author mode
+				if tc.Name == "git_commit" && a.cfg.Git.CoAuthorMode() == "ask" {
+					// Check if co_author is not already explicitly set
+					if _, hasCoAuthor := tc.Args["co_author"]; !hasCoAuthor {
+						// Store the pending commit and show co-author dialog
+						tcCopy := tc
+						a.pendingCommitToolCall = &tcCopy
+						if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
+							a.pendingCommitReplyCh = replyCh
+						}
+						coAuthorReplyCh := make(chan components.CoAuthorResponse, 1)
+						a.coAuthorConfirm.SetReply(coAuthorReplyCh)
+						a.coAuthorConfirm.Show()
+						a.layout()
+
+						// Handle the co-author response in a goroutine
+						go func() {
+							res := <-coAuthorReplyCh
+
+							// Save preference if requested
+							if res.Save != "" {
+								a.cfg.Git.CoAuthor = res.Save
+								_ = a.cfg.Save()
+							}
+
+							// Set the co_author arg based on user choice
+							if a.pendingCommitToolCall != nil {
+								a.pendingCommitToolCall.Args["co_author"] = res.Include
+							}
+
+							// Now proceed with the regular confirmation
+							if a.pendingCommitReplyCh != nil {
+								a.pendingCommitReplyCh <- agent.ConfirmationResponse{Allow: true}
+							}
+							a.pendingCommitToolCall = nil
+							a.pendingCommitReplyCh = nil
+						}()
+						return a.waitForAgentEvent()
+					}
+				}
+
 				// Use pretty name if possible
 				name := tc.Name
 				switch tc.Name {
@@ -726,6 +781,8 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 					name = "List directory"
 				case "run_shell_command", "run_command", "bash":
 					name = "Run"
+				case "git_commit":
+					name = "Git commit"
 				}
 
 				prompt := fmt.Sprintf("Allow %s?", name)
@@ -967,6 +1024,7 @@ func (a *App) layout() {
 	a.input.SetWidth(a.width)
 	a.palette.SetSize(a.width, a.height)
 	a.confirm.SetSize(a.width, a.height)
+	a.coAuthorConfirm.SetSize(a.width, a.height)
 
 	headerH := lipgloss.Height(a.header.View())
 	statusH := lipgloss.Height(a.statusBar.View())
@@ -974,6 +1032,8 @@ func (a *App) layout() {
 
 	if a.confirm.Visible() {
 		footerH = lipgloss.Height(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
+	} else if a.coAuthorConfirm.Visible() {
+		footerH = lipgloss.Height(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.coAuthorConfirm.View()))
 	} else {
 		footerH = lipgloss.Height(a.input.View())
 		if a.thinking {
@@ -1073,6 +1133,11 @@ func (a *App) View() tea.View {
 	// Overlay confirmation on top of everything (like palette)
 	if a.confirm.Visible() {
 		fullView = a.overlay(fullView, a.confirm.View())
+	}
+
+	// Overlay co-author confirmation
+	if a.coAuthorConfirm.Visible() {
+		fullView = a.overlay(fullView, a.coAuthorConfirm.View())
 	}
 
 	// If palette is visible, overlay it on top of EVERYTHING

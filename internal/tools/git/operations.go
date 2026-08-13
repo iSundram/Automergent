@@ -7,18 +7,30 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/tools"
 )
 
+// CoAuthorTrailer is the co-author line added to commits.
+const CoAuthorTrailer = "Co-authored-by: Automergent <automergent-bot@users.noreply.github.com>"
+
 // CommitTool creates a git commit.
-type CommitTool struct{}
+type CommitTool struct {
+	cfg *config.Config
+}
+
+// NewCommitTool creates a new CommitTool with config.
+func NewCommitTool(cfg *config.Config) *CommitTool {
+	return &CommitTool{cfg: cfg}
+}
 
 func (t *CommitTool) Name() string { return "git_commit" }
 func (t *CommitTool) Description() string {
 	return `Create a git commit with the specified message.
-- Automatically adds co-author trailer
+- Adds co-author trailer based on config (git.coAuthor: always/never/ask)
 - Use --all to stage all changes before committing
-- Use --amend to amend the previous commit`
+- Use --amend to amend the previous commit
+- Use co_author parameter to override config for this commit`
 }
 func (t *CommitTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
@@ -52,6 +64,10 @@ func (t *CommitTool) Schema() map[string]any {
 				"type":        "boolean",
 				"description": "Skip pre-commit and commit-msg hooks.",
 			},
+			"co_author": map[string]any{
+				"type":        "boolean",
+				"description": "Include Automergent co-author trailer. Overrides config setting.",
+			},
 		},
 		"required": []string{"message"},
 	}
@@ -63,8 +79,11 @@ func (t *CommitTool) Execute(ctx context.Context, args map[string]any) (tools.Re
 		return tools.Result{IsError: true, Content: "message is required"}, nil
 	}
 
-	// Add co-author trailer
-	message = message + "\n\nCo-authored-by: Automergent <automergent-bot@users.noreply.github.com>"
+	// Determine whether to add co-author
+	addCoAuthor := t.shouldAddCoAuthor(args)
+	if addCoAuthor {
+		message = message + "\n\n" + CoAuthorTrailer
+	}
 
 	cmdArgs := []string{"commit", "-m", message}
 
@@ -94,8 +113,39 @@ func (t *CommitTool) Execute(ctx context.Context, args map[string]any) (tools.Re
 		}
 		summary = fmt.Sprintf("committed %s", hash)
 	}
+	if addCoAuthor {
+		summary += " (co-authored)"
+	}
 	res.Summary = summary
 	return res, nil
+}
+
+// shouldAddCoAuthor determines if co-author should be added based on config and args.
+func (t *CommitTool) shouldAddCoAuthor(args map[string]any) bool {
+	// Check if explicitly set in args (overrides config)
+	if coAuthor, ok := tools.ArgBool(args, "co_author"); ok {
+		return coAuthor
+	}
+
+	// Fall back to config
+	if t.cfg == nil {
+		return true // default to always if no config
+	}
+
+	mode := t.cfg.Git.CoAuthorMode()
+	switch mode {
+	case "always":
+		return true
+	case "never":
+		return false
+	case "ask":
+		// When "ask", check if co_author was explicitly passed in args
+		// If not, we default to true (the confirmation UI handles the asking)
+		// The actual "ask" UI is handled by the TUI confirmation component
+		return true
+	default:
+		return true
+	}
 }
 
 // AddTool stages files for commit.

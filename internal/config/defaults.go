@@ -123,6 +123,9 @@ func Default() *Config {
 			MaxFileSizeBytes: 1 << 20, // 1 MB
 			CacheDurationSec: 30,
 		},
+		Git: GitConfig{
+			CoAuthor: "ask", // "always", "never", "ask"
+		},
 	}
 }
 
