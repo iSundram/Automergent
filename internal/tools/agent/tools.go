@@ -31,6 +31,7 @@ const (
 )
 
 // AgentInstance represents a running or completed sub-agent.
+// Add synchronization primitives for notifying waiters when the agent finishes.
 type AgentInstance struct {
 	ID          string
 	Name        string
@@ -42,7 +43,10 @@ type AgentInstance struct {
 	StartedAt   time.Time
 	CompletedAt time.Time
 	Turns       []AgentTurn
-	mu          sync.Mutex
+
+	mu      sync.Mutex
+	done    chan struct{}
+	dismiss sync.Once // used to close done channel exactly once
 }
 
 // AgentTurn represents a single turn in a multi-turn agent conversation.
@@ -84,6 +88,11 @@ func (m *AgentManager) SetExecutor(e AgentExecutor) {
 }
 
 func (m *AgentManager) Create(agent *AgentInstance) {
+	// initialize agent notification channel before publishing
+	if agent.done == nil {
+		agent.done = make(chan struct{})
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.agents[agent.ID] = agent
@@ -111,24 +120,39 @@ func (m *AgentManager) List(includeCompleted bool) []*AgentInstance {
 
 // Cleanup removes completed/failed agents older than maxAge to prevent memory leaks.
 func (m *AgentManager) Cleanup(maxAge time.Duration) int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
+	// Gather candidates without holding the write lock to avoid deadlocks with agent locks.
 	cutoff := time.Now().Add(-maxAge)
-	removed := 0
+	var toRemove []string
 
+	m.mu.RLock()
 	for id, a := range m.agents {
+		// copy pointer; evaluate agent state under its lock
+		if a == nil {
+			continue
+		}
 		a.mu.Lock()
 		isCompleted := a.Status == AgentStatusCompleted || a.Status == AgentStatusFailed || a.Status == AgentStatusCancelled
 		completedBefore := a.CompletedAt.Before(cutoff)
 		a.mu.Unlock()
-
 		if isCompleted && completedBefore {
+			toRemove = append(toRemove, id)
+		}
+	}
+	m.mu.RUnlock()
+
+	if len(toRemove) == 0 {
+		return 0
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	removed := 0
+	for _, id := range toRemove {
+		if _, ok := m.agents[id]; ok {
 			delete(m.agents, id)
 			removed++
 		}
 	}
-
 	return removed
 }
 
@@ -140,6 +164,16 @@ func (m *AgentManager) NextID(name string) string {
 		return fmt.Sprintf("agent-%d", m.counter)
 	}
 	return fmt.Sprintf("%s-%d", name, m.counter)
+}
+
+// validate agent type
+func isValidAgentType(t AgentType) bool {
+	switch t {
+	case AgentTypeExplore, AgentTypeTask, AgentTypeGeneralPurpose, AgentTypeCodeReview:
+		return true
+	default:
+		return false
+	}
 }
 
 // TaskTool spawns sub-agents for specialized tasks.
@@ -216,6 +250,10 @@ func (t *TaskTool) Execute(ctx context.Context, args map[string]any) (tools.Resu
 	}
 
 	agentType := AgentType(agentTypeStr)
+	if !isValidAgentType(agentType) {
+		return tools.Result{IsError: true, Content: fmt.Sprintf("invalid agent_type: %s", agentTypeStr)}, nil
+	}
+
 	agentID := GetAgentManager().NextID(name)
 
 	agent := &AgentInstance{
@@ -225,25 +263,36 @@ func (t *TaskTool) Execute(ctx context.Context, args map[string]any) (tools.Resu
 		Prompt:    prompt,
 		Status:    AgentStatusRunning,
 		StartedAt: time.Now(),
+		done:      make(chan struct{}),
 	}
 
 	GetAgentManager().Create(agent)
 
+	finish := func(result string, err error, status AgentStatus) {
+		agent.mu.Lock()
+		defer agent.mu.Unlock()
+		agent.CompletedAt = time.Now()
+		if err != nil {
+			agent.Status = AgentStatusFailed
+			agent.Error = err
+			agent.Result = err.Error()
+			return
+		}
+		agent.Status = status
+		agent.Result = result
+	}
+
 	if mode == "background" {
-		// Run in background
+		// Run in background. Use provided ctx so cancellation is propagated.
 		go func() {
-			result, err := executeAgent(context.Background(), agent, model)
-			agent.mu.Lock()
-			agent.CompletedAt = time.Now()
+			result, err := executeAgent(ctx, agent, model)
 			if err != nil {
-				agent.Status = AgentStatusFailed
-				agent.Error = err
-				agent.Result = err.Error()
+				finish("", err, AgentStatusFailed)
 			} else {
-				agent.Status = AgentStatusCompleted
-				agent.Result = result
+				finish(result, nil, AgentStatusCompleted)
 			}
-			agent.mu.Unlock()
+			// notify waiters exactly once
+			agent.dismiss.Do(func() { close(agent.done) })
 		}()
 
 		return tools.Result{
@@ -258,21 +307,18 @@ func (t *TaskTool) Execute(ctx context.Context, args map[string]any) (tools.Resu
 
 	// Sync mode - wait for result
 	result, err := executeAgent(ctx, agent, model)
-	agent.mu.Lock()
-	agent.CompletedAt = time.Now()
 	if err != nil {
-		agent.Status = AgentStatusFailed
-		agent.Error = err
-		agent.Result = err.Error()
-		agent.mu.Unlock()
+		finish("", err, AgentStatusFailed)
+		// notify any waiters
+		agent.dismiss.Do(func() { close(agent.done) })
 		return tools.Result{
 			IsError: true,
 			Content: fmt.Sprintf("agent %s failed: %v", agentID, err),
 		}, nil
 	}
-	agent.Status = AgentStatusCompleted
-	agent.Result = result
-	agent.mu.Unlock()
+	finish(result, nil, AgentStatusCompleted)
+	// notify any waiters
+	agent.dismiss.Do(func() { close(agent.done) })
 
 	return tools.Result{
 		Content: result,
@@ -286,11 +332,15 @@ func (t *TaskTool) Execute(ctx context.Context, args map[string]any) (tools.Resu
 
 func executeAgent(ctx context.Context, agent *AgentInstance, model string) (string, error) {
 	manager := GetAgentManager()
-	if manager.executor == nil {
+	// read executor under RLock to avoid races
+	manager.mu.RLock()
+	exec := manager.executor
+	manager.mu.RUnlock()
+	if exec == nil {
 		// Fallback: return a placeholder (in real implementation, this would call the AI)
 		return fmt.Sprintf("[Agent %s would execute: %s]", agent.Type, agent.Prompt), nil
 	}
-	return manager.executor.Execute(ctx, agent.Type, agent.Prompt, model)
+	return exec.Execute(ctx, agent.Type, agent.Prompt, model)
 }
 
 // ReadAgentTool retrieves results from a background agent.
@@ -341,11 +391,15 @@ func (t *ReadAgentTool) Execute(ctx context.Context, args map[string]any) (tools
 		wait = v
 	}
 
+	// validate timeout: ensure positive and within bounds
 	timeout := 10
-	if t, ok := tools.ArgInt(args, "timeout"); ok {
-		timeout = t
-		if timeout > 60 {
+	if tIn, ok := tools.ArgInt(args, "timeout"); ok {
+		if tIn <= 0 {
+			timeout = 10
+		} else if tIn > 60 {
 			timeout = 60
+		} else {
+			timeout = tIn
 		}
 	}
 
@@ -355,15 +409,23 @@ func (t *ReadAgentTool) Execute(ctx context.Context, args map[string]any) (tools
 	}
 
 	if wait {
-		deadline := time.Now().Add(time.Duration(timeout) * time.Second)
-		for time.Now().Before(deadline) {
-			agent.mu.Lock()
-			if agent.Status == AgentStatusCompleted || agent.Status == AgentStatusFailed {
-				agent.mu.Unlock()
-				break
+		// quick check if already done
+		agent.mu.Lock()
+		status := agent.Status
+		agent.mu.Unlock()
+		if status != AgentStatusCompleted && status != AgentStatusFailed {
+			// wait using agent.done channel and context; timeout respected
+			timer := time.NewTimer(time.Duration(timeout) * time.Second)
+			defer timer.Stop()
+			select {
+			case <-agent.done:
+				// finished
+			case <-ctx.Done():
+				// respect caller cancellation
+				return tools.Result{IsError: true, Content: "read_agent cancelled"}, nil
+			case <-timer.C:
+				// timeout
 			}
-			agent.mu.Unlock()
-			time.Sleep(500 * time.Millisecond)
 		}
 	}
 
