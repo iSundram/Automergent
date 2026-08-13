@@ -330,17 +330,14 @@ func (si *SearchIndex) scoreEntry(entry *IndexEntry, query SearchQuery) float64 
 			}
 		}
 
-		// Build lowercased joined blobs
+		// Build lowercased joined blobs for faster checks
 		titleLower := strings.ToLower(entry.Title)
 		summaryLower := strings.ToLower(entry.Summary)
 
-		keywordBlob := strings.Join(entry.Keywords, " ")
-		keywordBlobLower := strings.ToLower(keywordBlob)
+		keywordBlobLower := strings.ToLower(strings.Join(entry.Keywords, " "))
+		fileBlobLower := strings.ToLower(strings.Join(entry.FilesTouched, " "))
 
-		fileBlob := strings.Join(entry.FilesTouched, " ")
-		fileBlobLower := strings.ToLower(fileBlob)
-
-		// Check each unique query term once
+		// Check each unique query term once against blobs
 		for _, term := range uniqueTerms {
 			// Title match (highest weight)
 			if strings.Contains(titleLower, term) {
@@ -352,7 +349,7 @@ func (si *SearchIndex) scoreEntry(entry *IndexEntry, query SearchQuery) float64 
 				score += 5.0
 			}
 
-			// Keyword match
+			// Keyword match (string blob contains term)
 			if strings.Contains(keywordBlobLower, term) {
 				score += 2.0
 			}
@@ -402,13 +399,18 @@ func (si *SearchIndex) scoreEntry(entry *IndexEntry, query SearchQuery) float64 
 		score += 5.0
 	}
 
-	// Time range filter
+	// Time range filter (required match)
 	if query.TimeRange != nil {
 		if !query.TimeRange.After.IsZero() && entry.CreatedAt.Before(query.TimeRange.After) {
 			return 0
 		}
 		if !query.TimeRange.Before.IsZero() && entry.CreatedAt.After(query.TimeRange.Before) {
 			return 0
+		}
+		// If time range is the only filter (no text/tags/project/workdir/tasktype),
+		// treat this as a match with a small base score so results are returned.
+		if query.Text == "" && len(query.Tags) == 0 && query.ProjectPath == "" && query.WorkDir == "" && query.TaskType == "" {
+			score = 1.0
 		}
 	}
 
