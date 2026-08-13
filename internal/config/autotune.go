@@ -195,15 +195,16 @@ func (at *AutoTuner) newMetrics() *TuningMetrics {
 
 // Save persists current state and metrics.
 func (at *AutoTuner) Save() error {
-	at.mu.RLock()
-	defer at.mu.RUnlock()
+	// Use exclusive lock for saving to avoid races with writers
+	at.mu.Lock()
+	defer at.mu.Unlock()
 
 	// Save state
 	stateData, err := json.MarshalIndent(at.state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal state: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(at.dataPath, "state.json"), stateData, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(at.dataPath, "state.json"), stateData, 0o600); err != nil {
 		return fmt.Errorf("write state: %w", err)
 	}
 
@@ -212,7 +213,7 @@ func (at *AutoTuner) Save() error {
 	if err != nil {
 		return fmt.Errorf("marshal metrics: %w", err)
 	}
-	if err := os.WriteFile(filepath.Join(at.dataPath, "metrics.json"), metricsData, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(at.dataPath, "metrics.json"), metricsData, 0o600); err != nil {
 		return fmt.Errorf("write metrics: %w", err)
 	}
 

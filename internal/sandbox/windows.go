@@ -72,11 +72,21 @@ func (s *windowsSandbox) Wrap(_ context.Context, name string, args []string) (st
 }
 
 func (s *windowsSandbox) WrapWithPolicy(_ context.Context, name string, args []string, policy *Policy) (string, []string) {
-	// Windows sandboxing implementation is planned but not yet implemented
-	// This would use Windows APIs like:
-	// - CreateRestrictedToken for token restriction
-	// - CreateProcess with CREATE_BREAKAWAY_FROM_JOB for job objects
-	// - AppContainer for UWP-style isolation
+	// Windows sandboxing is not implemented in this package on non-Windows builds.
+	// IMPORTANT SECURITY NOTE:
+	// - The current implementation is a no-op and will execute commands without
+	//   additional Windows-specific isolation. Do NOT rely on this for security.
+	// - For production use on Windows, implement one of the following:
+	//   * Job Objects (golang.org/x/sys/windows): create a Job Object, set
+	//     limits and JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE, and assign child processes
+	//     to it so they are terminated together.
+	//   * AppContainer: use AppContainer APIs for stronger filesystem and network
+	//     isolation for UWP-style sandboxes.
+	//   * Restricted tokens/CreateRestrictedToken to remove privileges from the
+	//     child process token.
+	// Until a proper Windows implementation is added, this wrapper intentionally
+	// returns the unmodified command and arguments so callers are aware no sandbox
+	// protections are applied.
 	return name, args
 }
 

@@ -214,12 +214,18 @@ func (t *AddTool) Execute(ctx context.Context, args map[string]any) (tools.Resul
 	}
 
 	// Show what was staged
-	statusResult, _ := runGit(ctx, "status", "--short")
+	statusResult, err := runGit(ctx, "status", "--short")
+	if err != nil {
+		// If we couldn't get status, return the add result and the error
+		return result, err
+	}
 
 	stagedCount := 0
-	lines := strings.Split(strings.TrimSpace(statusResult.Content), "\n")
-	for _, line := range lines {
-		if len(line) >= 2 && line[0] != ' ' && line[0] != '?' {
+	for _, line := range strings.Split(statusResult.Content, "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if len(line) >= minStatusLineLen && line[0] != ' ' && line[0] != '?' {
 			stagedCount++
 		}
 	}
@@ -531,7 +537,7 @@ func (t *BlameTool) Execute(ctx context.Context, args map[string]any) (tools.Res
 			startLine = 1
 		}
 		if !hasEnd {
-			endLine = startLine + 100
+			endLine = startLine + defaultBlameRange
 		}
 		cmdArgs = append(cmdArgs, fmt.Sprintf("-L%d,%d", startLine, endLine))
 	}
@@ -595,40 +601,4 @@ func (t *ShowTool) Execute(ctx context.Context, args map[string]any) (tools.Resu
 	}
 
 	return runGit(ctx, cmdArgs...)
-}
-
-// Helper to run git commands (enhanced version)
-func runGitCmd(ctx context.Context, args ...string) (string, string, error) {
-	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	err := cmd.Run()
-	return stdout.String(), stderr.String(), err
-}
-
-// Updated runGit to use the new helper
-func runGitEnhanced(ctx context.Context, args ...string) (tools.Result, error) {
-	stdout, stderr, err := runGitCmd(ctx, args...)
-
-	output := strings.TrimSpace(stdout)
-	if stderr != "" {
-		if output != "" {
-			output += "\n"
-		}
-		output += "[stderr] " + strings.TrimSpace(stderr)
-	}
-
-	if err != nil {
-		return tools.Result{
-			IsError: true,
-			Content: fmt.Sprintf("git %v failed: %v\n%s", args, err, output),
-		}, nil
-	}
-
-	if output == "" {
-		output = "(no output)"
-	}
-
-	return tools.Result{Content: output}, nil
 }

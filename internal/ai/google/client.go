@@ -371,6 +371,14 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 					continue
 				}
 
+				// Parse function call args if present
+				var parsedArgs map[string]any
+				if part.FunctionCall != nil && len(part.FunctionCall.Args) > 0 {
+					if err := json.Unmarshal(part.FunctionCall.Args, &parsedArgs); err != nil {
+						return nil, fmt.Errorf("google: invalid function call args: %w", err)
+					}
+				}
+
 				// Save for next turn
 				rawParts = append(rawParts, geminiPart{
 					Text:             part.Text,
@@ -380,9 +388,11 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 						if part.FunctionCall == nil {
 							return nil
 						}
-						var args map[string]any
-						_ = json.Unmarshal(part.FunctionCall.Args, &args)
-						return &geminiFunctionCall{Name: part.FunctionCall.Name, Args: args}
+						argsCopy := parsedArgs
+						if argsCopy == nil {
+							argsCopy = map[string]any{}
+						}
+						return &geminiFunctionCall{Name: part.FunctionCall.Name, Args: argsCopy}
 					}(),
 				})
 				if part.Thought {
@@ -391,10 +401,7 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 					text += part.Text
 				}
 				if part.FunctionCall != nil {
-					var args map[string]any
-					if len(part.FunctionCall.Args) > 0 {
-						_ = json.Unmarshal(part.FunctionCall.Args, &args)
-					}
+					args := parsedArgs
 					if args == nil {
 						args = map[string]any{}
 					}
