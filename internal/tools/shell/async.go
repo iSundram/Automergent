@@ -456,7 +456,7 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 	}
 	cmd.Env = env
 
-	stdin, err := cmd.StdinPipe()
+	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		if cancel != nil {
 			cancel()
@@ -464,33 +464,44 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to create stdin pipe: %v", err)}, nil
 	}
 
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	session := &AsyncSession{
-		ID:      shellID,
-		Command: command,
-		Cmd:     cmd,
-		Stdin:   stdin,
-		Stdout:  &stdout,
-		Stderr:  &stderr,
-		Started: time.Now(),
-		cancel:  cancel,
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		stdinPipe.Close()
+		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to create stdout pipe: %v", err)}, nil
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		stdinPipe.Close()
+		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to create stderr pipe: %v", err)}, nil
 	}
 
 	if err := cmd.Start(); err != nil {
+		stdinPipe.Close()
 		if cancel != nil {
 			cancel()
 		}
 		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to start command: %v", err)}, nil
 	}
 
+	// create session and register
+	var stdoutBuf, stderrBuf bytes.Buffer
+	session := &AsyncSession{
+		ID:      shellID,
+		Command: command,
+		Cmd:     cmd,
+		Stdin:   stdinPipe,
+		Stdout:  &stdoutBuf,
+		Stderr:  &stderrBuf,
+		Started: time.Now(),
+		cancel:  cancel,
+	}
+
 	GetManager().Create(shellID, session)
 
 	// Send initial stdin if provided
 	if stdinInput != "" {
-		if _, werr := stdin.Write([]byte(stdinInput)); werr != nil {
-			stdin.Close()
+		if _, werr := stdinPipe.Write([]byte(stdinInput)); werr != nil {
+			stdinPipe.Close()
 			GetManager().Delete(shellID)
 			if cancel != nil {
 				cancel()
@@ -498,16 +509,13 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 			return tools.Result{IsError: true, Content: fmt.Sprintf("failed to write to stdin: %v", werr)}, nil
 		}
 		// close to signal EOF for initial input
-		stdin.Close()
+		stdinPipe.Close()
 		session.mu.Lock()
 		session.Stdin = nil
 		session.mu.Unlock()
 	}
 
 	// copy stdout/stderr into buffers with mutex protection
-	stdoutPipe, _ := cmd.StdoutPipe()
-	stderrPipe, _ := cmd.StderrPipe()
-
 	go func() {
 		buf := make([]byte, 4096)
 		for {
