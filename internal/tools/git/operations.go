@@ -81,7 +81,7 @@ func (t *CommitTool) Execute(ctx context.Context, args map[string]any) (tools.Re
 	if addCoAuthor {
 		trailer := "Co-authored-by: Automergent <automergent-bot@users.noreply.github.com>"
 		if t.cfg != nil {
-			trailer = t.cfg.Git.CoAuthorTrailer()
+			trailer = t.cfg.Git.CoAuthorTrailerValue()
 		}
 		message = message + "\n\n" + trailer
 	}

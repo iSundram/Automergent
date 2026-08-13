@@ -563,6 +563,14 @@ func (a *Agent) requestConfirmation(tc ai.ToolCall) ConfirmationResponse {
 }
 
 func (a *Agent) Emit(eventType string, payload any) {
+	// Recover from potential send-on-closed-channel panics; this guards against
+	// concurrent Close() racing with Emit().
+	defer func() {
+		if r := recover(); r != nil {
+			// swallow panic - channel closed while sending
+		}
+	}()
+
 	// If events channel is closed, drop events to avoid panic
 	a.mu.RLock()
 	closed := a.eventsClosed

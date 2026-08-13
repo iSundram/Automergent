@@ -754,26 +754,43 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 						a.layout()
 
 						// Handle the co-author response in a goroutine
+						// Handle the co-author response in a goroutine
 						go func() {
-							res := <-coAuthorReplyCh
-
-							// Save preference if requested
-							if res.Save != "" {
-								a.cfg.Git.CoAuthor = res.Save
-								_ = a.cfg.Save()
+							select {
+							case res, ok := <-coAuthorReplyCh:
+								if !ok {
+									if a.pendingCommitReplyCh != nil {
+										select {
+										case a.pendingCommitReplyCh <- agent.ConfirmationResponse{Allow: false}:
+										default:
+										}
+									}
+									a.pendingCommitToolCall = nil
+									a.pendingCommitReplyCh = nil
+									return
+								}
+								if res.Save != "" {
+									a.cfg.Git.CoAuthor = res.Save
+									_ = a.cfg.Save()
+								}
+								if a.pendingCommitToolCall != nil {
+									a.pendingCommitToolCall.Args["co_author"] = res.Include
+								}
+								if a.pendingCommitReplyCh != nil {
+									a.pendingCommitReplyCh <- agent.ConfirmationResponse{Allow: true}
+								}
+								a.pendingCommitToolCall = nil
+								a.pendingCommitReplyCh = nil
+							case <-a.ctx.Done():
+								if a.pendingCommitReplyCh != nil {
+									select {
+									case a.pendingCommitReplyCh <- agent.ConfirmationResponse{Allow: false}:
+									default:
+									}
+								}
+								a.pendingCommitToolCall = nil
+								a.pendingCommitReplyCh = nil
 							}
-
-							// Set the co_author arg based on user choice
-							if a.pendingCommitToolCall != nil {
-								a.pendingCommitToolCall.Args["co_author"] = res.Include
-							}
-
-							// Now proceed with the regular confirmation
-							if a.pendingCommitReplyCh != nil {
-								a.pendingCommitReplyCh <- agent.ConfirmationResponse{Allow: true}
-							}
-							a.pendingCommitToolCall = nil
-							a.pendingCommitReplyCh = nil
 						}()
 						return a.waitForAgentEvent()
 					}
@@ -847,8 +864,17 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 						wrapped := make(chan agent.ConfirmationResponse, 1)
 						a.confirm.SetReply(wrapped)
 						go func() {
-							res := <-wrapped
-							replyCh <- res
+							select {
+							case res, ok := <-wrapped:
+								if ok {
+									replyCh <- res
+								}
+							case <-a.ctx.Done():
+								select {
+								case replyCh <- agent.ConfirmationResponse{Allow: false}:
+								default:
+								}
+							}
 						}()
 					}
 				}

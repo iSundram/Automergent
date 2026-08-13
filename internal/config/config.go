@@ -241,7 +241,8 @@ type DiagnosticsConfig struct {
 
 // GitConfig holds git-related settings.
 type GitConfig struct {
-	CoAuthor string `mapstructure:"coAuthor" yaml:"coAuthor"` // "always", "never", "ask"
+	CoAuthor            string `mapstructure:"coAuthor" yaml:"coAuthor"`               // "always", "never", "ask"
+	CoAuthorTrailerLine string `mapstructure:"coAuthorTrailer" yaml:"coAuthorTrailer"` // Custom co-author trailer line
 }
 
 // CoAuthorMode returns the validated co-author mode.
@@ -252,4 +253,12 @@ func (g GitConfig) CoAuthorMode() string {
 	default:
 		return "ask" // default to ask
 	}
+}
+
+// CoAuthorTrailerValue returns the configured co-author trailer or a sensible default.
+func (g GitConfig) CoAuthorTrailerValue() string {
+	if g.CoAuthorTrailer != "" {
+		return g.CoAuthorTrailer
+	}
+	return "Co-authored-by: Automergent <automergent-bot@users.noreply.github.com>"
 }
