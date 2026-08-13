@@ -790,7 +790,12 @@ func (e *Engine) tryWorkStealing() {
 func (e *Engine) checkDependencies(task *Task) bool {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
+	return e.checkDependenciesUnlocked(task)
+}
 
+// checkDependenciesUnlocked checks if all dependencies are met.
+// Assumes e.mu is already held by caller.
+func (e *Engine) checkDependenciesUnlocked(task *Task) bool {
 	for _, depID := range task.Dependencies {
 		dep, ok := e.tasks[depID]
 		if !ok {
@@ -826,7 +831,7 @@ func (e *Engine) processDependentTasks(completedTaskID string) {
 		}
 		task.mu.RUnlock()
 
-		if hasDep && e.checkDependencies(task) {
+		if hasDep && e.checkDependenciesUnlocked(task) {
 			task.mu.Lock()
 			task.Status = TaskStatusQueued
 			task.mu.Unlock()

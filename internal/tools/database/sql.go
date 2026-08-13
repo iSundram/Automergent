@@ -95,6 +95,20 @@ func (t *SQLTool) Execute(_ context.Context, args map[string]any) (tools.Result,
 		return tools.Result{IsError: true, Content: "query is required"}, nil
 	}
 
+	// SECURITY: Validate query for SQL injection patterns
+	// This is a basic defense layer for the stub implementation.
+	// TODO: When implementing SQLite, ALWAYS use prepared statements:
+	//   stmt, err := db.PrepareContext(ctx, query)
+	//   rows, err := stmt.QueryContext(ctx, params...)
+	// Prepared statements are the ONLY reliable defense against SQL injection.
+	if err := t.validateQuery(query); err != nil {
+		return tools.Result{
+			Content: fmt.Sprintf("Query validation failed: %v", err),
+			Summary: "Query rejected for security",
+			IsError: true,
+		}, err
+	}
+
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -118,6 +132,77 @@ func (t *SQLTool) Execute(_ context.Context, args map[string]any) (tools.Result,
 	return tools.Result{
 		Content: fmt.Sprintf("Query noted: %s\n(Note: Full SQL support requires SQLite integration)", query),
 	}, nil
+}
+
+// validateQuery performs basic SQL injection detection.
+// This is a defense-in-depth measure for the stub implementation.
+// IMPORTANT: This is NOT sufficient for production use.
+// Real SQL execution MUST use prepared statements with parameterized queries.
+func (t *SQLTool) validateQuery(query string) error {
+	// Check for common SQL injection patterns
+	dangerous := []struct {
+		pattern string
+		reason  string
+	}{
+		{"--", "SQL comment marker"},
+		{"/*", "SQL block comment start"},
+		{"*/", "SQL block comment end"},
+		{";--", "statement terminator with comment"},
+		{"' OR '", "OR injection pattern"},
+		{"\" OR \"", "OR injection pattern (double quotes)"},
+		{"' OR 1=1", "always-true condition"},
+		{"\" OR 1=1", "always-true condition (double quotes)"},
+		{"UNION SELECT", "UNION-based injection"},
+		{"UNION ALL SELECT", "UNION-based injection"},
+		{"DROP TABLE", "table deletion attempt"},
+		{"DROP DATABASE", "database deletion attempt"},
+		{"EXEC ", "stored procedure execution"},
+		{"EXECUTE ", "stored procedure execution"},
+		{"xp_", "SQL Server extended procedure"},
+		{"sp_", "SQL Server stored procedure"},
+		{"SCRIPT", "XSS via SQL"},
+		{"JAVASCRIPT", "XSS via SQL"},
+		{"ONERROR", "XSS via SQL"},
+		{"<SCRIPT", "XSS via SQL"},
+		{"WAITFOR DELAY", "time-based blind injection"},
+		{"BENCHMARK(", "MySQL time-based injection"},
+		{"SLEEP(", "MySQL time-based injection"},
+		{"PG_SLEEP(", "PostgreSQL time-based injection"},
+		{"DBMS_LOCK", "Oracle time-based injection"},
+	}
+
+	queryUpper := strings.ToUpper(query)
+	queryUpper = strings.ReplaceAll(queryUpper, " ", " ") // normalize whitespace
+
+	for _, d := range dangerous {
+		if strings.Contains(queryUpper, strings.ToUpper(d.pattern)) {
+			return fmt.Errorf("potentially dangerous SQL pattern detected: %s (%s)", d.pattern, d.reason)
+		}
+	}
+
+	// Check for suspicious quote patterns
+	singleQuotes := strings.Count(query, "'")
+	doubleQuotes := strings.Count(query, "\"")
+	if singleQuotes%2 != 0 {
+		return fmt.Errorf("unbalanced single quotes detected (possible injection)")
+	}
+	if doubleQuotes%2 != 0 {
+		return fmt.Errorf("unbalanced double quotes detected (possible injection)")
+	}
+
+	// Check for multiple statements (semicolon outside of strings)
+	// Simple heuristic: if there's a semicolon that's not at the end, flag it
+	trimmedQuery := strings.TrimSpace(query)
+	semicolonIndex := strings.Index(trimmedQuery, ";")
+	if semicolonIndex >= 0 && semicolonIndex < len(trimmedQuery)-1 {
+		// Allow semicolon only at the very end
+		afterSemicolon := strings.TrimSpace(trimmedQuery[semicolonIndex+1:])
+		if afterSemicolon != "" {
+			return fmt.Errorf("multiple statements detected (semicolon not at end)")
+		}
+	}
+
+	return nil
 }
 
 func (t *SQLTool) handleSelect(query string) (tools.Result, error) {

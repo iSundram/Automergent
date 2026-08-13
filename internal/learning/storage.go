@@ -37,7 +37,7 @@ type Storage interface {
 	DeleteKnowledge(ctx context.Context, id string) error
 
 	// User Profiles
-	SaveUserProfile(ctx context.Context, profile UserProfile) error
+	SaveUserProfile(ctx context.Context, profile *UserProfile) error
 	GetUserProfile(ctx context.Context, userID string) (*UserProfile, error)
 
 	// Project Context
@@ -412,12 +412,34 @@ func (s *FileStorage) DeleteKnowledge(ctx context.Context, id string) error {
 }
 
 // SaveUserProfile saves a user profile.
-func (s *FileStorage) SaveUserProfile(ctx context.Context, profile UserProfile) error {
+func (s *FileStorage) SaveUserProfile(ctx context.Context, profile *UserProfile) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	path := filepath.Join(s.baseDir, "profiles", profile.UserID+".json")
-	return s.writeJSON(path, profile)
+	// Create a copy without the mutex for JSON encoding
+	profileCopy := struct {
+		UserID      string              `json:"user_id"`
+		ID          string              `json:"id"`
+		CreatedAt   time.Time           `json:"created_at"`
+		UpdatedAt   time.Time           `json:"updated_at"`
+		Version     int                 `json:"version"`
+		Patterns    map[string]*Pattern `json:"patterns,omitempty"`
+		Preferences UserPreferences     `json:"preferences"`
+		Stats       ProfileStats        `json:"stats"`
+		Privacy     PrivacySettings     `json:"privacy"`
+	}{
+		UserID:      profile.UserID,
+		ID:          profile.ID,
+		CreatedAt:   profile.CreatedAt,
+		UpdatedAt:   profile.UpdatedAt,
+		Version:     profile.Version,
+		Patterns:    profile.Patterns,
+		Preferences: profile.Preferences,
+		Stats:       profile.Stats,
+		Privacy:     profile.Privacy,
+	}
+	return s.writeJSON(path, profileCopy)
 }
 
 // GetUserProfile retrieves a user profile.

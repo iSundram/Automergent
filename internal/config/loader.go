@@ -819,8 +819,15 @@ func (l *Loader) watchLoop() {
 			if err != nil {
 				continue
 			}
-			// Notify listeners
-			for _, fn := range l.onReload {
+
+			// Get callbacks under lock to avoid race condition
+			l.mu.RLock()
+			callbacks := make([]func(*Config), len(l.onReload))
+			copy(callbacks, l.onReload)
+			l.mu.RUnlock()
+
+			// Call callbacks outside lock to avoid deadlock
+			for _, fn := range callbacks {
 				fn(cfg)
 			}
 		case err, ok := <-l.watcher.Errors:

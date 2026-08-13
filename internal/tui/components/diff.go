@@ -2,154 +2,349 @@ package components
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
+	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/iSundram/Automergent/internal/tui/render"
+	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
+// DiffAcceptMsg is sent when user accepts the diff.
+type DiffAcceptMsg struct{}
+
+// DiffRejectMsg is sent when user rejects the diff.
+type DiffRejectMsg struct{}
+
 // Hunk represents a single change block in a diff.
 type Hunk struct {
-	Content string
-	Active  bool
+	StartLine int
+	LineCount int
 }
 
-// Diff is a scrollable diff pane with hunk navigation.
+type diffMode int
+
+const (
+	diffModeView diffMode = iota
+	diffModeConfirm
+	diffModeRejectReason
+)
+
+// Diff is a fullscreen scrollable diff viewer with inline confirmation.
 type Diff struct {
-	viewport    viewport.Model
-	styles      *themes.Styles
-	visible     bool
-	focused     bool
-	hunks       []Hunk
-	hunkCursor  int
-	Summary     string
-	Filename    string
-	HideActions bool
+	viewport   viewport.Model
+	styles     *themes.Styles
+	visible    bool
+	rawContent string
+	hunks      []Hunk
+	hunkCursor int
+	Filename   string
+	AddCount   int
+	DelCount   int
+	TotalLines int
+	width      int
+	height     int
+
+	// Confirmation
+	mode        diffMode
+	replyCh     chan agent.ConfirmationResponse
+	rejectInput textinput.Model
 }
+
+// hunkHeaderRe matches unified diff hunk headers
+var hunkHeaderRe = regexp.MustCompile(`^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@`)
 
 // NewDiff creates a new Diff component.
 func NewDiff(styles *themes.Styles) Diff {
-	vp := viewport.New(viewport.WithWidth(40), viewport.WithHeight(20))
-	vp.MouseWheelEnabled = false // Enforce keyboard-only scrolling
-	return Diff{viewport: vp, styles: styles}
+	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+	vp.MouseWheelEnabled = true
+
+	ti := textinput.New()
+	ti.Placeholder = "optional reason..."
+	ti.Prompt = ""
+	ti.Focus()
+
+	return Diff{viewport: vp, styles: styles, rejectInput: ti}
 }
 
-// SetSize updates the component dimensions.
+// SetSize updates dimensions for fullscreen.
 func (d *Diff) SetSize(w, h int) {
-	if w < 10 {
-		w = 10
-	}
-	if h < 5 {
-		h = 5
-	}
-	d.viewport.SetWidth(w - 2)
-	d.viewport.SetHeight(h - 4) // Reserve space for header and optional action bar
+	d.width = w
+	d.height = h
+	d.viewport.SetWidth(w - 6)
+	d.viewport.SetHeight(h - 5)
 	d.refresh()
 }
 
-// SetContent sets and parses the diff content.
+// SetContent parses and sets the diff content.
 func (d *Diff) SetContent(content string) {
-	// Extract filename and summary
-	plus := strings.Count(content, "\n+")
-	minus := strings.Count(content, "\n-")
-	d.Summary = fmt.Sprintf("󰐙 %d  󰍵 %d", plus, minus)
-
+	d.rawContent = content
 	lines := strings.Split(content, "\n")
+	d.TotalLines = len(lines)
+
+	// Count changes
+	d.AddCount, d.DelCount = 0, 0
+	for _, line := range lines {
+		if strings.HasPrefix(line, "+") && !strings.HasPrefix(line, "+++") {
+			d.AddCount++
+		} else if strings.HasPrefix(line, "-") && !strings.HasPrefix(line, "---") {
+			d.DelCount++
+		}
+	}
+
+	// Extract filename
+	d.Filename = ""
 	for _, line := range lines {
 		if strings.HasPrefix(line, "+++ ") {
 			d.Filename = strings.TrimPrefix(line, "+++ ")
+			d.Filename = strings.TrimPrefix(d.Filename, "b/")
 			if idx := strings.Index(d.Filename, "\t"); idx != -1 {
 				d.Filename = d.Filename[:idx]
 			}
-			d.Filename = strings.TrimPrefix(d.Filename, "b/")
+			if strings.HasSuffix(d.Filename, " (proposed)") {
+				d.Filename = strings.TrimSuffix(d.Filename, " (proposed)")
+			}
 			break
 		}
 	}
 
-	// Parse hunks
-	rawHunks := strings.Split(content, "@@")
+	// Find hunks
 	d.hunks = nil
-	if len(rawHunks) > 0 {
-		// First part is usually the file header
-		d.hunks = append(d.hunks, Hunk{Content: rawHunks[0]})
-		for i := 1; i < len(rawHunks); i++ {
-			d.hunks = append(d.hunks, Hunk{Content: "@@" + rawHunks[i]})
+	for i, line := range lines {
+		if hunkHeaderRe.MatchString(line) {
+			d.hunks = append(d.hunks, Hunk{StartLine: i})
 		}
 	}
 	d.hunkCursor = 0
-	if len(d.hunks) > 1 {
-		d.hunkCursor = 1 // Focus first real hunk
-	}
+
 	d.refresh()
+}
+
+// ShowWithConfirm shows diff and waits for user confirmation.
+func (d *Diff) ShowWithConfirm(replyCh chan agent.ConfirmationResponse) {
+	d.visible = true
+	d.mode = diffModeConfirm
+	d.replyCh = replyCh
+	d.rejectInput.Reset()
+	d.scrollToFirstChange()
+}
+
+// scrollToFirstChange scrolls viewport to show the first changed line (+ or -).
+func (d *Diff) scrollToFirstChange() {
+	lines := strings.Split(d.rawContent, "\n")
+
+	// Find first actual change line (+ or - but not --- or +++)
+	for i, line := range lines {
+		if len(line) > 0 {
+			if (line[0] == '+' && !strings.HasPrefix(line, "+++")) ||
+				(line[0] == '-' && !strings.HasPrefix(line, "---")) {
+				// Found first change, scroll to show it with some context above
+				target := i - 3
+				if target < 0 {
+					target = 0
+				}
+				d.viewport.SetYOffset(target)
+				return
+			}
+		}
+	}
+	// No changes found, stay at top
+	d.viewport.SetYOffset(0)
 }
 
 func (d *Diff) refresh() {
-	var sb strings.Builder
-	for i, hunk := range d.hunks {
-		content := hunk.Content
-
-		// If hunk is very large and not focused, truncate it for the preview
-		lines := strings.Split(content, "\n")
-		if len(lines) > 20 && i != d.hunkCursor {
-			// Show first 5 and last 5 lines
-			newLines := append(lines[:5], "  ...")
-			newLines = append(newLines, lines[len(lines)-5:]...)
-			content = strings.Join(newLines, "\n")
-		}
-
-		rendered := render.Diff(content)
-		if i == d.hunkCursor && d.focused {
-			// Clean highlight: Left border and surface background
-			rendered = lipgloss.NewStyle().
-				Background(d.styles.T.Surface).
-				Border(lipgloss.NormalBorder(), false, false, false, true).
-				BorderForeground(d.styles.T.Accent).
-				Width(d.viewport.Width()-1).
-				Padding(0, 1).
-				Render(rendered)
-		}
-		sb.WriteString(rendered + "\n")
+	if d.rawContent == "" {
+		d.viewport.SetContent("")
+		return
 	}
+
+	lines := strings.Split(d.rawContent, "\n")
+	contentW := d.viewport.Width()
+
+	// Colors
+	addBg := lipgloss.Color("#143d14")
+	delBg := lipgloss.Color("#3d1414")
+	addFg := lipgloss.Color("#a6e3a1")
+	delFg := lipgloss.Color("#f38ba8")
+	hunkFg := lipgloss.Color("#89b4fa")
+	fileFg := lipgloss.Color("#cba6f7")
+	numFg := lipgloss.Color("#6c7086")
+	ctxFg := lipgloss.Color("#9399b2")
+	prefixBg := lipgloss.Color("#1e3a5f") // Blue highlight for +/- prefix
+
+	var sb strings.Builder
+	lineNum := 0
+
+	for _, line := range lines {
+		pad := func(s string) string {
+			w := lipgloss.Width(s)
+			if w < contentW {
+				return s + strings.Repeat(" ", contentW-w)
+			}
+			return s
+		}
+
+		switch {
+		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
+			styled := lipgloss.NewStyle().Foreground(fileFg).Bold(true).Render(line)
+			sb.WriteString("     " + styled + "\n")
+
+		case strings.HasPrefix(line, "@@"):
+			styled := lipgloss.NewStyle().Foreground(hunkFg).Bold(true).Render(line)
+			sb.WriteString("\n     " + styled + "\n")
+			lineNum = 0
+
+		case strings.HasPrefix(line, "+"):
+			lineNum++
+			num := lipgloss.NewStyle().Foreground(numFg).Width(4).Align(lipgloss.Right).Render(fmt.Sprintf("%d", lineNum))
+			// Blue highlight on +, green on rest
+			prefix := lipgloss.NewStyle().Background(prefixBg).Foreground(addFg).Bold(true).Render("+")
+			rest := lipgloss.NewStyle().Background(addBg).Foreground(addFg).Render(pad(line[1:]))
+			sb.WriteString(num + " " + prefix + rest + "\n")
+
+		case strings.HasPrefix(line, "-"):
+			num := lipgloss.NewStyle().Foreground(numFg).Width(4).Align(lipgloss.Right).Render("-")
+			// Blue highlight on -, red on rest
+			prefix := lipgloss.NewStyle().Background(prefixBg).Foreground(delFg).Bold(true).Render("-")
+			rest := lipgloss.NewStyle().Background(delBg).Foreground(delFg).Render(pad(line[1:]))
+			sb.WriteString(num + " " + prefix + rest + "\n")
+
+		case line == "":
+			lineNum++
+			sb.WriteString("\n")
+
+		default:
+			lineNum++
+			num := lipgloss.NewStyle().Foreground(numFg).Width(4).Align(lipgloss.Right).Render(fmt.Sprintf("%d", lineNum))
+			content := lipgloss.NewStyle().Foreground(ctxFg).Render(line)
+			sb.WriteString(num + " " + content + "\n")
+		}
+	}
+
 	d.viewport.SetContent(sb.String())
 }
 
-// Toggle shows or hides the diff pane.
+// Toggle visibility.
 func (d *Diff) Toggle() { d.visible = !d.visible }
 
-// Visible reports whether the pane is visible.
-func (d *Diff) Visible() bool { return d.visible }
-
-// Focus sets the focused state
-func (d *Diff) Focus(focus bool) {
-	d.focused = focus
-	d.refresh()
+// Show the diff.
+func (d *Diff) Show() {
+	d.visible = true
+	d.scrollToFirstChange()
 }
 
-// Update processes viewport and hunk navigation.
+// Hide the diff and reset mode.
+func (d *Diff) Hide() {
+	d.visible = false
+	d.mode = diffModeView
+	d.replyCh = nil
+	d.rejectInput.Reset()
+}
+
+// Visible returns visibility state.
+func (d *Diff) Visible() bool { return d.visible }
+
+// Focus is no-op for fullscreen.
+func (d *Diff) Focus(_ bool) {}
+
+// Update handles input.
 func (d Diff) Update(msg tea.Msg) (Diff, tea.Cmd) {
 	if !d.visible {
 		return d, nil
 	}
 
-	if km, ok := msg.(tea.KeyMsg); ok && d.focused {
+	// Handle reject reason input mode
+	if d.mode == diffModeRejectReason {
+		if km, ok := msg.(tea.KeyMsg); ok {
+			switch km.String() {
+			case "enter":
+				// Submit rejection with reason
+				reason := strings.TrimSpace(d.rejectInput.Value())
+				if d.replyCh != nil {
+					select {
+					case d.replyCh <- agent.ConfirmationResponse{Allow: false, Feedback: reason}:
+					default:
+					}
+				}
+				d.Hide()
+				return d, nil
+			case "esc":
+				// Skip reason, just reject
+				if d.replyCh != nil {
+					select {
+					case d.replyCh <- agent.ConfirmationResponse{Allow: false}:
+					default:
+					}
+				}
+				d.Hide()
+				return d, nil
+			}
+		}
+		// Update text input
+		var cmd tea.Cmd
+		d.rejectInput, cmd = d.rejectInput.Update(msg)
+		return d, cmd
+	}
+
+	if km, ok := msg.(tea.KeyMsg); ok {
 		switch km.String() {
-		case "n", "down", "j":
-			if d.hunkCursor < len(d.hunks)-1 {
-				d.hunkCursor++
-				d.refresh()
-				// Scroll viewport to active hunk (approximate)
-				d.viewport.SetYOffset(d.hunkCursor * 5)
+		case "y", "Y", "enter":
+			if d.mode == diffModeConfirm && d.replyCh != nil {
+				select {
+				case d.replyCh <- agent.ConfirmationResponse{Allow: true}:
+				default:
+				}
+				d.Hide()
+				return d, nil
 			}
-		case "p", "up", "k":
-			if d.hunkCursor > 0 {
-				d.hunkCursor--
-				d.refresh()
-				d.viewport.SetYOffset(d.hunkCursor * 5)
+		case "a", "A":
+			if d.mode == diffModeConfirm && d.replyCh != nil {
+				select {
+				case d.replyCh <- agent.ConfirmationResponse{Allow: true, Always: true}:
+				default:
+				}
+				d.Hide()
+				return d, nil
 			}
+		case "n", "N":
+			if d.mode == diffModeConfirm && d.replyCh != nil {
+				// Enter reject reason mode
+				d.mode = diffModeRejectReason
+				d.rejectInput.Focus()
+				return d, textinput.Blink
+			}
+			d.visible = false
+			return d, nil
+		case "q", "esc":
+			if d.mode == diffModeConfirm && d.replyCh != nil {
+				// Quick reject without reason
+				select {
+				case d.replyCh <- agent.ConfirmationResponse{Allow: false}:
+				default:
+				}
+				d.Hide()
+				return d, nil
+			}
+			d.visible = false
+			return d, nil
+		case "g":
+			d.viewport.SetYOffset(0)
+			return d, nil
+		case "G":
+			d.viewport.GotoBottom()
+			return d, nil
+		case "j", "down":
+			vp, cmd := d.viewport.Update(msg)
+			d.viewport = vp
+			return d, cmd
+		case "k", "up":
+			vp, cmd := d.viewport.Update(msg)
+			d.viewport = vp
+			return d, cmd
 		}
 	}
 
@@ -158,43 +353,101 @@ func (d Diff) Update(msg tea.Msg) (Diff, tea.Cmd) {
 	return d, cmd
 }
 
-// View renders the diff pane.
+// View renders fullscreen diff with inline confirmation.
 func (d Diff) View() string {
 	if !d.visible {
 		return ""
 	}
 
+	bg := d.styles.T.Background
+
 	// Header
-	headerLabel := d.styles.Bold.Foreground(d.styles.T.Accent).Render(" 󰛓 DIFF: " + d.Filename)
+	icon := lipgloss.NewStyle().Foreground(d.styles.T.Accent).Render("󰈙 ")
+	filename := lipgloss.NewStyle().Bold(true).Foreground(d.styles.T.Text).Render(d.Filename)
+	addLabel := lipgloss.NewStyle().Foreground(d.styles.T.Green).Bold(true).Render(fmt.Sprintf("+%d", d.AddCount))
+	delLabel := lipgloss.NewStyle().Foreground(d.styles.T.Red).Bold(true).Render(fmt.Sprintf("-%d", d.DelCount))
 
-	hunkInfo := ""
-	if len(d.hunks) > 1 {
-		hunkInfo = fmt.Sprintf(" [Hunk %d/%d] ", d.hunkCursor, len(d.hunks)-1)
+	headerW := d.width - 4
+	headerLeft := icon + filename
+	headerRight := addLabel + "  " + delLabel
+	spacer := headerW - lipgloss.Width(headerLeft) - lipgloss.Width(headerRight)
+	if spacer < 1 {
+		spacer = 1
 	}
-	summaryLabel := d.styles.Dim.Render(hunkInfo + d.Summary + " ")
+	header := headerLeft + strings.Repeat(" ", spacer) + headerRight
 
-	availableWidth := d.viewport.Width() + 2
-	spacerWidth := availableWidth - lipgloss.Width(headerLabel) - lipgloss.Width(summaryLabel)
-	if spacerWidth < 1 {
-		spacerWidth = 1
-	}
-	header := headerLabel + strings.Repeat(" ", spacerWidth) + summaryLabel
+	// Separator
+	sep := lipgloss.NewStyle().Foreground(d.styles.T.BorderNormal).Render(strings.Repeat("─", headerW))
 
+	// Content
 	content := d.viewport.View()
 
-	var sections []string
-	sections = append(sections, header, lipgloss.NewStyle().Foreground(d.styles.T.BorderNormal).Faint(true).Render(strings.Repeat("─", availableWidth)), content)
-
-	if !d.HideActions {
-		// Floating action bar for Diff - navigation only
-		actionBar := d.styles.DiffAction.Render(" [n/p] Next/Prev Hunk   [up/down] Scroll   [tab] Focus Input")
-		sections = append(sections, "\n", actionBar)
+	// Scroll indicator
+	yOffset := d.viewport.YOffset()
+	var scrollInfo string
+	if yOffset > 0 {
+		scrollInfo = d.styles.Dim.Render(fmt.Sprintf("↑ %d hidden", yOffset))
+	}
+	remaining := d.TotalLines - yOffset - d.viewport.Height()
+	if remaining > 0 {
+		if scrollInfo != "" {
+			scrollInfo += "  "
+		}
+		scrollInfo += d.styles.Dim.Render(fmt.Sprintf("↓ %d more", remaining))
 	}
 
-	layout := lipgloss.JoinVertical(lipgloss.Left, sections...)
+	// Footer - different for each mode
+	var footer string
+	switch d.mode {
+	case diffModeRejectReason:
+		// Reject reason input - hide hint once user starts typing
+		label := lipgloss.NewStyle().Foreground(d.styles.T.Yellow).Bold(true).Render("Reject reason: ")
+		input := d.rejectInput.View()
+		var hint string
+		if d.rejectInput.Value() == "" {
+			hint = d.styles.Dim.Render("  [Enter] submit  [Esc] skip")
+		}
+		footer = label + input + hint
 
-	if d.focused {
-		return d.styles.ActivePane.Width(availableWidth).Render(layout)
+	case diffModeConfirm:
+		// Confirmation buttons in footer
+		yBtn := lipgloss.NewStyle().Background(d.styles.T.Green).Foreground(d.styles.T.Background).Bold(true).Padding(0, 1).Render("y Accept")
+		aBtn := lipgloss.NewStyle().Background(d.styles.T.Accent).Foreground(d.styles.T.Background).Bold(true).Padding(0, 1).Render("a Always")
+		nBtn := lipgloss.NewStyle().Background(d.styles.T.Red).Foreground(d.styles.T.Background).Bold(true).Padding(0, 1).Render("n Reject")
+		nav := d.styles.Dim.Render("[j/k] scroll  [esc] cancel")
+
+		buttons := yBtn + "  " + aBtn + "  " + nBtn + "    " + nav
+
+		footerSpacer := headerW - lipgloss.Width(scrollInfo) - lipgloss.Width(buttons)
+		if footerSpacer < 1 {
+			footerSpacer = 1
+		}
+		footer = scrollInfo + strings.Repeat(" ", footerSpacer) + buttons
+
+	default:
+		help := d.styles.Dim.Render("[j/k] scroll  [g/G] top/end  [q] close")
+		footerSpacer := headerW - lipgloss.Width(scrollInfo) - lipgloss.Width(help)
+		if footerSpacer < 1 {
+			footerSpacer = 1
+		}
+		footer = scrollInfo + strings.Repeat(" ", footerSpacer) + help
 	}
-	return d.styles.InactivePane.Width(availableWidth).Render(layout)
+
+	// Assemble
+	view := lipgloss.JoinVertical(lipgloss.Left,
+		header,
+		sep,
+		content,
+		sep,
+		footer,
+	)
+
+	// Fullscreen with solid background
+	return lipgloss.NewStyle().
+		Background(bg).
+		Foreground(d.styles.T.Text).
+		Width(d.width).
+		Height(d.height).
+		Padding(1, 2).
+		Render(view)
 }

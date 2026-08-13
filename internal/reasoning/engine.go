@@ -299,31 +299,16 @@ func (e *Engine) execute(ctx context.Context, plan *ExecutionPlan) error {
 		UpdatedAt:    time.Now(),
 	}
 	if err := e.executor.Execute(ctx, plan, e.currentState); err != nil {
+		// Mark tasks as failed, not complete
 		for _, task := range plan.Tasks {
-			if task == nil || task.Status == TaskStatusComplete {
-				continue
-			}
-			task.Status = TaskStatusComplete
-			if task.Result == nil {
-				task.Result = &TaskResult{
-					Success:     true,
-					Output:      fmt.Sprintf("Task %s executed successfully", task.Description),
-					CompletedAt: time.Now(),
-				}
-			} else {
-				task.Result.Success = true
-				task.Result.CompletedAt = time.Now()
+			if task.Status != TaskStatusComplete {
+				task.Status = TaskStatusFailed
+				task.Result.Success = false
+				task.Result.Error = err
 			}
 		}
-		e.currentState.CompletedTasks = e.currentState.CompletedTasks[:0]
-		e.currentState.ActiveTasks = nil
-		e.currentState.FailedTasks = nil
-		for _, task := range plan.Tasks {
-			if task != nil {
-				e.currentState.CompletedTasks = append(e.currentState.CompletedTasks, task.ID)
-			}
-		}
-		return nil
+		// Return the error so verification/recovery can run
+		return fmt.Errorf("execution failed: %w", err)
 	}
 	return nil
 }

@@ -17,6 +17,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/sahilm/fuzzy"
+	"github.com/sergi/go-diff/diffmatchpatch"
 
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/ai"
@@ -208,6 +209,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.layout()
 		return a, nil
 	case tea.KeyMsg:
+		// When diff is visible (fullscreen), route events to diff first
+		if a.diffPane.Visible() && !a.confirm.Visible() {
+			diff, cmd := a.diffPane.Update(msg)
+			a.diffPane = diff
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			// If diff closed itself, continue normal flow
+			if !a.diffPane.Visible() {
+				return a, tea.Batch(cmds...)
+			}
+			return a, tea.Batch(cmds...)
+		}
 		// When confirmation modal is visible, route key events only to the modal.
 		if !a.confirm.Visible() {
 			cmd = a.handleKey(m)
@@ -706,10 +720,11 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 				}
 
 				// Special handling for file edits: show diff
-				if tc.Name == "write_file" || tc.Name == "edit_file" {
+				// Special handling for file edits: show diff with inline confirmation
+				if tc.Name == "write_file" || tc.Name == "edit_file" || tc.Name == "create_file" {
 					path, _ := tc.Args["path"].(string)
 					newContent := ""
-					if tc.Name == "write_file" {
+					if tc.Name == "write_file" || tc.Name == "create_file" {
 						newContent, _ = tc.Args["content"].(string)
 					} else {
 						// Patch: read file and apply patch
@@ -729,30 +744,25 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 					diff := computeSimpleDiff(path, string(oldData), newContent)
 					a.diffPane.SetContent(diff)
 					a.conversation.UpdateToolContent(tc.ID, diff)
-					a.diffPane.HideActions = true
-					a.focusMode = true // Enter Focus Mode
-					if !a.diffPane.Visible() {
-						a.diffPane.Toggle()
-					}
-				}
 
-				a.confirm.Show(prompt)
-				a.layout() // Adjust layout for confirm box
-				if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
-					// Mark that we need to hide diff after confirmation (for file edits)
-					showedDiff := tc.Name == "write_file" || tc.Name == "edit_file"
-					if showedDiff {
+					// Use diff component for confirmation (not separate confirm component)
+					if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
+						a.diffPane.ShowWithConfirm(replyCh)
 						a.pendingDiffHide = true
 					}
-
-					// Wrap reply channel to forward response
-					wrapped := make(chan agent.ConfirmationResponse, 1)
-					a.confirm.SetReply(wrapped)
-					go func() {
-						res := <-wrapped
-						a.focusMode = false // Exit Focus Mode on reply
-						replyCh <- res
-					}()
+					a.layout()
+				} else {
+					// Non-file tools use confirm component
+					a.confirm.Show(prompt)
+					a.layout()
+					if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
+						wrapped := make(chan agent.ConfirmationResponse, 1)
+						a.confirm.SetReply(wrapped)
+						go func() {
+							res := <-wrapped
+							replyCh <- res
+						}()
+					}
 				}
 			}
 		}
@@ -962,44 +972,26 @@ func (a *App) layout() {
 		mainH = 1
 	}
 
-	if a.focusMode {
-		// Focus Mode: Full width Diff on top, Confirm on bottom (via View)
-		a.diffPane.SetSize(a.width, mainH)
-		a.conversation.SetSize(0, 0) // Hide conversation
+	// Diff is now fullscreen overlay - always set to full dimensions
+	a.diffPane.SetSize(a.width, a.height)
+
+	mainW := a.width
+	if a.showFileTree {
+		treeW := 25
+		if a.width > 80 {
+			treeW = a.width / 5
+		}
+		a.fileTree.SetSize(treeW, mainH)
+		mainW = a.width - treeW - 1
+	}
+
+	if a.lspPanel.Visible() {
+		convW := mainW * 70 / 100
+		lspW := mainW - convW - 1
+		a.conversation.SetSize(convW, mainH)
+		a.lspPanel.SetSize(lspW, mainH)
 	} else {
-		mainW := a.width
-		if a.showFileTree {
-			treeW := 25
-			if a.width > 80 {
-				treeW = a.width / 5
-			}
-			a.fileTree.SetSize(treeW, mainH)
-			mainW = a.width - treeW - 1
-		}
-		if a.diffPane.Visible() {
-			convW := mainW * 45 / 100
-			diffW := mainW - convW - 1
-			if a.lspPanel.Visible() {
-				diffW = diffW * 60 / 100
-				lspW := mainW - convW - diffW - 2
-				if lspW < 20 {
-					lspW = 20
-					diffW = mainW - convW - lspW - 2
-				}
-				a.lspPanel.SetSize(lspW, mainH)
-			}
-			a.conversation.SetSize(convW, mainH)
-			a.diffPane.SetSize(diffW, mainH)
-		} else {
-			if a.lspPanel.Visible() {
-				convW := mainW * 70 / 100
-				lspW := mainW - convW - 1
-				a.conversation.SetSize(convW, mainH)
-				a.lspPanel.SetSize(lspW, mainH)
-			} else {
-				a.conversation.SetSize(mainW, mainH)
-			}
-		}
+		a.conversation.SetSize(mainW, mainH)
 	}
 	a.sessionBrowser.SetSize(a.width*3/4, a.height*3/4)
 }
@@ -1029,14 +1021,11 @@ func (a *App) View() tea.View {
 
 	if a.sessionBrowser.Visible() {
 		sections = append(sections, a.sessionBrowser.View())
-	} else if a.focusMode {
-		// Focus Mode: Full width Diff on top
-		sections = append(sections, a.diffPane.View())
 	} else {
 		var mainRow string
 		convView := a.conversation.View()
-		// Only wrap in ActivePane border if we have multiple panes (FileTree, Diff, or LSP)
-		hasOtherPanes := a.showFileTree || a.diffPane.Visible() || a.lspPanel.Visible()
+		// Only wrap in ActivePane border if we have multiple panes (FileTree or LSP)
+		hasOtherPanes := a.showFileTree || a.lspPanel.Visible()
 		if a.focus == "conversation" && hasOtherPanes {
 			convView = a.styles.ActivePane.Width(lipgloss.Width(convView)).Render(convView)
 		}
@@ -1045,28 +1034,32 @@ func (a *App) View() tea.View {
 		} else {
 			mainRow = convView
 		}
-		if a.diffPane.Visible() {
-			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", a.diffPane.View())
-		}
 		if a.lspPanel.Visible() {
 			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", a.lspPanel.View())
 		}
 		sections = append(sections, mainRow)
 	}
 
-	if a.confirm.Visible() {
-		sections = append(sections, lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
-	} else {
-		var footer []string
-		if a.thinking {
-			footer = append(footer, "  "+a.spin.View())
-		}
-		footer = append(footer, a.input.View())
-		sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, footer...))
+	// Always show input/footer (confirmation uses overlay now)
+	var footer []string
+	if a.thinking {
+		footer = append(footer, "  "+a.spin.View())
 	}
+	footer = append(footer, a.input.View())
+	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, footer...))
 	sections = append(sections, statusView)
 
 	fullView := lipgloss.JoinVertical(lipgloss.Left, sections...)
+
+	// Diff is now fullscreen overlay - render on top of everything
+	if a.diffPane.Visible() {
+		fullView = a.diffPane.View()
+	}
+
+	// Overlay confirmation on top of everything (like palette)
+	if a.confirm.Visible() {
+		fullView = a.overlay(fullView, a.confirm.View())
+	}
 
 	// If palette is visible, overlay it on top of EVERYTHING
 	if a.palette.Visible() {
@@ -1159,37 +1152,106 @@ func (a *App) skip(s string, w int) string {
 }
 
 func computeSimpleDiff(filename, old, new string) string {
+	dmp := diffmatchpatch.New()
+
+	// Use line-mode diff for better performance on large files
+	a, b, lineArray := dmp.DiffLinesToChars(old, new)
+	diffs := dmp.DiffMain(a, b, false)
+	diffs = dmp.DiffCharsToLines(diffs, lineArray)
+	diffs = dmp.DiffCleanupSemantic(diffs)
+
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("--- %s (current)\n", filename))
 	sb.WriteString(fmt.Sprintf("+++ %s (proposed)\n", filename))
 
-	oldLines := strings.Split(old, "\n")
-	newLines := strings.Split(new, "\n")
-
-	// Simplified hunk generation: treat the whole change as one hunk for now
-	// but add the standard @@ marker so the Diff component can parse it properly.
-	sb.WriteString(fmt.Sprintf("@@ -1,%d +1,%d @@\n", len(oldLines), len(newLines)))
-
-	max := len(oldLines)
-	if len(newLines) > max {
-		max = len(newLines)
+	// Count lines for hunk header
+	oldLineCount := 0
+	newLineCount := 0
+	for _, d := range diffs {
+		lines := strings.Split(strings.TrimSuffix(d.Text, "\n"), "\n")
+		switch d.Type {
+		case diffmatchpatch.DiffEqual:
+			oldLineCount += len(lines)
+			newLineCount += len(lines)
+		case diffmatchpatch.DiffDelete:
+			oldLineCount += len(lines)
+		case diffmatchpatch.DiffInsert:
+			newLineCount += len(lines)
+		}
 	}
 
-	for i := 0; i < max; i++ {
-		if i < len(oldLines) && i < len(newLines) {
-			if oldLines[i] == newLines[i] {
-				sb.WriteString(" " + oldLines[i] + "\n")
-			} else {
-				sb.WriteString("-" + oldLines[i] + "\n")
-				sb.WriteString("+" + newLines[i] + "\n")
+	sb.WriteString(fmt.Sprintf("@@ -1,%d +1,%d @@\n", oldLineCount, newLineCount))
+
+	// Generate unified diff output with word-level highlighting hints
+	for i, d := range diffs {
+		text := strings.TrimSuffix(d.Text, "\n")
+		lines := strings.Split(text, "\n")
+
+		switch d.Type {
+		case diffmatchpatch.DiffEqual:
+			for _, line := range lines {
+				sb.WriteString(" " + line + "\n")
 			}
-		} else if i < len(oldLines) {
-			sb.WriteString("-" + oldLines[i] + "\n")
-		} else if i < len(newLines) {
-			sb.WriteString("+" + newLines[i] + "\n")
+		case diffmatchpatch.DiffDelete:
+			// Check if next diff is an insert (replacement scenario)
+			if i+1 < len(diffs) && diffs[i+1].Type == diffmatchpatch.DiffInsert {
+				// Word-level diff for replacements
+				insertText := strings.TrimSuffix(diffs[i+1].Text, "\n")
+				insertLines := strings.Split(insertText, "\n")
+
+				// If same number of lines, do inline word diff
+				if len(lines) == len(insertLines) {
+					for j, oldLine := range lines {
+						newLine := insertLines[j]
+						wordDiff := computeWordDiff(dmp, oldLine, newLine)
+						sb.WriteString(wordDiff)
+					}
+					// Mark that we handled the insert
+					diffs[i+1] = diffmatchpatch.Diff{Type: diffmatchpatch.DiffEqual, Text: ""}
+					continue
+				}
+			}
+			for _, line := range lines {
+				sb.WriteString("-" + line + "\n")
+			}
+		case diffmatchpatch.DiffInsert:
+			if d.Text == "" {
+				continue // Already handled in word-diff
+			}
+			for _, line := range lines {
+				sb.WriteString("+" + line + "\n")
+			}
 		}
 	}
 	return sb.String()
+}
+
+// computeWordDiff generates a word-level diff for a single line replacement
+func computeWordDiff(dmp *diffmatchpatch.DiffMatchPatch, oldLine, newLine string) string {
+	wordDiffs := dmp.DiffMain(oldLine, newLine, false)
+	wordDiffs = dmp.DiffCleanupSemantic(wordDiffs)
+
+	var oldSb, newSb strings.Builder
+	hasChanges := false
+
+	for _, wd := range wordDiffs {
+		switch wd.Type {
+		case diffmatchpatch.DiffEqual:
+			oldSb.WriteString(wd.Text)
+			newSb.WriteString(wd.Text)
+		case diffmatchpatch.DiffDelete:
+			oldSb.WriteString("«" + wd.Text + "»")
+			hasChanges = true
+		case diffmatchpatch.DiffInsert:
+			newSb.WriteString("‹" + wd.Text + "›")
+			hasChanges = true
+		}
+	}
+
+	if hasChanges {
+		return fmt.Sprintf("-" + oldSb.String() + "\n+" + newSb.String() + "\n")
+	}
+	return " " + oldLine + "\n"
 }
 
 func formatErrorMessage(errStr string) string {

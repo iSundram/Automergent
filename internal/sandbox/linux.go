@@ -173,6 +173,8 @@ func (s *linuxSandbox) buildBwrapArgs(policy *Policy, command string) []string {
 	}
 
 	// Add seccomp filter if available
+	// NOTE: Custom seccomp filtering is not yet implemented (see generateSeccompProfile).
+	// Bubblewrap applies its own default seccomp profile which provides baseline protection.
 	if s.seccompAvail && len(policy.Syscalls.DeniedSyscalls) > 0 {
 		seccompPath := s.generateSeccompProfile(policy)
 		if seccompPath != "" {
@@ -245,8 +247,20 @@ func (s *linuxSandbox) setupFilesystem(args []string, policy *Policy) []string {
 }
 
 func (s *linuxSandbox) generateSeccompProfile(policy *Policy) string {
-	// Generate BPF seccomp filter
-	// This is a simplified version - a full implementation would compile BPF
+	// TODO: Seccomp BPF filter generation not yet implemented
+	//
+	// Current limitation: While bubblewrap supports seccomp filtering via the --seccomp flag,
+	// generating custom BPF bytecode requires libseccomp-golang or similar. For now, we rely
+	// on bubblewrap's built-in default seccomp profile which blocks dangerous syscalls like
+	// ptrace, personality, and various kernel module operations.
+	//
+	// To fully implement this:
+	// 1. Use github.com/seccomp/libseccomp-golang to generate BPF bytecode
+	// 2. Create a seccomp profile based on policy.Syscalls.DeniedSyscalls
+	// 3. Write the BPF program to a file descriptor that bubblewrap can read
+	// 4. Return the path or fd number for bubblewrap's --seccomp argument
+	//
+	// For now, bubblewrap's default seccomp filter provides baseline protection.
 	return ""
 }
 

@@ -1,18 +1,18 @@
 package components
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"image/color"
 
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
-// Confirm renders an advanced tool confirmation dialog.
+// Confirm renders a clean confirmation dialog as centered overlay.
 type Confirm struct {
 	styles   *themes.Styles
 	visible  bool
@@ -51,6 +51,11 @@ func (c *Confirm) Show(prompt string) {
 	c.feedback.Reset()
 }
 
+// ShowWithDiff is same as Show (diff preview removed for clean UI).
+func (c *Confirm) ShowWithDiff(prompt, _ string) {
+	c.Show(prompt)
+}
+
 // SetReply sets the channel to send the reply to.
 func (c *Confirm) SetReply(ch chan agent.ConfirmationResponse) { c.replyCh = ch }
 
@@ -64,7 +69,7 @@ func (c Confirm) Visible() bool { return c.visible }
 func (c *Confirm) SetSize(w, h int) {
 	c.width = w
 	c.height = h
-	c.feedback.SetWidth(w / 2)
+	c.feedback.SetWidth(40)
 }
 
 // Update handles confirmation selection and feedback input.
@@ -119,7 +124,7 @@ func (c *Confirm) sendResponse(res agent.ConfirmationResponse) {
 	}
 }
 
-// View renders the confirmation prompt.
+// View renders the confirmation dialog.
 func (c Confirm) View() string {
 	if !c.visible {
 		return ""
@@ -128,47 +133,82 @@ func (c Confirm) View() string {
 	var content strings.Builder
 
 	if c.mode == modeFeedback {
-		content.WriteString(c.styles.Bold.Foreground(c.styles.T.Yellow).Render("󰙺 REJECT WITH FEEDBACK") + "\n\n")
+		// Feedback mode
+		header := lipgloss.NewStyle().
+			Foreground(c.styles.T.Yellow).
+			Bold(true).
+			Render("󰙺 REJECT WITH FEEDBACK")
+		content.WriteString(header + "\n\n")
 		content.WriteString(c.feedback.View() + "\n\n")
-		content.WriteString(c.styles.Dim.Render("[enter] Submit  [esc] Cancel"))
+		content.WriteString(c.styles.Dim.Render("[Enter] Submit  [Esc] Cancel"))
 	} else {
-		// Header with warning icon
-		content.WriteString(c.styles.Bold.Foreground(c.styles.T.Accent).Render("󱈸 ACTION REQUIRED") + "\n\n")
+		// Selection mode - clean and simple
+		header := lipgloss.NewStyle().
+			Foreground(c.styles.T.Accent).
+			Bold(true).
+			Render("󱈸 CONFIRM ACTION")
+		content.WriteString(header + "\n\n")
 
-		// Highlight the tool name in the prompt
-		promptDisp := c.prompt
-		if strings.HasPrefix(promptDisp, "Allow ") {
-			parts := strings.SplitN(promptDisp, "Allow ", 2)
-			rest := parts[1]
-			toolName := ""
-			// Find first space or colon
-			if idx := strings.IndexAny(rest, " :"); idx != -1 {
-				toolName = rest[:idx]
-				rest = rest[idx:]
-			} else {
-				toolName = rest
-				rest = ""
-			}
-			promptDisp = "Allow " + c.styles.Bold.Copy().Foreground(c.styles.T.AccentAlt).Render(toolName) + rest
-		}
-		content.WriteString(promptDisp + "\n\n")
+		// Format the prompt
+		prompt := c.formatPrompt()
+		content.WriteString(prompt + "\n\n")
 
-		// Render "Buttons" row
-		buttons := lipgloss.JoinHorizontal(lipgloss.Top,
-			c.renderButton("y", "Allow", c.styles.ConfirmAllow),
-			c.renderButton("a", "Always", c.styles.ConfirmAlways),
-			c.renderButton("n", "Reject", c.styles.ConfirmReject),
-			c.renderButton("f", "Feedback", c.styles.ConfirmFeedback),
-		)
-		content.WriteString(buttons)
+		// Buttons
+		content.WriteString(c.renderButtons())
 	}
 
-	return c.styles.ConfirmBox.
-		Width(c.width / 2).
+	// Fixed width box with solid background
+	boxWidth := 50
+
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(c.styles.T.Accent).
+		Background(c.styles.T.Background).
+		Foreground(c.styles.T.Text).
+		Padding(1, 2).
+		Width(boxWidth).
 		Render(content.String())
 }
 
-func (c Confirm) renderButton(key, desc string, style lipgloss.Style) string {
-	keyText := lipgloss.NewStyle().Underline(true).Render(key)
-	return style.Render(fmt.Sprintf("%s %s", keyText, desc))
+func (c Confirm) formatPrompt() string {
+	prompt := c.prompt
+	if !strings.HasPrefix(prompt, "Allow ") {
+		return prompt
+	}
+
+	rest := strings.TrimPrefix(prompt, "Allow ")
+	actionEnd := strings.IndexAny(rest, " :?")
+	if actionEnd == -1 {
+		actionEnd = len(rest)
+	}
+
+	actionName := rest[:actionEnd]
+	remainder := rest[actionEnd:]
+
+	highlighted := lipgloss.NewStyle().
+		Foreground(c.styles.T.AccentAlt).
+		Bold(true).
+		Render(actionName)
+
+	return "Allow " + highlighted + remainder
+}
+
+func (c Confirm) renderButtons() string {
+	makeButton := func(key, label string, bg color.Color) string {
+		keyStyle := lipgloss.NewStyle().Underline(true).Bold(true)
+		return lipgloss.NewStyle().
+			Background(bg).
+			Foreground(c.styles.T.Background).
+			Bold(true).
+			Padding(0, 1).
+			MarginRight(1).
+			Render(keyStyle.Render(key) + " " + label)
+	}
+
+	return lipgloss.JoinHorizontal(lipgloss.Center,
+		makeButton("y", "Allow", c.styles.T.Green),
+		makeButton("a", "Always", c.styles.T.Accent),
+		makeButton("n", "Reject", c.styles.T.Red),
+		makeButton("f", "Feedback", c.styles.T.Yellow),
+	)
 }

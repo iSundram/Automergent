@@ -169,6 +169,13 @@ func (pr *PatternRecognizer) RecordFileAccess(path string, operation string) {
 	dir := extractDirectory(path)
 	if dir != "" {
 		id := pr.patternID(PatternTypeFile, "dir_"+anonymizePath(dir))
+
+		// Anonymize path if privacy settings require it
+		storedDir := dir
+		if pr.profile != nil && pr.profile.Privacy.AnonymizePaths {
+			storedDir = anonymizePath(dir)
+		}
+
 		pattern, exists := pr.patterns[id]
 		if !exists {
 			pattern = &Pattern{
@@ -177,10 +184,15 @@ func (pr *PatternRecognizer) RecordFileAccess(path string, operation string) {
 				Name:      "Directory pattern",
 				FirstSeen: time.Now(),
 				Data: PatternData{
-					Directories: []string{dir},
+					Directories: []string{storedDir},
 				},
 			}
 			pr.patterns[id] = pattern
+		} else {
+			// Add directory if not already present
+			if !contains(pattern.Data.Directories, storedDir) {
+				pattern.Data.Directories = append(pattern.Data.Directories, storedDir)
+			}
 		}
 		pattern.Frequency++
 		pattern.LastSeen = time.Now()
@@ -599,6 +611,16 @@ func addUnique(slice []string, item string) []string {
 		}
 	}
 	return append(slice, item)
+}
+
+// contains checks if a slice contains an item.
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
 }
 
 // extractTechnicalKeywords finds technical terms in text.

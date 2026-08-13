@@ -447,7 +447,18 @@ func (c *PromptCache) Clear() {
 func (c *PromptCache) Stats() CacheStats {
 	c.stats.mu.RLock()
 	defer c.stats.mu.RUnlock()
-	return *c.stats
+	return CacheStats{
+		Hits:             c.stats.Hits,
+		Misses:           c.stats.Misses,
+		Evictions:        c.stats.Evictions,
+		TotalRequests:    c.stats.TotalRequests,
+		BytesSaved:       c.stats.BytesSaved,
+		LatencySavedMs:   c.stats.LatencySavedMs,
+		SystemPromptHits: c.stats.SystemPromptHits,
+		ContextHits:      c.stats.ContextHits,
+		ConversationHits: c.stats.ConversationHits,
+		ToolHits:         c.stats.ToolHits,
+	}
 }
 
 // Size returns the current cache size in bytes.

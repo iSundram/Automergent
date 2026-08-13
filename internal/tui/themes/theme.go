@@ -228,6 +228,7 @@ func NewStyles(t *Theme) *Styles {
 	s.ConfirmBox = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(t.Accent).
+		Background(t.Background).
 		Padding(1, 2)
 
 	buttonBase := lipgloss.NewStyle().
@@ -236,10 +237,10 @@ func NewStyles(t *Theme) *Styles {
 		Padding(0, 1).
 		MarginRight(1)
 
-	s.ConfirmAllow = buttonBase.Copy().Background(t.Green)
-	s.ConfirmAlways = buttonBase.Copy().Background(t.Accent)
-	s.ConfirmReject = buttonBase.Copy().Background(t.Red)
-	s.ConfirmFeedback = buttonBase.Copy().Background(t.Yellow)
+	s.ConfirmAllow = lipgloss.NewStyle().Inherit(buttonBase).Background(t.Green)
+	s.ConfirmAlways = lipgloss.NewStyle().Inherit(buttonBase).Background(t.Accent)
+	s.ConfirmReject = lipgloss.NewStyle().Inherit(buttonBase).Background(t.Red)
+	s.ConfirmFeedback = lipgloss.NewStyle().Inherit(buttonBase).Background(t.Yellow)
 
 	s.HelpBox = lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
