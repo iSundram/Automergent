@@ -340,6 +340,20 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 						a.layout()
 						return a.handleSlashCommand("/" + sel.Value)
 					}
+					// Commands that need a sub-palette (model, provider, etc.)
+					needsSubPalette := map[string]bool{
+						"model": true, "provider": true, "mode": true,
+					}
+					if needsSubPalette[sel.Value] {
+						a.input.InsertValue(sel.Value)
+						a.updatePalette()
+						a.palette.Show(a.palette.Items(), a.input.TriggerValue())
+						a.layout()
+						if sel.Value == "model" && len(a.availableModels) == 0 {
+							return a.fetchModels()
+						}
+						return nil
+					}
 				}
 				a.input.InsertValue(sel.Value)
 				a.palette.Hide()
@@ -1094,6 +1108,12 @@ func (a *App) overlay(base, over string) string {
 		}
 	}
 
+	// Dim the entire background first
+	dimStyle := lipgloss.NewStyle().Foreground(a.styles.T.Muted)
+	for i := range baseLines {
+		baseLines[i] = dimStyle.Render(stripAnsi(baseLines[i]))
+	}
+
 	for i := 0; i < oH && top+i < bH; i++ {
 		oLine := overLines[i]
 		bLine := baseLines[top+i]
@@ -1149,6 +1169,29 @@ func (a *App) skip(s string, w int) string {
 	// returning empty is safer than misaligning.
 	// If the background contains text we want to KEEP on the right, we'd need a real skip.
 	return ""
+}
+
+// stripAnsi removes ANSI escape sequences from a string.
+func stripAnsi(s string) string {
+	var result strings.Builder
+	i := 0
+	for i < len(s) {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			// Skip until we find a letter (end of escape sequence)
+			j := i + 2
+			for j < len(s) && !((s[j] >= 'A' && s[j] <= 'Z') || (s[j] >= 'a' && s[j] <= 'z')) {
+				j++
+			}
+			if j < len(s) {
+				j++ // skip the final letter
+			}
+			i = j
+		} else {
+			result.WriteByte(s[i])
+			i++
+		}
+	}
+	return result.String()
 }
 
 func computeSimpleDiff(filename, old, new string) string {
