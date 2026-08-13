@@ -109,8 +109,8 @@ func (t *CommitTool) Execute(ctx context.Context, args map[string]any) (tools.Re
 	parts := strings.Split(strings.TrimSpace(res.Content), " ")
 	if len(parts) >= 2 {
 		hash := strings.TrimSuffix(strings.TrimPrefix(parts[1], "["), "]")
-		if len(hash) > 7 {
-			hash = hash[:7]
+		if len(hash) > defaultCommitHashShortLen {
+			hash = hash[:defaultCommitHashShortLen]
 		}
 		summary = fmt.Sprintf("committed %s", hash)
 	}
