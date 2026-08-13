@@ -246,7 +246,7 @@ func run(cmd *cobra.Command, args []string) error {
 	reg.Register(planningPkg.NewReplanTool("."))
 
 	// Interaction tools
-	reg.Register(&toolsInteraction.NotifyTool{})
+	// NotifyTool will be registered after agent creation so it can emit events to the UI.
 
 	// Get AI provider
 	provider, err := resolveProvider(cfg)
@@ -257,6 +257,13 @@ func run(cmd *cobra.Command, args []string) error {
 	// Build agent
 	ag := agent.New(cfg, provider, sess, reg)
 	ag.SetSessionPersist(func() { _ = storage.Save(sess) })
+
+	// Register NotifyTool now that we have an agent to emit UI events.
+	reg.Register(toolsInteraction.NewNotifyTool(func(level string, title string, message string) error {
+		// Use agent events to surface notifications in the TUI
+		ag.Emit(agent.EventNotify, map[string]any{"level": level, "title": title, "message": message})
+		return nil
+	}))
 
 	// Set the main agent as the executor for sub-agent tools.
 	toolsAgent.GetAgentManager().SetExecutor(ag)

@@ -270,7 +270,13 @@ func (a *Agent) summarizeWithLLM(ctx context.Context, messages []ai.Message, pro
 // CompactSessionMessages provides intelligent context compaction with LLM-based summarization.
 // This should be called by the Agent loop when context usage is high.
 func (a *Agent) CompactSessionMessages(ctx context.Context, messages []ai.Message) []ai.Message {
-	if len(messages) <= 10 {
+	// Respect configured compaction thresholds
+	keepRecent := 6
+	if a.cfg != nil && a.cfg.CompressionKeepRecent > 0 {
+		keepRecent = a.cfg.CompressionKeepRecent
+	}
+
+	if len(messages) <= 10 || len(messages) <= keepRecent+2 {
 		return messages
 	}
 
@@ -279,7 +285,7 @@ func (a *Agent) CompactSessionMessages(ctx context.Context, messages []ai.Messag
 	compacted = append(compacted, messages[0])
 
 	// Determine the range to compact
-	startIdx := len(messages) - 6
+	startIdx := len(messages) - keepRecent
 	if startIdx < 1 {
 		startIdx = 1
 	}
@@ -321,7 +327,7 @@ func (a *Agent) CompactSessionMessages(ctx context.Context, messages []ai.Messag
 	// Add important messages
 	compacted = append(compacted, importantMessages...)
 
-	// Keep the most recent 6 messages
+	// Keep the most recent messages
 	compacted = append(compacted, messages[startIdx:]...)
 
 	return compacted

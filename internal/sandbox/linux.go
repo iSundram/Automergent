@@ -247,20 +247,19 @@ func (s *linuxSandbox) setupFilesystem(args []string, policy *Policy) []string {
 }
 
 func (s *linuxSandbox) generateSeccompProfile(policy *Policy) string {
-	// TODO: Seccomp BPF filter generation not yet implemented
+	// Seccomp BPF generation is intentionally not implemented here.
 	//
-	// Current limitation: While bubblewrap supports seccomp filtering via the --seccomp flag,
-	// generating custom BPF bytecode requires libseccomp-golang or similar. For now, we rely
-	// on bubblewrap's built-in default seccomp profile which blocks dangerous syscalls like
-	// ptrace, personality, and various kernel module operations.
+	// SECURITY NOTE:
+	// - Kernel support for seccomp (presence of /proc/sys/kernel/seccomp) does not imply
+	//   that this package can generate or apply custom seccomp BPF programs.
+	// - Generating and loading BPF requires libseccomp or equivalent (e.g. github.com/seccomp/libseccomp-golang),
+	//   which is not linked into this module by default. Implementers should add libseccomp
+	//   integration if they need custom syscall whitelisting.
+	// - When this returns an empty string, no custom seccomp filter will be passed to
+	//   bubblewrap; bubblewrap's internal/default profile (if any) will be relied upon.
 	//
-	// To fully implement this:
-	// 1. Use github.com/seccomp/libseccomp-golang to generate BPF bytecode
-	// 2. Create a seccomp profile based on policy.Syscalls.DeniedSyscalls
-	// 3. Write the BPF program to a file descriptor that bubblewrap can read
-	// 4. Return the path or fd number for bubblewrap's --seccomp argument
-	//
-	// For now, bubblewrap's default seccomp filter provides baseline protection.
+	// If strict syscall filtering is required, extend this function to generate BPF and
+	// return an appropriate descriptor/path that bubblewrap can consume.
 	return ""
 }
 
@@ -346,7 +345,8 @@ func NewCgroupController(name string) (*CgroupController, error) {
 	}
 
 	cgroupPath := filepath.Join(cgroupBase, "automergent-sandbox", name)
-	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
+	// Create cgroup directory with owner-only permissions to avoid information leakage.
+	if err := os.MkdirAll(cgroupPath, 0700); err != nil {
 		return nil, fmt.Errorf("creating cgroup: %w", err)
 	}
 
@@ -432,7 +432,9 @@ func (c *CgroupController) Cleanup() error {
 
 func (c *CgroupController) writeValue(file, value string) error {
 	path := filepath.Join(c.cgroupPath, file)
-	return os.WriteFile(path, []byte(value), 0644)
+	// Write with owner-only permissions where applicable to reduce exposure.
+	// Note: many cgroup pseudo-files ignore mode bits, but keep conservative mode here.
+	return os.WriteFile(path, []byte(value), 0600)
 }
 
 // ============================================================================

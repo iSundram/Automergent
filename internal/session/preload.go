@@ -37,6 +37,7 @@ type PreloadConfig struct {
 	MaxPredictedFiles int
 	CacheExpiry       time.Duration
 	MaxCacheItems     int
+	DepthLimit        int
 }
 
 // DefaultPreloadConfig returns sensible defaults.
@@ -46,6 +47,7 @@ func DefaultPreloadConfig() PreloadConfig {
 		MaxPredictedFiles: 5,
 		CacheExpiry:       30 * time.Minute,
 		MaxCacheItems:     10,
+		DepthLimit:        10,
 	}
 }
 
@@ -112,7 +114,7 @@ func (p *Preloader) PreloadProject(projectPath string, config PreloadConfig) (*P
 	}
 
 	// Predict files based on current directory structure
-	ctx.PredictedFiles = p.predictRelevantFiles(projectPath, config.MaxPredictedFiles)
+	ctx.PredictedFiles = p.predictRelevantFiles(projectPath, config.MaxPredictedFiles, config.DepthLimit)
 
 	// Cache the result
 	p.cache[projectPath] = ctx
@@ -121,10 +123,39 @@ func (p *Preloader) PreloadProject(projectPath string, config PreloadConfig) (*P
 	return ctx, nil
 }
 
+// walkWithDepth walks a directory tree with a depth limit.
+func walkWithDepth(root string, maxDepth int, fn filepath.WalkFunc) error {
+	if maxDepth < 0 {
+		return nil
+	}
+
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		// Calculate depth relative to root
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return nil
+		}
+
+		depth := len(strings.Split(strings.TrimPrefix(rel, "."), string(filepath.Separator)))
+		if depth > maxDepth && info.IsDir() {
+			return filepath.SkipDir
+		}
+
+		return fn(path, info, nil)
+	})
+}
+
 // predictRelevantFiles predicts files that might be needed.
-func (p *Preloader) predictRelevantFiles(projectPath string, maxFiles int) []string {
+func (p *Preloader) predictRelevantFiles(projectPath string, maxFiles int, depth int) []string {
 	if maxFiles <= 0 {
 		maxFiles = 5
+	}
+	if depth <= 0 {
+		depth = 10
 	}
 
 	var candidates []fileCandidate
@@ -153,7 +184,7 @@ func (p *Preloader) predictRelevantFiles(projectPath string, maxFiles int) []str
 	}
 
 	// Also check for recently modified files
-	recentlyModified := p.findRecentlyModified(projectPath, 20)
+	recentlyModified := p.findRecentlyModified(projectPath, 20, depth)
 	for _, path := range recentlyModified {
 		candidates = append(candidates, fileCandidate{
 			path:     path,
@@ -226,7 +257,11 @@ func fileTypePriority(filename string) int {
 }
 
 // findRecentlyModified finds recently modified source files.
-func (p *Preloader) findRecentlyModified(projectPath string, maxFiles int) []string {
+func (p *Preloader) findRecentlyModified(projectPath string, maxFiles int, depth int) []string {
+	if depth <= 0 {
+		depth = 10
+	}
+
 	type fileInfo struct {
 		path    string
 		modTime time.Time
@@ -235,7 +270,7 @@ func (p *Preloader) findRecentlyModified(projectPath string, maxFiles int) []str
 	var files []fileInfo
 	cutoff := time.Now().Add(-7 * 24 * time.Hour) // Last week
 
-	_ = filepath.Walk(projectPath, func(path string, info os.FileInfo, err error) error {
+	_ = walkWithDepth(projectPath, depth, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -492,7 +527,7 @@ func detectPrimaryLanguage(projectPath string) string {
 
 	counts := make(map[string]int)
 
-	_ = filepath.Walk(projectPath, func(path string, info os.FileInfo, err error) error {
+	_ = walkWithDepth(projectPath, 10, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}

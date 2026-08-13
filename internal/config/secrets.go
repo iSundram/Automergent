@@ -1,8 +1,14 @@
 package config
 
 import (
+	"crypto/aes"
+	"crypto/cipher"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -156,7 +162,13 @@ func (sm *SecretManager) List() ([]string, error) {
 	return names, nil
 }
 
-// setFileSecret stores a secret in the encrypted file.
+// maxSecretFileSize limits the size of the secrets file to prevent DoS when reading.
+const maxSecretFileSize = 1 << 20 // 1 MiB
+
+// setFileSecret stores a secret in the encrypted file. If an environment passphrase
+// AUTOMERGENT_SECRET_PASSPHRASE is set, the secret will be encrypted with AES-GCM
+// using a key derived via PBKDF2. Otherwise, for backward compatibility, it will
+// be stored as legacy base64-encoded plaintext.
 func (sm *SecretManager) setFileSecret(name, value string) error {
 	secrets, err := sm.loadSecretFile()
 	if err != nil && !os.IsNotExist(err) {
@@ -166,8 +178,18 @@ func (sm *SecretManager) setFileSecret(name, value string) error {
 		secrets = make(map[string]string)
 	}
 
-	// Simple obfuscation (not real encryption - for production use a proper crypto library)
-	secrets[name] = base64.StdEncoding.EncodeToString([]byte(value))
+	pass := os.Getenv("AUTOMERGENT_SECRET_PASSPHRASE")
+	if pass == "" {
+		// Legacy behavior: base64-encode the plaintext (not secure)
+		secrets[name] = base64.StdEncoding.EncodeToString([]byte(value))
+	} else {
+		enc, err := encrypt([]byte(value), pass)
+		if err != nil {
+			return fmt.Errorf("encrypt secret: %w", err)
+		}
+		// Mark as v2 so we can detect and decrypt later
+		secrets[name] = "v2:" + enc
+	}
 
 	return sm.saveSecretFile(secrets)
 }
@@ -184,6 +206,21 @@ func (sm *SecretManager) getFileSecret(name string) (string, error) {
 		return "", fmt.Errorf("secret %q not found", name)
 	}
 
+	// New encrypted format: "v2:<base64(salt||nonce||ciphertext)>"
+	if strings.HasPrefix(encoded, "v2:") {
+		pass := os.Getenv("AUTOMERGENT_SECRET_PASSPHRASE")
+		if pass == "" {
+			return "", fmt.Errorf("secret %q is encrypted but AUTOMERGENT_SECRET_PASSPHRASE is not set", name)
+		}
+		raw := strings.TrimPrefix(encoded, "v2:")
+		dec, err := decrypt(raw, pass)
+		if err != nil {
+			return "", fmt.Errorf("decrypt secret: %w", err)
+		}
+		return string(dec), nil
+	}
+
+	// Legacy base64-encoded plaintext
 	decoded, err := base64.StdEncoding.DecodeString(encoded)
 	if err != nil {
 		return "", fmt.Errorf("decode secret: %w", err)
@@ -217,8 +254,16 @@ func (sm *SecretManager) listFileSecrets() ([]string, error) {
 	return names, nil
 }
 
-// loadSecretFile loads the secret file.
+// loadSecretFile loads the secret file with file size validation to avoid DoS.
 func (sm *SecretManager) loadSecretFile() (map[string]string, error) {
+	st, err := os.Stat(sm.FilePath)
+	if err != nil {
+		return nil, err
+	}
+	if st.Size() > maxSecretFileSize {
+		return nil, fmt.Errorf("secrets file too large: %d bytes", st.Size())
+	}
+
 	content, err := os.ReadFile(sm.FilePath)
 	if err != nil {
 		return nil, err
@@ -249,6 +294,99 @@ func (sm *SecretManager) saveSecretFile(secrets map[string]string) error {
 	}
 
 	return nil
+}
+
+// pbkdf2Key derives a key of desired length using PBKDF2-HMAC-SHA256.
+func pbkdf2Key(password, salt []byte, iter, keyLen int) []byte {
+	// PBKDF2 implementation (HMAC-SHA256)
+	var hLen = sha256.Size
+	nBlocks := (keyLen + hLen - 1) / hLen
+	out := make([]byte, 0, nBlocks*hLen)
+	for block := 1; block <= nBlocks; block++ {
+		// U_1 = PRF(password, salt || INT(block))
+		mac := hmac.New(sha256.New, password)
+		mac.Write(salt)
+		mac.Write([]byte{byte(block >> 24), byte(block >> 16), byte(block >> 8), byte(block)})
+		u := mac.Sum(nil)
+		t := make([]byte, len(u))
+		copy(t, u)
+		for i := 1; i < iter; i++ {
+			mac = hmac.New(sha256.New, password)
+			mac.Write(u)
+			u = mac.Sum(nil)
+			for j := 0; j < len(t); j++ {
+				t[j] ^= u[j]
+			}
+		}
+		out = append(out, t...)
+	}
+	return out[:keyLen]
+}
+
+// encrypt encrypts plaintext with a key derived from passphrase using PBKDF2.
+// Returns base64(salt||nonce||ciphertext).
+func encrypt(plaintext []byte, passphrase string) (string, error) {
+	// Generate salt
+	salt := make([]byte, 16)
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		return "", fmt.Errorf("generate salt: %w", err)
+	}
+	key := pbkdf2Key([]byte(passphrase), salt, 100000, 32)
+
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return "", fmt.Errorf("new cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return "", fmt.Errorf("new gcm: %w", err)
+	}
+
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
+		return "", fmt.Errorf("generate nonce: %w", err)
+	}
+
+	ct := gcm.Seal(nil, nonce, plaintext, nil)
+	buf := make([]byte, 0, len(salt)+len(nonce)+len(ct))
+	buf = append(buf, salt...)
+	buf = append(buf, nonce...)
+	buf = append(buf, ct...)
+	return base64.StdEncoding.EncodeToString(buf), nil
+}
+
+// decrypt reverses encrypt() using the provided passphrase.
+func decrypt(dataB64 string, passphrase string) ([]byte, error) {
+	data, err := base64.StdEncoding.DecodeString(dataB64)
+	if err != nil {
+		return nil, fmt.Errorf("base64 decode: %w", err)
+	}
+	if len(data) < 16 { // salt
+		return nil, fmt.Errorf("ciphertext too short")
+	}
+	salt := data[:16]
+	rest := data[16:]
+
+	key := pbkdf2Key([]byte(passphrase), salt, 100000, 32)
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, fmt.Errorf("new cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("new gcm: %w", err)
+	}
+	nonceSize := gcm.NonceSize()
+	if len(rest) < nonceSize {
+		return nil, fmt.Errorf("ciphertext missing nonce")
+	}
+	nonce := rest[:nonceSize]
+	ct := rest[nonceSize:]
+	pt, err := gcm.Open(nil, nonce, ct, nil)
+	if err != nil {
+		return nil, fmt.Errorf("gcm open: %w", err)
+	}
+	return pt, nil
 }
 
 // ResolveSecretRefs resolves secret references in a config.

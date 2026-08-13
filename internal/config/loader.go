@@ -540,7 +540,7 @@ func (l *Loader) merge() (*Config, error) {
 // applyLayerToConfig applies a map of settings to a config struct.
 func applyLayerToConfig(cfg *Config, data map[string]any) error {
 	for key, value := range data {
-		if err := setConfigField(cfg, key, value); err != nil {
+		if err := SetConfigField(cfg, key, value); err != nil {
 			// Log but don't fail on unknown keys
 			continue
 		}
@@ -548,8 +548,8 @@ func applyLayerToConfig(cfg *Config, data map[string]any) error {
 	return nil
 }
 
-// setConfigField sets a config field by path (e.g., "security.sandbox").
-func setConfigField(cfg *Config, path string, value any) error {
+// SetConfigField sets a config field by path (e.g., "security.sandbox").
+func SetConfigField(cfg *Config, path string, value any) error {
 	parts := strings.Split(path, ".")
 
 	// Handle top-level fields

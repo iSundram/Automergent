@@ -10,6 +10,13 @@ import (
 	"github.com/iSundram/Automergent/internal/tools"
 )
 
+const (
+	minStatusLineLen          = 2   // minimum chars for git status short line (X Y)
+	defaultCommitHashShortLen = 7   // characters to show for short commit hash
+	defaultLogCount           = 10  // default number of commits to show
+	defaultBlameRange         = 100 // default number of lines for blame when end not set
+)
+
 // StatusTool returns the current git status.
 type StatusTool struct{}
 
@@ -40,13 +47,16 @@ func (t *StatusTool) Execute(ctx context.Context, _ map[string]any) (tools.Resul
 		return res, err
 	}
 
-	lines := strings.Split(strings.TrimSpace(res.Content), "\n")
+	lines := strings.Split(res.Content, "\n")
 	staged := 0
 	modified := 0
 	untracked := 0
 
 	for _, line := range lines {
-		if len(line) < 2 {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		if len(line) < minStatusLineLen {
 			continue
 		}
 		if line[0] != ' ' && line[0] != '?' {
@@ -55,13 +65,21 @@ func (t *StatusTool) Execute(ctx context.Context, _ map[string]any) (tools.Resul
 		if line[1] != ' ' {
 			modified++
 		}
-		if line[0] == '?' && line[1] == '?' {
+		if strings.HasPrefix(line, "??") {
 			untracked++
 		}
 	}
 
 	summary := "clean"
-	if len(lines) > 0 && lines[0] != "" {
+	// determine if there were any non-empty lines
+	hasAny := false
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			hasAny = true
+			break
+		}
+	}
+	if hasAny {
 		summary = fmt.Sprintf("%d staged, %d modified", staged, modified)
 		if untracked > 0 {
 			summary += fmt.Sprintf(", %d untracked", untracked)
@@ -144,7 +162,7 @@ func (t *LogTool) Schema() map[string]any {
 }
 
 func (t *LogTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
-	n := 10
+	n := defaultLogCount
 	if ni, ok := tools.ArgInt(args, "n"); ok && ni > 0 {
 		n = ni
 	}
@@ -153,9 +171,11 @@ func (t *LogTool) Execute(ctx context.Context, args map[string]any) (tools.Resul
 		return res, err
 	}
 
-	count := strings.Count(strings.TrimSpace(res.Content), "\n")
-	if len(strings.TrimSpace(res.Content)) > 0 {
-		count++
+	count := 0
+	for _, l := range strings.Split(res.Content, "\n") {
+		if strings.TrimSpace(l) != "" {
+			count++
+		}
 	}
 	res.Summary = fmt.Sprintf("read %d commits", count)
 	return res, nil
@@ -167,10 +187,8 @@ func runGit(ctx context.Context, args ...string) (tools.Result, error) {
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		return tools.Result{
-			IsError: true,
-			Content: fmt.Sprintf("git %v: %v\n%s", args, err, stderr.String()),
-		}, nil
+		content := fmt.Sprintf("git %v: %v\n%s", args, err, stderr.String())
+		return tools.Result{IsError: true, Content: content}, fmt.Errorf(content)
 	}
 	return tools.Result{Content: stdout.String()}, nil
 }

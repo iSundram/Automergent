@@ -234,9 +234,22 @@ func (t *stdioTransport) readResponses() {
 
 		line, err := t.stdout.ReadBytes('\n')
 		if err != nil {
+			// Propagate connection closure to pending requests
 			if err != io.EOF {
 				t.connected.Store(false)
 			}
+
+			// Notify all pending response channels about the error so callers don't hang.
+			t.respMu.Lock()
+			for id, ch := range t.responses {
+				select {
+				case ch <- nil:
+				default:
+				}
+				delete(t.responses, id)
+			}
+			t.respMu.Unlock()
+
 			return
 		}
 
@@ -255,10 +268,15 @@ func (t *stdioTransport) readResponses() {
 
 		t.respMu.Lock()
 		if ch, ok := t.responses[msg.ID]; ok {
-			if msg.Error != nil {
-				ch <- nil // Signal error via nil
-			} else {
-				ch <- msg.Result
+			// Prefer non-blocking send to avoid goroutine stalls if caller timed out and removed the channel
+			select {
+			case ch <- func() json.RawMessage {
+				if msg.Error != nil {
+					return nil
+				}
+				return msg.Result
+			}():
+			default:
 			}
 			delete(t.responses, msg.ID)
 		}

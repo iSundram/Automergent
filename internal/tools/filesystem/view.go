@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/iSundram/Automergent/internal/tools"
 )
@@ -114,16 +115,25 @@ func viewFileWithLines(path string, args map[string]any) (tools.Result, error) {
 		maxLines = n
 	}
 
-	// Validate start line
+	// Validate start and end lines
 	if startLine < 1 {
 		startLine = 1
 	}
+	if endLine != -1 && endLine < startLine {
+		return tools.Result{IsError: true, Content: fmt.Sprintf("invalid view_range: end_line (%d) is before start_line (%d)", endLine, startLine)}, nil
+	}
 
-	// Read file
-	file, err := os.Open(path)
+	// Open file without following symlinks to avoid TOCTOU through symlink swaps.
+	// If the platform doesn't support O_NOFOLLOW this will return an error.
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
+		// If the error indicates the path is a symlink (ELOOP), refuse to open symlinks.
+		if err == syscall.ELOOP {
+			return tools.Result{IsError: true, Content: fmt.Sprintf("refusing to open symlink: %s", path)}, nil
+		}
 		return tools.Result{IsError: true, Content: fmt.Sprintf("error opening file: %v", err)}, nil
 	}
+	file := os.NewFile(uintptr(fd), path)
 	defer file.Close()
 
 	var lines []string
@@ -197,7 +207,7 @@ func listDirectoryTree(root string, maxDepth int) (tools.Result, error) {
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // Skip errors
+			return err
 		}
 
 		// Get relative path

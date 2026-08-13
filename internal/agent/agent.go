@@ -23,9 +23,12 @@ type Agent struct {
 	sess                *session.Session
 	tools               *tools.Registry
 	events              chan Event
+	closeOnce           sync.Once
+	eventsClosed        bool
 	sessionPersist      func()
 	mu                  sync.RWMutex
 	sessionAllowedTools map[string]bool
+	firstMessageHandled bool
 }
 
 // Execute implements the AgentExecutor interface for sub-agents.
@@ -44,20 +47,24 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 	// 3. Create a child agent.
 	childAgent := New(&childCfg, a.provider, childSess, a.tools)
 
-	// 4. Run the child agent.
-	done := make(chan bool)
+	// 4. Run the child agent with proper cancellation handling.
 	var finalResponse string
 	var finalErr error
+	done := make(chan struct{})
 
+	childCtx, childCancel := context.WithCancel(ctx)
+	defer childCancel()
+
+	// Drain events to avoid blocking child agent. The drainer will exit when the child agent
+	// events channel is closed via childAgent.Close().
 	go func() {
-		// Drain events to avoid blocking child agent
-		go func() {
-			for range childAgent.Events() {
-			}
-		}()
+		for range childAgent.Events() {
+		}
+	}()
 
-		finalErr = childAgent.Run(ctx, prompt)
-
+	// Run the child agent in a goroutine and signal completion on done.
+	go func() {
+		finalErr = childAgent.Run(childCtx, prompt)
 		// Extract the last assistant message as the result
 		if len(childSess.Messages) > 0 {
 			lastMsg := childSess.Messages[len(childSess.Messages)-1]
@@ -65,14 +72,24 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 				finalResponse = lastMsg.TextContent()
 			}
 		}
-		done <- true
+		// Ensure we close the child's event channel so drainers exit.
+		_ = childAgent.Close()
+		close(done)
 	}()
 
 	select {
 	case <-done:
 		return finalResponse, finalErr
 	case <-ctx.Done():
-		return "", ctx.Err()
+		// Parent cancelled: request child cancellation and wait for a short grace period
+		childCancel()
+		select {
+		case <-done:
+			return finalResponse, finalErr
+		case <-time.After(5 * time.Second):
+			// Give up waiting to avoid blocking indefinitely; return the context error
+			return "", ctx.Err()
+		}
 	}
 }
 
@@ -129,6 +146,7 @@ const (
 	EventError     = "error"
 	EventConfirm   = "confirm"
 	EventAskUser   = "ask_user"
+	EventNotify    = "notify"
 	EventStatus    = "status"
 	EventThinking  = "thinking"
 )
@@ -164,6 +182,20 @@ func (a *Agent) tryPersist() {
 	}
 }
 
+// checkAndMarkFirstMessage safely determines whether the current run is the first
+// message handled for this agent and marks it as handled to avoid races.
+func (a *Agent) checkAndMarkFirstMessage() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.firstMessageHandled {
+		return false
+	}
+	isFirst := len(a.sess.Messages) == 0
+	// Mark handled regardless so subsequent runs don't treat this as first.
+	a.firstMessageHandled = true
+	return isFirst
+}
+
 // Events returns the channel of agent events.
 func (a *Agent) Events() <-chan Event { return a.events }
 
@@ -196,7 +228,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 
 	// 1. Initial Triage Phase (Dynamic Workflow)
 	// If this is the very first message, we run a hidden triage loop
-	isFirstMessage := len(a.sess.Messages) == 0
+	isFirstMessage := a.checkAndMarkFirstMessage()
 	if isFirstMessage {
 		a.Emit(EventStatus, "initiating project triage")
 		// Use externalized instruction from triage.go
@@ -515,28 +547,74 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 func (a *Agent) requestConfirmation(tc ai.ToolCall) ConfirmationResponse {
 	ch := make(chan ConfirmationResponse, 1)
 	a.Emit(EventConfirm, map[string]any{"tool_call": tc, "reply": ch})
+	// Use configurable timeout with a sensible default (10 minutes)
+	timeout := 10 * time.Minute
+	if a.cfg != nil && a.cfg.ConfirmationTimeout != "" {
+		if d, err := time.ParseDuration(a.cfg.ConfirmationTimeout); err == nil {
+			timeout = d
+		}
+	}
 	select {
 	case res := <-ch:
 		return res
-	case <-time.After(time.Hour): // Safety timeout
+	case <-time.After(timeout):
 		return ConfirmationResponse{Allow: false}
 	}
 }
 
 func (a *Agent) Emit(eventType string, payload any) {
+	// If events channel is closed, drop events to avoid panic
+	a.mu.RLock()
+	closed := a.eventsClosed
+	a.mu.RUnlock()
+	if closed {
+		return
+	}
+
+	e := Event{Type: eventType, Payload: payload}
+	// Critical events should not be dropped. Block with a short timeout to avoid deadlock.
+	critical := map[string]bool{
+		EventConfirm:   true,
+		EventToolCall:  true,
+		EventToolStart: true,
+		EventToolDone:  true,
+		EventError:     true,
+		EventDone:      true,
+	}
+
+	if critical[eventType] {
+		// Try an immediate send first.
+		select {
+		case a.events <- e:
+			return
+		default:
+		}
+		// Block briefly to ensure delivery for critical events.
+		select {
+		case a.events <- e:
+			return
+		case <-time.After(5 * time.Second):
+			// Give up after timeout to avoid deadlock.
+			return
+		}
+	}
+
+	// Non-critical events: attempt non-blocking send, dropping oldest if buffer is full.
 	select {
-	case a.events <- Event{Type: eventType, Payload: payload}:
+	case a.events <- e:
+		return
 	default:
-		// Channel full - this shouldn't happen with 8192 buffer, but prevent deadlock
-		// Drop oldest event and retry
+		// Drop oldest and retry once
 		select {
 		case <-a.events:
 		default:
 		}
 		select {
-		case a.events <- Event{Type: eventType, Payload: payload}:
+		case a.events <- e:
+			return
 		default:
-			// Still full, drop event rather than block
+			// Still full; drop event
+			return
 		}
 	}
 }
@@ -593,4 +671,19 @@ func gitIsRepo(ctx context.Context, dir string) bool {
 
 func (a *Agent) Shutdown() error {
 	return nil
+}
+
+// Close cleans up agent resources, ensuring the events channel is closed exactly once.
+func (a *Agent) Close() error {
+	var err error
+	a.closeOnce.Do(func() {
+		// Mark closed under lock then close the channel
+		a.mu.Lock()
+		if !a.eventsClosed {
+			a.eventsClosed = true
+			close(a.events)
+		}
+		a.mu.Unlock()
+	})
+	return err
 }

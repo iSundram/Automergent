@@ -2,11 +2,15 @@ package testing
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/iSundram/Automergent/internal/tools"
@@ -89,8 +93,22 @@ func (t *RunTestsTool) Execute(ctx context.Context, args map[string]any) (tools.
 		}, nil
 	}
 
+	// Validate timeout
+	if timeoutStr != "" {
+		if err := validateTimeout(timeoutStr); err != nil {
+			return tools.Result{IsError: true, Content: fmt.Sprintf("invalid timeout: %v", err)}, nil
+		}
+	}
+
+	// Validate pattern
+	if pattern != "" {
+		if err := validatePattern(framework, pattern); err != nil {
+			return tools.Result{IsError: true, Content: fmt.Sprintf("invalid pattern: %v", err)}, nil
+		}
+	}
+
 	// Build command
-	cmd, cmdArgs := buildTestCommand(framework, path, pattern, coverage, timeoutStr)
+	cmd, cmdArgs := buildTestCommand(framework, path, pattern, coverage, timeoutStr, verbose)
 	if cmd == "" {
 		return tools.Result{
 			IsError: true,
@@ -101,22 +119,22 @@ func (t *RunTestsTool) Execute(ctx context.Context, args map[string]any) (tools.
 	// Set timeout
 	timeout := 5 * time.Minute
 	if timeoutStr != "" {
-		if d, err := time.ParseDuration(timeoutStr); err == nil {
-			timeout = d
-		}
+		d, _ := time.ParseDuration(timeoutStr)
+		timeout = d
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	// Run tests
-	execCmd := exec.CommandContext(ctx, cmd, cmdArgs...)
-	execCmd.Dir = path
-
-	output, err := execCmd.CombinedOutput()
+	// Run tests using robust runner that kills child processes on cancel
+	output, err := runCommand(ctx, path, cmd, cmdArgs...)
 	outputStr := string(output)
 
 	if err != nil {
+		// If context deadline exceeded, propagate a clear message
+		if errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded {
+			return tools.Result{IsError: true, Content: "tests timed out"}, nil
+		}
 		// Test failure
 		return tools.Result{
 			IsError: true,
@@ -168,11 +186,37 @@ func detectTestFramework(path string) string {
 		return "npm"
 	}
 
-	// Python
-	if fileExists(filepath.Join(path, "pytest.ini")) ||
-		fileExists(filepath.Join(path, "pyproject.toml")) ||
-		fileExists(filepath.Join(path, "setup.py")) {
+	// Python: be conservative. Prefer pytest only when explicit pytest config is present.
+	if fileExists(filepath.Join(path, "pytest.ini")) || fileExists(filepath.Join(path, "tox.ini")) {
 		return "pytest"
+	}
+	if fileExists(filepath.Join(path, "pyproject.toml")) {
+		// inspect pyproject for [tool.pytest] or pytest in deps
+		if data, err := os.ReadFile(filepath.Join(path, "pyproject.toml")); err == nil {
+			s := string(data)
+			if strings.Contains(s, "[tool.pytest]") || strings.Contains(s, "pytest") {
+				return "pytest"
+			}
+		}
+	}
+	if fileExists(filepath.Join(path, "setup.cfg")) {
+		if data, err := os.ReadFile(filepath.Join(path, "setup.cfg")); err == nil {
+			s := string(data)
+			if strings.Contains(s, "pytest") {
+				return "pytest"
+			}
+		}
+	}
+	if fileExists(filepath.Join(path, "requirements.txt")) {
+		if data, err := os.ReadFile(filepath.Join(path, "requirements.txt")); err == nil {
+			if strings.Contains(string(data), "pytest") {
+				return "pytest"
+			}
+		}
+	}
+	// If setup.py exists but no explicit pytest markers, assume unittest
+	if fileExists(filepath.Join(path, "setup.py")) {
+		return "unittest"
 	}
 
 	// Rust
@@ -186,23 +230,26 @@ func detectTestFramework(path string) string {
 	}
 
 	// Gradle
-	if fileExists(filepath.Join(path, "build.gradle")) ||
-		fileExists(filepath.Join(path, "build.gradle.kts")) {
+	if fileExists(filepath.Join(path, "build.gradle")) || fileExists(filepath.Join(path, "build.gradle.kts")) {
 		return "gradle"
 	}
 
 	return ""
 }
 
-func buildTestCommand(framework, path, pattern string, coverage bool, timeout string) (string, []string) {
+func buildTestCommand(framework, path, pattern string, coverage bool, timeout string, verbose bool) (string, []string) {
 	switch framework {
 	case "go":
 		args := []string{"test", "./..."}
+		// Use -json for stable parsing when not verbose
+		if !verbose {
+			args = append(args, "-json")
+		}
 		if pattern != "" {
 			args = append(args, "-run", pattern)
 		}
 		if coverage {
-			args = append(args, "-cover")
+			args = append(args, "-coverprofile=coverage.out")
 		}
 		if timeout != "" {
 			args = append(args, "-timeout", timeout)
@@ -276,20 +323,41 @@ func buildTestCommand(framework, path, pattern string, coverage bool, timeout st
 }
 
 func summarizeTestOutput(framework, output string) string {
+	// Prefer structured (JSON) parsing when available
+	if framework == "go" {
+		// go test -json emits JSON per-line
+		scanner := strings.Split(output, "\n")
+		pass := 0
+		fail := 0
+		for _, line := range scanner {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			var ev struct {
+				Action string `json:"Action"`
+				Test   string `json:"Test"`
+			}
+			if err := json.Unmarshal([]byte(line), &ev); err == nil {
+				if ev.Test != "" {
+					if ev.Action == "pass" {
+						pass++
+					} else if ev.Action == "fail" {
+						fail++
+					}
+				}
+			}
+		}
+		if fail > 0 {
+			return fmt.Sprintf("❌ %d tests failed, %d passed", fail, pass)
+		}
+		return fmt.Sprintf("✅ %d tests passed", pass)
+	}
+
+	// Fallback: simple string parsing
 	lines := strings.Split(output, "\n")
 	var summary []string
 
 	switch framework {
-	case "go":
-		for _, line := range lines {
-			if strings.Contains(line, "PASS") || strings.Contains(line, "ok") {
-				summary = append(summary, line)
-			}
-		}
-		if len(summary) > 0 {
-			return fmt.Sprintf("✅ All tests passed\n%s", strings.Join(summary[:min(5, len(summary))], "\n"))
-		}
-
 	case "pytest":
 		for _, line := range lines {
 			if strings.Contains(line, "passed") || strings.Contains(line, "PASSED") {
@@ -310,6 +378,73 @@ func summarizeTestOutput(framework, output string) string {
 
 	// Default summary
 	return fmt.Sprintf("✅ Tests passed (output: %d lines)", len(lines))
+}
+
+func validatePattern(framework, pattern string) error {
+	switch framework {
+	case "go":
+		// go -run accepts a regexp
+		if _, err := regexp.Compile(pattern); err != nil {
+			return fmt.Errorf("go regexp invalid: %w", err)
+		}
+	default:
+		// Basic sanity check: no null bytes and reasonable length
+		if strings.Contains(pattern, "\x00") {
+			return errors.New("pattern contains NUL byte")
+		}
+		if len(pattern) > 2000 {
+			return errors.New("pattern too long")
+		}
+	}
+	return nil
+}
+
+func validateTimeout(timeoutStr string) error {
+	d, err := time.ParseDuration(timeoutStr)
+	if err != nil {
+		return err
+	}
+	if d <= 0 {
+		return errors.New("timeout must be positive")
+	}
+	// cap to 24h
+	if d > 24*time.Hour {
+		return errors.New("timeout unreasonably large")
+	}
+	return nil
+}
+
+// runCommand runs a command in its own process group and ensures that when ctx is
+// cancelled all child processes are killed as well.
+func runCommand(ctx context.Context, dir, name string, args ...string) ([]byte, error) {
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	// Create new process group
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	var b strings.Builder
+	cmd.Stdout = &b
+	cmd.Stderr = &b
+
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	select {
+	case <-ctx.Done():
+		// kill process group
+		pgid := cmd.Process.Pid
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		// wait for process to exit
+		<-done
+		return []byte(b.String()), ctx.Err()
+	case err := <-done:
+		return []byte(b.String()), err
+	}
 }
 
 func fileExists(path string) bool {
@@ -379,42 +514,48 @@ func (t *TestCoverageTool) Execute(ctx context.Context, args map[string]any) (to
 func runGoCoverage(ctx context.Context, path, format string) (tools.Result, error) {
 	// Run tests with coverage
 	coverFile := filepath.Join(path, "coverage.out")
-	cmd := exec.CommandContext(ctx, "go", "test", "-coverprofile="+coverFile, "./...")
-	cmd.Dir = path
-	if err := cmd.Run(); err != nil {
-		return tools.Result{IsError: true, Content: fmt.Sprintf("coverage failed: %v", err)}, nil
+	output, err := runCommand(ctx, path, "go", "test", "-coverprofile="+coverFile, "./...")
+	if err != nil {
+		// cleanup
+		_ = os.Remove(coverFile)
+		return tools.Result{IsError: true, Content: fmt.Sprintf("coverage failed: %v\n%s", err, output)}, nil
 	}
 
 	// Get coverage report
 	var args []string
+	htmlFile := filepath.Join(path, "coverage.html")
 	switch format {
 	case "html":
-		htmlFile := filepath.Join(path, "coverage.html")
 		args = []string{"tool", "cover", "-html=" + coverFile, "-o", htmlFile}
 	default:
 		args = []string{"tool", "cover", "-func=" + coverFile}
 	}
 
-	cmd = exec.CommandContext(ctx, "go", args...)
-	cmd.Dir = path
-	output, err := cmd.CombinedOutput()
+	out, err := runCommand(ctx, path, "go", args...)
+	// cleanup coverage files
+	_ = os.Remove(coverFile)
+	if format == "html" {
+		_ = os.Remove(htmlFile)
+	}
 	if err != nil {
-		return tools.Result{IsError: true, Content: fmt.Sprintf("coverage report failed: %v", err)}, nil
+		return tools.Result{IsError: true, Content: fmt.Sprintf("coverage report failed: %v\n%s", err, out)}, nil
 	}
 
-	return tools.Result{Content: string(output)}, nil
+	return tools.Result{Content: string(out)}, nil
 }
 
 func runPytestCoverage(ctx context.Context, path, format string) (tools.Result, error) {
 	args := []string{"--cov=" + path, "--cov-report=" + format}
-	cmd := exec.CommandContext(ctx, "pytest", args...)
-	cmd.Dir = path
-	output, err := cmd.CombinedOutput()
+	out, err := runCommand(ctx, path, "pytest", args...)
+	// cleanup common pytest coverage artifacts
+	_ = os.Remove(filepath.Join(path, ".coverage"))
+	_ = os.Remove(filepath.Join(path, "coverage.xml"))
+	_ = os.RemoveAll(filepath.Join(path, "htmlcov"))
 	if err != nil {
-		return tools.Result{IsError: true, Content: fmt.Sprintf("coverage failed: %v\n%s", err, output)}, nil
+		return tools.Result{IsError: true, Content: fmt.Sprintf("coverage failed: %v\n%s", err, out)}, nil
 	}
 
-	return tools.Result{Content: string(output)}, nil
+	return tools.Result{Content: string(out)}, nil
 }
 
 // EstimatedCost returns cost estimates for the run tests tool.

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -258,7 +259,9 @@ func searchFileByLine(path string, re *regexp.Regexp, outputMode string, showLin
 	if isBinary(buf[:n]) {
 		return nil
 	}
-	file.Seek(0, 0)
+	if _, err := file.Seek(0, 0); err != nil {
+		return nil
+	}
 
 	scanner := bufio.NewScanner(file)
 	var beforeBuffer []string  // rolling buffer of before-context lines
@@ -359,48 +362,100 @@ func searchFileByLine(path string, re *regexp.Regexp, outputMode string, showLin
 }
 
 func searchFileMultiline(path string, re *regexp.Regexp, outputMode string, results *[]string, fileCounts map[string]int, matchedFiles map[string]bool, resultCount *int, maxResults int) error {
-	data, err := os.ReadFile(path)
+	// To avoid reading very large files into memory, search using a sliding window
+	const maxWindow = 5 * 1024 * 1024 // 5MB window
+	const overlap = 64 * 1024         // 64KB overlap to catch cross-boundary matches
+
+	f, err := os.Open(path)
 	if err != nil {
 		return nil
 	}
-	if isBinary(data) {
+	defer f.Close()
+
+	fi, err := f.Stat()
+	if err != nil {
 		return nil
 	}
 
-	content := string(data)
-	matches := re.FindAllStringIndex(content, -1)
+	size := fi.Size()
 
-	if len(matches) == 0 {
-		return nil
-	}
-
-	matchedFiles[path] = true
-	fileCounts[path] = len(matches)
-
-	if outputMode == "content" {
-		for _, match := range matches {
-			start := match[0]
-			end := match[1]
-
-			// Find line boundaries
-			lineStart := strings.LastIndex(content[:start], "\n") + 1
-			lineEnd := strings.Index(content[end:], "\n")
-			if lineEnd == -1 {
-				lineEnd = len(content)
-			} else {
-				lineEnd += end
-			}
-
-			matchText := content[lineStart:lineEnd]
-			*results = append(*results, fmt.Sprintf("%s: %s", path, matchText))
-
-			(*resultCount)++
-			if *resultCount >= maxResults {
-				return fmt.Errorf("limit reached")
-			}
+	// Quick binary check using the first chunk
+	peek := make([]byte, 8192)
+	if n, _ := f.Read(peek); n > 0 {
+		if isBinary(peek[:n]) {
+			return nil
 		}
-	} else {
-		*resultCount += len(matches)
+	}
+	// Seek back to start (should succeed)
+	if _, err := f.Seek(0, 0); err != nil {
+		return nil
+	}
+
+	reported := make(map[int64]bool)
+
+	// Helper to process a window of bytes at absolute offset `off`.
+	processWindow := func(off int64, buf []byte) error {
+		content := string(buf)
+		matches := re.FindAllStringIndex(content, -1)
+		if len(matches) == 0 {
+			return nil
+		}
+		// Mark file as matched and count matches
+		matchedFiles[path] = true
+		fileCounts[path] += len(matches)
+
+		if outputMode == "content" {
+			for _, m := range matches {
+				absStart := off + int64(m[0])
+				if reported[absStart] {
+					continue
+				}
+				reported[absStart] = true
+
+				// Extract the matched text (best-effort within this window)
+				matchText := content[m[0]:m[1]]
+				*results = append(*results, fmt.Sprintf("%s: %s", path, strings.ReplaceAll(matchText, "\n", "\\n")))
+
+				(*resultCount)++
+				if *resultCount >= maxResults {
+					return fmt.Errorf("limit reached")
+				}
+			}
+		} else {
+			// counting mode
+			// resultCount will be incremented by caller aggregation
+			*resultCount += len(matches)
+		}
+		return nil
+	}
+
+	// Slide windows across the file
+	if size <= maxWindow {
+		// Small file: read fully
+		data, err := io.ReadAll(f)
+		if err != nil {
+			return nil
+		}
+		return processWindow(0, data)
+	}
+
+	// Large file: process in windows
+	for off := int64(0); off < size; off += (int64(maxWindow) - int64(overlap)) {
+		readLen := int64(maxWindow)
+		if off+readLen > size {
+			readLen = size - off
+		}
+		buf := make([]byte, readLen)
+		n, err := f.ReadAt(buf, off)
+		if n <= 0 {
+			if err == io.EOF {
+				break
+			}
+			return nil
+		}
+		if err := processWindow(off, buf[:n]); err != nil {
+			return err
+		}
 	}
 
 	return nil

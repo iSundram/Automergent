@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -121,9 +123,23 @@ func (e *Executor) Execute(ctx context.Context, name string, args []string, opts
 	// Create command
 	cmd := exec.CommandContext(ctx, wrappedName, wrappedArgs...)
 
-	// Set working directory
+	// Set working directory with validation to prevent path traversal
 	if opts.WorkDir != "" {
-		cmd.Dir = opts.WorkDir
+		cleaned := filepath.Clean(opts.WorkDir)
+		if strings.Contains(cleaned, "..") {
+			return nil, fmt.Errorf("invalid WorkDir: contains parent traversal")
+		}
+		// If a policy workdir is defined, ensure opts.WorkDir is within it
+		if e.policy != nil && e.policy.FileSystem.WorkDir != "" {
+			rel, err := filepath.Rel(e.policy.FileSystem.WorkDir, cleaned)
+			if err != nil {
+				return nil, fmt.Errorf("invalid WorkDir: %w", err)
+			}
+			if strings.HasPrefix(rel, "..") {
+				return nil, fmt.Errorf("workdir outside allowed policy workdir")
+			}
+		}
+		cmd.Dir = cleaned
 	} else if e.policy.FileSystem.WorkDir != "" {
 		cmd.Dir = e.policy.FileSystem.WorkDir
 	}
@@ -159,36 +175,69 @@ func (e *Executor) Execute(ctx context.Context, name string, args []string, opts
 
 	// Execute
 	start := time.Now()
-	err := cmd.Start()
-	if err != nil {
+	if err := cmd.Start(); err != nil {
 		return &ExecutionResult{
 			ExitCode: -1,
 			Stderr:   []byte(err.Error()),
 		}, fmt.Errorf("starting command: %w", err)
 	}
 
-	// Wait for completion
-	waitErr := cmd.Wait()
-	duration := time.Since(start)
-
-	result := &ExecutionResult{
-		ExitCode: 0,
-		Stdout:   stdout.Bytes(),
-		Stderr:   stderr.Bytes(),
-		Duration: duration,
+	pid := 0
+	if cmd.Process != nil {
+		pid = cmd.Process.Pid
 	}
 
-	// Check for context cancellation (timeout or manual cancel)
-	if ctx.Err() != nil {
-		result.Killed = true
+	done := make(chan error, 1)
+	go func() {
+		done <- cmd.Wait()
+	}()
+
+	var waitErr error
+	killed := false
+	killReason := ""
+
+	select {
+	case waitErr = <-done:
+		// process exited normally
+	case <-ctx.Done():
+		// context cancelled or timed out -- ensure process group is terminated
+		killed = true
 		if ctx.Err() == context.DeadlineExceeded {
-			result.KillReason = "timeout"
+			killReason = "timeout"
 		} else {
-			result.KillReason = "cancelled"
+			killReason = "cancelled"
+		}
+
+		if pid > 0 {
+			// First try graceful termination of the process group
+			_ = syscall.Kill(-pid, syscall.SIGTERM)
+
+			// Wait for a short grace period
+			select {
+			case waitErr = <-done:
+				// exited after SIGTERM
+			case <-time.After(5 * time.Second):
+				// Escalate to SIGKILL
+				_ = syscall.Kill(-pid, syscall.SIGKILL)
+				waitErr = <-done
+			}
+		} else {
+			// No PID to kill; mark as cancelled
+			waitErr = fmt.Errorf("process missing after context cancel")
 		}
 	}
 
-	// Extract exit code
+	duration := time.Since(start)
+	result := &ExecutionResult{
+		ExitCode:   0,
+		Stdout:     stdout.Bytes(),
+		Stderr:     stderr.Bytes(),
+		Duration:   duration,
+		Killed:     killed,
+		KillReason: killReason,
+	}
+
+	// Extract exit code and resource usage
 	if waitErr != nil {
 		if exitErr, ok := waitErr.(*exec.ExitError); ok {
 			result.ExitCode = exitErr.ExitCode()
@@ -197,7 +246,9 @@ func (e *Executor) Execute(ctx context.Context, name string, args []string, opts
 			if status, ok := exitErr.Sys().(syscall.WaitStatus); ok {
 				_ = status // For potential future use
 			}
-			if rusage, ok := exitErr.SysUsage().(*syscall.Rusage); ok {
+			// Note: SysUsage is not portable; attempt best-effort extraction
+			// This may be nil on some platforms.
+			if rusage, ok := exitErr.SysUsage().(*syscall.Rusage); ok && rusage != nil {
 				result.ResourceUsage = &ResourceUsage{
 					UserTime:       time.Duration(rusage.Utime.Nano()),
 					SystemTime:     time.Duration(rusage.Stime.Nano()),
@@ -215,8 +266,12 @@ func (e *Executor) Execute(ctx context.Context, name string, args []string, opts
 
 // ExecuteScript runs a script in the sandbox.
 func (e *Executor) ExecuteScript(ctx context.Context, interpreter string, script string, opts *ExecutionOptions) (*ExecutionResult, error) {
-	// Create a temporary script file
-	tmpFile, err := os.CreateTemp("", "sandbox-script-*")
+	// Create a temporary script file (prefer policy TempDir when available)
+	dir := ""
+	if e.policy != nil && e.policy.FileSystem.TempDir != "" {
+		dir = e.policy.FileSystem.TempDir
+	}
+	tmpFile, err := os.CreateTemp(dir, "sandbox-script-*")
 	if err != nil {
 		return nil, fmt.Errorf("creating temp script: %w", err)
 	}
@@ -228,8 +283,8 @@ func (e *Executor) ExecuteScript(ctx context.Context, interpreter string, script
 	}
 	tmpFile.Close()
 
-	// Make executable
-	if err := os.Chmod(tmpFile.Name(), 0755); err != nil {
+	// Restrict permissions to owner only (rwx for owner) to avoid world-readable/executable scripts
+	if err := os.Chmod(tmpFile.Name(), 0700); err != nil {
 		return nil, fmt.Errorf("chmod script: %w", err)
 	}
 

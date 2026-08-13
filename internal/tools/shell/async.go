@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,9 @@ type AsyncSession struct {
 	ExitCode  int
 	Error     error
 	mu        sync.Mutex
+
+	// Protect concurrent writes to Stdin
+	stdinMu sync.Mutex
 
 	// Track read positions to avoid returning duplicate output
 	stdoutReadPos int
@@ -72,21 +76,31 @@ func (m *SessionManager) Delete(id string) {
 
 // Cleanup removes completed sessions older than maxAge to prevent memory leaks.
 func (m *SessionManager) Cleanup(maxAge time.Duration) int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	cutoff := time.Now().Add(-maxAge)
-	removed := 0
-
+	// Copy references under a read lock to avoid holding manager lock while locking sessions
+	m.mu.RLock()
+	sessionsCopy := make(map[string]*AsyncSession, len(m.sessions))
 	for id, s := range m.sessions {
-		s.mu.Lock()
-		if s.Completed && s.Started.Before(cutoff) {
-			delete(m.sessions, id)
-			removed++
-		}
-		s.mu.Unlock()
+		sessionsCopy[id] = s
 	}
+	m.mu.RUnlock()
 
+	removed := 0
+	for id, s := range sessionsCopy {
+		s.mu.Lock()
+		completed := s.Completed
+		started := s.Started
+		s.mu.Unlock()
+		if completed && started.Before(cutoff) {
+			m.mu.Lock()
+			// Double-check it hasn't been replaced
+			if cur, ok := m.sessions[id]; ok && cur == s {
+				delete(m.sessions, id)
+				removed++
+			}
+			m.mu.Unlock()
+		}
+	}
 	return removed
 }
 
@@ -243,41 +257,182 @@ func (t *AsyncRunnerTool) executeSync(ctx context.Context, command, cwd string, 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// If no initial_wait requested, keep original blocking behavior.
+	if initialWait <= 0 {
+		cmd := exec.CommandContext(ctx, "bash", "-c", command)
+		if cwd != "" {
+			cmd.Dir = cwd
+		}
+		cmd.Env = env
+
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		if stdinInput != "" {
+			cmd.Stdin = bytes.NewBufferString(stdinInput)
+		}
+
+		err := cmd.Run()
+
+		output := stdout.String()
+		if stderr.Len() > 0 {
+			output += "\n[stderr]\n" + stderr.String()
+		}
+
+		if err != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return tools.Result{
+					IsError: true,
+					Content: fmt.Sprintf("command timed out after %s\n%s", timeout, output),
+				}, nil
+			}
+			return tools.Result{
+				IsError: true,
+				Content: fmt.Sprintf("command failed: %v\n%s", err, output),
+			}, nil
+		}
+
+		return tools.Result{Content: output}, nil
+	}
+
+	// initialWait > 0: start the process, collect initial output, then background if still running
 	cmd := exec.CommandContext(ctx, "bash", "-c", command)
 	if cwd != "" {
 		cmd.Dir = cwd
 	}
 	cmd.Env = env
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	if stdinInput != "" {
-		cmd.Stdin = bytes.NewBufferString(stdinInput)
-	}
-
-	err := cmd.Run()
-
-	output := stdout.String()
-	if stderr.Len() > 0 {
-		output += "\n[stderr]\n" + stderr.String()
-	}
-
+	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			return tools.Result{
-				IsError: true,
-				Content: fmt.Sprintf("command timed out after %s\n%s", timeout, output),
-			}, nil
+		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to create stdin pipe: %v", err)}, nil
+	}
+
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		stdinPipe.Close()
+		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to create stdout pipe: %v", err)}, nil
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		stdinPipe.Close()
+		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to create stderr pipe: %v", err)}, nil
+	}
+
+	if err := cmd.Start(); err != nil {
+		stdinPipe.Close()
+		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to start command: %v", err)}, nil
+	}
+
+	// create session and register
+	shellID := GetManager().NextID()
+	var stdoutBuf, stderrBuf bytes.Buffer
+	session := &AsyncSession{
+		ID:      shellID,
+		Command: command,
+		Cmd:     cmd,
+		Stdin:   stdinPipe,
+		Stdout:  &stdoutBuf,
+		Stderr:  &stderrBuf,
+		Started: time.Now(),
+		cancel:  cancel,
+	}
+
+	GetManager().Create(shellID, session)
+
+	// send initial stdin and close to avoid hangs
+	if stdinInput != "" {
+		if _, werr := stdinPipe.Write([]byte(stdinInput)); werr != nil {
+			stdinPipe.Close()
+			GetManager().Delete(shellID)
+			if cancel != nil {
+				cancel()
+			}
+			return tools.Result{IsError: true, Content: fmt.Sprintf("failed to write to stdin: %v", werr)}, nil
 		}
+		// close to indicate EOF
+		stdinPipe.Close()
+		session.mu.Lock()
+		session.Stdin = nil
+		session.mu.Unlock()
+	}
+
+	// copy stdout/stderr into buffers with mutex protection
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, rerr := stdoutPipe.Read(buf)
+			if n > 0 {
+				session.mu.Lock()
+				session.Stdout.Write(buf[:n])
+				session.mu.Unlock()
+			}
+			if rerr != nil {
+				break
+			}
+		}
+	}()
+
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, rerr := stderrPipe.Read(buf)
+			if n > 0 {
+				session.mu.Lock()
+				session.Stderr.Write(buf[:n])
+				session.mu.Unlock()
+			}
+			if rerr != nil {
+				break
+			}
+		}
+	}()
+
+	// monitor completion
+	done := make(chan struct{})
+	go func() {
+		err := cmd.Wait()
+		session.mu.Lock()
+		session.Completed = true
+		session.Error = err
+		if cmd.ProcessState != nil {
+			session.ExitCode = cmd.ProcessState.ExitCode()
+		}
+		session.mu.Unlock()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// finished within initial wait
+		session.mu.Lock()
+		out := session.Stdout.String()
+		if session.Stderr.Len() > 0 {
+			out += "\n[stderr]\n" + session.Stderr.String()
+		}
+		exitErr := session.Error
+		session.mu.Unlock()
+
+		GetManager().Delete(shellID)
+
+		if exitErr != nil {
+			if ctx.Err() == context.DeadlineExceeded {
+				return tools.Result{IsError: true, Content: fmt.Sprintf("command timed out after %s\n%s", timeout, out)}, nil
+			}
+			return tools.Result{IsError: true, Content: fmt.Sprintf("command failed: %v\n%s", exitErr, out)}, nil
+		}
+		return tools.Result{Content: out}, nil
+	case <-time.After(time.Duration(initialWait) * time.Second):
+		// still running - return session id for async reads/writes
 		return tools.Result{
-			IsError: true,
-			Content: fmt.Sprintf("command failed: %v\n%s", err, output),
+			Content: fmt.Sprintf("started async command (shell_id: %s)\nUse read_shell to get output, write_shell to send input", shellID),
+			Metadata: map[string]any{
+				"shell_id": shellID,
+				"pid":      cmd.Process.Pid,
+				"detached": false,
+			},
 		}, nil
 	}
-
-	return tools.Result{Content: output}, nil
 }
 
 func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellID, stdinInput string, detach bool) (tools.Result, error) {
@@ -300,8 +455,6 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 		cmd.Dir = cwd
 	}
 	cmd.Env = env
-
-	var stdout, stderr bytes.Buffer
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -336,8 +489,54 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 
 	// Send initial stdin if provided
 	if stdinInput != "" {
-		stdin.Write([]byte(stdinInput))
+		if _, werr := stdin.Write([]byte(stdinInput)); werr != nil {
+			stdin.Close()
+			GetManager().Delete(shellID)
+			if cancel != nil {
+				cancel()
+			}
+			return tools.Result{IsError: true, Content: fmt.Sprintf("failed to write to stdin: %v", werr)}, nil
+		}
+		// close to signal EOF for initial input
+		stdin.Close()
+		session.mu.Lock()
+		session.Stdin = nil
+		session.mu.Unlock()
 	}
+
+	// copy stdout/stderr into buffers with mutex protection
+	stdoutPipe, _ := cmd.StdoutPipe()
+	stderrPipe, _ := cmd.StderrPipe()
+
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, rerr := stdoutPipe.Read(buf)
+			if n > 0 {
+				session.mu.Lock()
+				session.Stdout.Write(buf[:n])
+				session.mu.Unlock()
+			}
+			if rerr != nil {
+				break
+			}
+		}
+	}()
+
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, rerr := stderrPipe.Read(buf)
+			if n > 0 {
+				session.mu.Lock()
+				session.Stderr.Write(buf[:n])
+				session.mu.Unlock()
+			}
+			if rerr != nil {
+				break
+			}
+		}
+	}()
 
 	// Monitor completion in background
 	go func() {
@@ -527,8 +726,17 @@ func (t *WriteShellTool) Execute(_ context.Context, args map[string]any) (tools.
 	// Process special keys
 	input = processSpecialKeys(input)
 
-	if _, err := session.Stdin.Write([]byte(input)); err != nil {
-		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to write to stdin: %v", err)}, nil
+	// Ensure stdin is available
+	if session.Stdin == nil {
+		return tools.Result{IsError: true, Content: "stdin is closed for this session"}, nil
+	}
+
+	// Protect concurrent writes to Stdin
+	session.stdinMu.Lock()
+	_, werr := session.Stdin.Write([]byte(input))
+	session.stdinMu.Unlock()
+	if werr != nil {
+		return tools.Result{IsError: true, Content: fmt.Sprintf("failed to write to stdin: %v", werr)}, nil
 	}
 
 	// Wait for response if delay specified
@@ -566,23 +774,7 @@ func processSpecialKeys(input string) string {
 }
 
 func replaceAll(s, old, new string) string {
-	for {
-		idx := indexOf(s, old)
-		if idx == -1 {
-			break
-		}
-		s = s[:idx] + new + s[idx+len(old):]
-	}
-	return s
-}
-
-func indexOf(s, substr string) int {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
+	return strings.ReplaceAll(s, old, new)
 }
 
 // StopShellTool terminates an async shell session.
@@ -701,9 +893,10 @@ func truncateCommand(cmd string) string {
 }
 
 func joinLines(lines []string) string {
-	result := ""
+	var b strings.Builder
 	for _, l := range lines {
-		result += l + "\n"
+		b.WriteString(l)
+		b.WriteByte('\n')
 	}
-	return result
+	return b.String()
 }

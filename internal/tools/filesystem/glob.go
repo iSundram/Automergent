@@ -85,7 +85,7 @@ func (t *GlobTool) Execute(_ context.Context, args map[string]any) (tools.Result
 
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // Skip errors
+			return err
 		}
 
 		// Skip hidden files/dirs unless requested
@@ -163,7 +163,17 @@ func matchDoublestar(pattern, path string) bool {
 	return doMatch(pattern, path)
 }
 
+const maxGlobDepth = 256
+
 func doMatch(pattern, path string) bool {
+	return doMatchDepth(pattern, path, 0)
+}
+
+func doMatchDepth(pattern, path string, depth int) bool {
+	if depth > maxGlobDepth {
+		// prevent pathological recursion/loops
+		return false
+	}
 	for len(pattern) > 0 {
 		switch {
 		case strings.HasPrefix(pattern, "**"):
@@ -177,7 +187,7 @@ func doMatch(pattern, path string) bool {
 
 			// Try matching rest of pattern at every position
 			for i := 0; i <= len(path); i++ {
-				if doMatch(pattern, path[i:]) {
+				if doMatchDepth(pattern, path[i:], depth+1) {
 					return true
 				}
 				// Skip to next segment
@@ -201,7 +211,7 @@ func doMatch(pattern, path string) bool {
 				if i > 0 && path[i-1] == '/' {
 					return false // * can't cross /
 				}
-				if doMatch(pattern, path[i:]) {
+				if doMatchDepth(pattern, path[i:], depth+1) {
 					return true
 				}
 			}
@@ -225,7 +235,7 @@ func doMatch(pattern, path string) bool {
 			rest := pattern[end+1:]
 
 			for _, alt := range alts {
-				if doMatch(alt+rest, path) {
+				if doMatchDepth(alt+rest, path, depth+1) {
 					return true
 				}
 			}

@@ -27,15 +27,20 @@ type ManagedServer struct {
 
 	// Event handlers
 	onEvent EventHandler
+
+	// Event queue to avoid spawning unbounded goroutines for events
+	eventCh chan ServerEvent
+	eventWg sync.WaitGroup
 }
 
 // NewManagedServer creates a new managed server instance.
 func NewManagedServer(config *ServerConfig, onEvent EventHandler) *ManagedServer {
-	return &ManagedServer{
+	ms := &ManagedServer{
 		config:     config,
 		transport:  CreateTransport(config),
 		onEvent:    onEvent,
 		healthDone: make(chan struct{}),
+		eventCh:    make(chan ServerEvent, 16),
 		info: &ServerInfo{
 			Config:       config,
 			Status:       StatusDisconnected,
@@ -43,6 +48,26 @@ func NewManagedServer(config *ServerConfig, onEvent EventHandler) *ManagedServer
 			Capabilities: make(map[string]bool),
 		},
 	}
+
+	// Start a background dispatcher to call the event handler serially and avoid spawning
+	// a goroutine per event which could lead to leaks if the handler is slow or blocked.
+	if ms.onEvent != nil {
+		ms.eventWg.Add(1)
+		go func() {
+			defer ms.eventWg.Done()
+			for ev := range ms.eventCh {
+				// Protect against panics in the handler
+				func() {
+					defer func() {
+						_ = recover()
+					}()
+					ms.onEvent(ev)
+				}()
+			}
+		}()
+	}
+
+	return ms
 }
 
 // Connect establishes connection to the server.
@@ -187,9 +212,29 @@ func (s *ManagedServer) discoverTools(ctx context.Context) error {
 
 // startHealthMonitor starts periodic health checks.
 func (s *ManagedServer) startHealthMonitor() {
+	// If there's an existing monitor, stop it first to avoid dangling goroutines.
+	var prevCancel context.CancelFunc
+	var prevDone chan struct{}
+
+	s.mu.Lock()
+	prevCancel = s.healthCancel
+	prevDone = s.healthDone
+	s.mu.Unlock()
+
+	if prevCancel != nil {
+		prevCancel()
+		if prevDone != nil {
+			<-prevDone
+		}
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+
+	s.mu.Lock()
 	s.healthCancel = cancel
-	s.healthDone = make(chan struct{})
+	s.healthDone = done
+	s.mu.Unlock()
 
 	interval := s.config.HealthCheck.Interval
 	if interval == 0 {
@@ -197,7 +242,7 @@ func (s *ManagedServer) startHealthMonitor() {
 	}
 
 	go func() {
-		defer close(s.healthDone)
+		defer close(done)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -267,12 +312,24 @@ func (s *ManagedServer) Close() error {
 
 	err := s.transport.Close()
 
+	// Emit disconnected event
 	s.emitEvent(ServerEvent{
 		Type:      EventDisconnected,
 		Server:    s.config.Name,
 		Status:    StatusDisconnected,
 		Timestamp: time.Now(),
 	})
+
+	// Close event channel and wait for dispatcher to finish
+	s.mu.Lock()
+	ch := s.eventCh
+	s.eventCh = nil
+	s.mu.Unlock()
+
+	if ch != nil {
+		close(ch)
+		s.eventWg.Wait()
+	}
 
 	return err
 }
@@ -384,7 +441,28 @@ func (s *ManagedServer) UpdateConfig(config *ServerConfig) {
 }
 
 func (s *ManagedServer) emitEvent(event ServerEvent) {
-	if s.onEvent != nil {
-		go s.onEvent(event)
+	// Non-blocking enqueue to the event dispatcher. Drop the event if the queue is full
+	// or the dispatcher is not present to avoid goroutine leaks.
+	s.mu.RLock()
+	ch := s.eventCh
+	s.mu.RUnlock()
+
+	if ch == nil {
+		// No dispatcher available; fall back to synchronous call if handler exists
+		if s.onEvent != nil {
+			// Protect against panics
+			func() {
+				defer func() { _ = recover() }()
+				s.onEvent(event)
+			}()
+		}
+		return
+	}
+
+	select {
+	case ch <- event:
+		// enqueued
+	default:
+		// queue full, drop to avoid blocking
 	}
 }

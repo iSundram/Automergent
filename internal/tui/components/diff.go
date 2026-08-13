@@ -72,7 +72,16 @@ func NewDiff(styles *themes.Styles) Diff {
 }
 
 // SetSize updates dimensions for fullscreen.
+func (d *Diff) ensureViewport() {
+	if d.viewport.Width() == 0 && d.viewport.Height() == 0 {
+		vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+		vp.MouseWheelEnabled = true
+		d.viewport = vp
+	}
+}
+
 func (d *Diff) SetSize(w, h int) {
+	d.ensureViewport()
 	d.width = w
 	d.height = h
 	d.viewport.SetWidth(w - 6)
@@ -82,6 +91,7 @@ func (d *Diff) SetSize(w, h int) {
 
 // SetContent parses and sets the diff content.
 func (d *Diff) SetContent(content string) {
+	d.ensureViewport()
 	d.rawContent = content
 	lines := strings.Split(content, "\n")
 	d.TotalLines = len(lines)
@@ -135,6 +145,7 @@ func (d *Diff) ShowWithConfirm(replyCh chan agent.ConfirmationResponse) {
 
 // scrollToFirstChange scrolls viewport to show the first changed line (+ or -).
 func (d *Diff) scrollToFirstChange() {
+	d.ensureViewport()
 	lines := strings.Split(d.rawContent, "\n")
 
 	// Find first actual change line (+ or - but not --- or +++)
@@ -157,6 +168,7 @@ func (d *Diff) scrollToFirstChange() {
 }
 
 func (d *Diff) refresh() {
+	d.ensureViewport()
 	if d.rawContent == "" {
 		d.viewport.SetContent("")
 		return
@@ -253,6 +265,7 @@ func (d *Diff) Focus(_ bool) {}
 
 // Update handles input.
 func (d Diff) Update(msg tea.Msg) (Diff, tea.Cmd) {
+	(&d).ensureViewport()
 	if !d.visible {
 		return d, nil
 	}
@@ -355,6 +368,7 @@ func (d Diff) Update(msg tea.Msg) (Diff, tea.Cmd) {
 
 // View renders fullscreen diff with inline confirmation.
 func (d Diff) View() string {
+	(&d).ensureViewport()
 	if !d.visible {
 		return ""
 	}

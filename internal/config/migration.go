@@ -520,7 +520,7 @@ func importGeneric(content []byte, cfg *Config) (*Config, error) {
 
 	for _, field := range directFields {
 		if value, ok := data[field]; ok {
-			_ = setConfigField(cfg, field, value)
+			_ = SetConfigField(cfg, field, value)
 		}
 	}
 

@@ -320,38 +320,46 @@ func (si *SearchIndex) scoreEntry(entry *IndexEntry, query SearchQuery) float64 
 		textLower := strings.ToLower(query.Text)
 		queryTerms := tokenize(textLower)
 
-		// Title match (highest weight)
-		titleLower := strings.ToLower(entry.Title)
+		// Dedupe query terms
+		termSet := make(map[string]bool)
+		uniqueTerms := []string{}
 		for _, term := range queryTerms {
+			if !termSet[term] {
+				termSet[term] = true
+				uniqueTerms = append(uniqueTerms, term)
+			}
+		}
+
+		// Build lowercased joined blobs
+		titleLower := strings.ToLower(entry.Title)
+		summaryLower := strings.ToLower(entry.Summary)
+
+		keywordBlob := strings.Join(entry.Keywords, " ")
+		keywordBlobLower := strings.ToLower(keywordBlob)
+
+		fileBlob := strings.Join(entry.FilesTouched, " ")
+		fileBlobLower := strings.ToLower(fileBlob)
+
+		// Check each unique query term once
+		for _, term := range uniqueTerms {
+			// Title match (highest weight)
 			if strings.Contains(titleLower, term) {
 				score += 10.0
 			}
-		}
 
-		// Summary match
-		summaryLower := strings.ToLower(entry.Summary)
-		for _, term := range queryTerms {
+			// Summary match
 			if strings.Contains(summaryLower, term) {
 				score += 5.0
 			}
-		}
 
-		// Keyword match
-		for _, keyword := range entry.Keywords {
-			for _, term := range queryTerms {
-				if strings.Contains(keyword, term) || strings.Contains(term, keyword) {
-					score += 2.0
-				}
+			// Keyword match
+			if strings.Contains(keywordBlobLower, term) {
+				score += 2.0
 			}
-		}
 
-		// File path match
-		for _, file := range entry.FilesTouched {
-			fileLower := strings.ToLower(file)
-			for _, term := range queryTerms {
-				if strings.Contains(fileLower, term) {
-					score += 3.0
-				}
+			// File path match
+			if strings.Contains(fileBlobLower, term) {
+				score += 3.0
 			}
 		}
 	}

@@ -101,6 +101,9 @@ func NewTokenBudget(modelLimits ModelTokenLimits, cfg TokenBudgetConfig) *TokenB
 
 // Allocate computes the available allocation for each component.
 func (tb *TokenBudget) Allocate(cfg TokenBudgetConfig) BudgetAllocation {
+	if tb == nil {
+		return BudgetAllocation{}
+	}
 	tb.mu.RLock()
 	defer tb.mu.RUnlock()
 
@@ -118,6 +121,9 @@ func (tb *TokenBudget) Allocate(cfg TokenBudgetConfig) BudgetAllocation {
 
 // AvailableTokens returns remaining tokens after current usage.
 func (tb *TokenBudget) AvailableTokens() int {
+	if tb == nil {
+		return 0
+	}
 	tb.mu.RLock()
 	defer tb.mu.RUnlock()
 
@@ -129,6 +135,9 @@ func (tb *TokenBudget) AvailableTokens() int {
 
 // AvailableForContext returns tokens available for context files.
 func (tb *TokenBudget) AvailableForContext() int {
+	if tb == nil {
+		return 0
+	}
 	tb.mu.RLock()
 	defer tb.mu.RUnlock()
 
@@ -140,6 +149,9 @@ func (tb *TokenBudget) AvailableForContext() int {
 
 // UseSystemPrompt records system prompt token usage.
 func (tb *TokenBudget) UseSystemPrompt(tokens int) error {
+	if tb == nil {
+		return fmt.Errorf("token budget is nil")
+	}
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 
@@ -152,6 +164,9 @@ func (tb *TokenBudget) UseSystemPrompt(tokens int) error {
 
 // UseToolDefinitions records tool definition token usage.
 func (tb *TokenBudget) UseToolDefinitions(tokens int) error {
+	if tb == nil {
+		return fmt.Errorf("token budget is nil")
+	}
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 
@@ -164,6 +179,9 @@ func (tb *TokenBudget) UseToolDefinitions(tokens int) error {
 
 // UseConversation records conversation token usage.
 func (tb *TokenBudget) UseConversation(tokens int) {
+	if tb == nil {
+		return
+	}
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 	tb.ConversationUsed = tokens
@@ -171,6 +189,9 @@ func (tb *TokenBudget) UseConversation(tokens int) {
 
 // UseContextFiles records context file token usage.
 func (tb *TokenBudget) UseContextFiles(tokens int) {
+	if tb == nil {
+		return
+	}
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 	tb.ContextFilesUsed = tokens
@@ -178,11 +199,19 @@ func (tb *TokenBudget) UseContextFiles(tokens int) {
 
 // Summary returns a summary of current budget usage.
 func (tb *TokenBudget) Summary() BudgetSummary {
+	if tb == nil {
+		return BudgetSummary{}
+	}
 	tb.mu.RLock()
 	defer tb.mu.RUnlock()
 
 	totalUsed := tb.SystemPromptUsed + tb.ToolDefinitionUsed + tb.ConversationUsed + tb.ContextFilesUsed
 	available := tb.TotalBudget - totalUsed - tb.OutputReserve - tb.SafetyMargin
+
+	usagePercent := 0.0
+	if tb.TotalBudget > 0 {
+		usagePercent = float64(totalUsed) / float64(tb.TotalBudget) * 100
+	}
 
 	return BudgetSummary{
 		TotalBudget:     tb.TotalBudget,
@@ -193,7 +222,7 @@ func (tb *TokenBudget) Summary() BudgetSummary {
 		Conversation:    tb.ConversationUsed,
 		ContextFiles:    tb.ContextFilesUsed,
 		OutputReserve:   tb.OutputReserve,
-		UsagePercent:    float64(totalUsed) / float64(tb.TotalBudget) * 100,
+		UsagePercent:    usagePercent,
 	}
 }
 

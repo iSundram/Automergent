@@ -11,9 +11,6 @@ import (
 	"github.com/iSundram/Automergent/internal/tools"
 )
 
-// CoAuthorTrailer is the co-author line added to commits.
-const CoAuthorTrailer = "Co-authored-by: Automergent <automergent-bot@users.noreply.github.com>"
-
 // CommitTool creates a git commit.
 type CommitTool struct {
 	cfg *config.Config
@@ -82,7 +79,11 @@ func (t *CommitTool) Execute(ctx context.Context, args map[string]any) (tools.Re
 	// Determine whether to add co-author
 	addCoAuthor := t.shouldAddCoAuthor(args)
 	if addCoAuthor {
-		message = message + "\n\n" + CoAuthorTrailer
+		trailer := "Co-authored-by: Automergent <automergent-bot@users.noreply.github.com>"
+		if t.cfg != nil {
+			trailer = t.cfg.Git.CoAuthorTrailer()
+		}
+		message = message + "\n\n" + trailer
 	}
 
 	cmdArgs := []string{"commit", "-m", message}

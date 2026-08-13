@@ -198,11 +198,25 @@ type IntelligentClient struct {
 
 // NewIntelligentClient creates a new intelligent LSP client.
 func NewIntelligentClient(client *Client) *IntelligentClient {
-	return &IntelligentClient{
+	ic := &IntelligentClient{
 		Client:               client,
 		openFiles:            make(map[string]int),
 		requestTimeout:       30 * time.Second,
 		notificationHandlers: make(map[string]func(json.RawMessage)),
+	}
+	// Hook client's notifications to the intelligent client so handlers get called.
+	client.SetNotificationHandler(ic.handleNotification)
+	return ic
+}
+
+// handleNotification dispatches server notifications to registered handlers.
+func (ic *IntelligentClient) handleNotification(method string, params json.RawMessage) {
+	ic.mu.RLock()
+	h := ic.notificationHandlers[method]
+	ic.mu.RUnlock()
+	if h != nil {
+		// run handler asynchronously
+		go h(params)
 	}
 }
 

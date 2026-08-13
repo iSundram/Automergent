@@ -39,6 +39,9 @@ type Conversation struct {
 	height     int
 	streaming  bool
 	reviewMode bool
+	// Builders used during streaming to avoid quadratic concatenation
+	currentBuilder        *strings.Builder
+	currentThoughtBuilder *strings.Builder
 }
 
 func (c *Conversation) refreshWithFollow(shouldFollow bool) {
@@ -56,7 +59,18 @@ func NewConversation(styles *themes.Styles) Conversation {
 	return Conversation{viewport: vp, styles: styles}
 }
 
+func (c *Conversation) ensureViewport() {
+	if c.viewport.Width() == 0 && c.viewport.Height() == 0 {
+		vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
+		vp.MouseWheelEnabled = false
+		vp.KeyMap.Up.SetKeys("up")
+		vp.KeyMap.Down.SetKeys("down")
+		c.viewport = vp
+	}
+}
+
 func (c *Conversation) SetSize(w, h int) {
+	c.ensureViewport()
 	shouldFollow := c.viewport.AtBottom()
 	if w < 0 {
 		w = 0
@@ -72,8 +86,11 @@ func (c *Conversation) SetSize(w, h int) {
 }
 
 func (c *Conversation) AddMessage(role, content string, isError bool) {
+	c.ensureViewport()
 	shouldFollow := c.viewport.AtBottom()
 	c.streaming = false
+	c.currentBuilder = nil
+	c.currentThoughtBuilder = nil
 	c.messages = append(c.messages, ConversationMsg{
 		Role:      role,
 		Content:   content,
@@ -177,42 +194,60 @@ func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, d
 }
 
 func (c *Conversation) AppendToken(token string) {
+	c.ensureViewport()
 	shouldFollow := c.viewport.AtBottom()
 	if len(c.messages) == 0 || !c.streaming {
 		c.messages = append(c.messages, ConversationMsg{
 			Role:      "assistant",
-			Content:   token,
+			Content:   "",
 			Timestamp: time.Now(),
 		})
 		c.streaming = true
+		c.currentBuilder = &strings.Builder{}
+		c.currentBuilder.WriteString(token)
 	} else {
 		last := &c.messages[len(c.messages)-1]
 		if last.Role == "assistant" {
-			last.Content += token
+			if c.currentBuilder == nil {
+				c.currentBuilder = &strings.Builder{}
+				c.currentBuilder.WriteString(last.Content)
+			}
+			c.currentBuilder.WriteString(token)
 		} else {
-			c.messages = append(c.messages, ConversationMsg{Role: "assistant", Content: token, Timestamp: time.Now()})
+			c.messages = append(c.messages, ConversationMsg{Role: "assistant", Content: "", Timestamp: time.Now()})
 			c.streaming = true
+			c.currentBuilder = &strings.Builder{}
+			c.currentBuilder.WriteString(token)
 		}
 	}
 	c.refreshWithFollow(shouldFollow)
 }
 
 func (c *Conversation) AppendThought(thought string) {
+	c.ensureViewport()
 	shouldFollow := c.viewport.AtBottom()
 	if len(c.messages) == 0 || !c.streaming {
 		c.messages = append(c.messages, ConversationMsg{
 			Role:      "assistant",
-			Thought:   thought,
+			Thought:   "",
 			Timestamp: time.Now(),
 		})
 		c.streaming = true
+		c.currentThoughtBuilder = &strings.Builder{}
+		c.currentThoughtBuilder.WriteString(thought)
 	} else {
 		last := &c.messages[len(c.messages)-1]
 		if last.Role == "assistant" {
-			last.Thought += thought
+			if c.currentThoughtBuilder == nil {
+				c.currentThoughtBuilder = &strings.Builder{}
+				c.currentThoughtBuilder.WriteString(last.Thought)
+			}
+			c.currentThoughtBuilder.WriteString(thought)
 		} else {
-			c.messages = append(c.messages, ConversationMsg{Role: "assistant", Thought: thought, Timestamp: time.Now()})
+			c.messages = append(c.messages, ConversationMsg{Role: "assistant", Thought: "", Timestamp: time.Now()})
 			c.streaming = true
+			c.currentThoughtBuilder = &strings.Builder{}
+			c.currentThoughtBuilder.WriteString(thought)
 		}
 	}
 	c.refreshWithFollow(shouldFollow)
@@ -221,12 +256,25 @@ func (c *Conversation) AppendThought(thought string) {
 func (c *Conversation) Clear() {
 	c.messages = nil
 	c.streaming = false
+	c.currentBuilder = nil
+	c.currentThoughtBuilder = nil
 	c.refresh()
 }
 
 // FinalizeStreaming ends streaming mode and re-renders to apply markdown.
 func (c *Conversation) FinalizeStreaming() {
 	if c.streaming {
+		// Flush builders to last message
+		if c.currentBuilder != nil && len(c.messages) > 0 {
+			last := &c.messages[len(c.messages)-1]
+			last.Content = c.currentBuilder.String()
+			c.currentBuilder = nil
+		}
+		if c.currentThoughtBuilder != nil && len(c.messages) > 0 {
+			last := &c.messages[len(c.messages)-1]
+			last.Thought = c.currentThoughtBuilder.String()
+			c.currentThoughtBuilder = nil
+		}
 		c.streaming = false
 		c.refresh()
 	}
@@ -255,6 +303,7 @@ func (c *Conversation) UpdateToolContent(id, content string) {
 
 func (c *Conversation) refresh() {
 	var sb strings.Builder
+	c.ensureViewport()
 	w := c.width
 	if w <= 0 {
 		w = 80
@@ -267,6 +316,15 @@ func (c *Conversation) refresh() {
 	lastIdx := len(c.messages) - 1
 	for i, m := range c.messages {
 		isLast := i == lastIdx
+		// If this is the active streaming assistant message, prefer builder content
+		if isLast && c.streaming && m.Role == "assistant" {
+			if c.currentBuilder != nil {
+				m.Content = c.currentBuilder.String()
+			}
+			if c.currentThoughtBuilder != nil {
+				m.Thought = c.currentThoughtBuilder.String()
+			}
+		}
 		switch m.Role {
 		case "user":
 			label := c.styles.UserLabel.Render(" You ")

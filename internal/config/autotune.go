@@ -625,7 +625,7 @@ func (at *AutoTuner) ApplyRecommendation(cfg *Config, rec TuningRecommendation) 
 	defer at.mu.Unlock()
 
 	// Apply the change
-	if err := setConfigField(cfg, rec.Field, rec.SuggestVal); err != nil {
+	if err := SetConfigField(cfg, rec.Field, rec.SuggestVal); err != nil {
 		return fmt.Errorf("apply recommendation: %w", err)
 	}
 

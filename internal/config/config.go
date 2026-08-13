@@ -60,6 +60,9 @@ type Config struct {
 	ProviderFallback []FallbackProvider `mapstructure:"providerFallback" yaml:"providerFallback,omitempty"`
 
 	Notifications NotificationConfig `mapstructure:"notifications" yaml:"notifications"`
+	// ConfirmationTimeout controls the default timeout for user confirmation dialogs (e.g., tool execution).
+	// Accepts any time.Duration string (e.g., "5m", "10m"). If empty, defaults to 10m.
+	ConfirmationTimeout string `mapstructure:"confirmationTimeout" yaml:"confirmationTimeout,omitempty"`
 
 	// ConfigFile is the path to the config file used for loading and saving.
 	// It is not persisted to the config file itself.

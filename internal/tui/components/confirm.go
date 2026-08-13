@@ -2,6 +2,7 @@ package components
 
 import (
 	"strings"
+	"sync"
 
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
@@ -14,14 +15,16 @@ import (
 
 // Confirm renders a clean confirmation dialog as centered overlay.
 type Confirm struct {
-	styles   *themes.Styles
-	visible  bool
-	prompt   string
-	replyCh  chan agent.ConfirmationResponse
-	feedback textinput.Model
-	mode     confirmMode
-	width    int
-	height   int
+	styles    *themes.Styles
+	visible   bool
+	prompt    string
+	replyCh   chan agent.ConfirmationResponse
+	feedback  textinput.Model
+	mode      confirmMode
+	width     int
+	height    int
+	mu        sync.Mutex
+	responded bool
 }
 
 type confirmMode int
@@ -49,6 +52,9 @@ func (c *Confirm) Show(prompt string) {
 	c.visible = true
 	c.mode = modeSelection
 	c.feedback.Reset()
+	c.mu.Lock()
+	c.responded = false
+	c.mu.Unlock()
 }
 
 // ShowWithDiff is same as Show (diff preview removed for clean UI).
@@ -57,7 +63,12 @@ func (c *Confirm) ShowWithDiff(prompt, _ string) {
 }
 
 // SetReply sets the channel to send the reply to.
-func (c *Confirm) SetReply(ch chan agent.ConfirmationResponse) { c.replyCh = ch }
+func (c *Confirm) SetReply(ch chan agent.ConfirmationResponse) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.replyCh = ch
+	c.responded = false
+}
 
 // Hide hides the confirmation prompt.
 func (c *Confirm) Hide() { c.visible = false }
@@ -116,6 +127,12 @@ func (c Confirm) Update(msg tea.Msg) (Confirm, tea.Cmd) {
 
 func (c *Confirm) sendResponse(res agent.ConfirmationResponse) {
 	c.visible = false
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.responded {
+		return
+	}
+	c.responded = true
 	if c.replyCh != nil {
 		select {
 		case c.replyCh <- res:

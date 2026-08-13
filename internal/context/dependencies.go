@@ -51,8 +51,8 @@ func (dg *DependencyGraph) SetDependencies(file string, deps []string) {
 		}
 	}
 
-	// Set new dependencies
-	dg.dependencies[file] = deps
+	// Store a copy of deps to avoid external mutation
+	dg.dependencies[file] = append([]string(nil), deps...)
 
 	// Update dependents
 	for _, dep := range deps {
@@ -73,21 +73,39 @@ func (dg *DependencyGraph) SetImports(file string, imports []string) {
 func (dg *DependencyGraph) GetDependencies(file string) []string {
 	dg.mu.RLock()
 	defer dg.mu.RUnlock()
-	return dg.dependencies[file]
+	orig := dg.dependencies[file]
+	if orig == nil {
+		return nil
+	}
+	out := make([]string, len(orig))
+	copy(out, orig)
+	return out
 }
 
 // GetDependents returns files that depend on this file.
 func (dg *DependencyGraph) GetDependents(file string) []string {
 	dg.mu.RLock()
 	defer dg.mu.RUnlock()
-	return dg.dependents[file]
+	orig := dg.dependents[file]
+	if orig == nil {
+		return nil
+	}
+	out := make([]string, len(orig))
+	copy(out, orig)
+	return out
 }
 
 // GetImports returns import paths for a file.
 func (dg *DependencyGraph) GetImports(file string) []string {
 	dg.mu.RLock()
 	defer dg.mu.RUnlock()
-	return dg.imports[file]
+	orig := dg.imports[file]
+	if orig == nil {
+		return nil
+	}
+	out := make([]string, len(orig))
+	copy(out, orig)
+	return out
 }
 
 // TransitiveClosure returns all files reachable from the given files.
@@ -264,7 +282,7 @@ func (da *DependencyAnalyzer) AnalyzeFile(ctx context.Context, path string) erro
 func (da *DependencyAnalyzer) AnalyzeDirectory(ctx context.Context, dir string) error {
 	return filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // Skip errors
+			return err // Propagate errors so callers can report them
 		}
 
 		if d.IsDir() {
@@ -290,48 +308,78 @@ func (da *DependencyAnalyzer) AnalyzeDirectory(ctx context.Context, dir string) 
 func (da *DependencyAnalyzer) resolveImports(fromFile string, imports []string) []string {
 	var resolved []string
 	dir := filepath.Dir(fromFile)
+	rootClean := filepath.Clean(da.rootDir)
 
 	for _, imp := range imports {
 		// Handle relative imports
 		if strings.HasPrefix(imp, ".") {
 			path := filepath.Join(dir, imp)
-			resolved = append(resolved, da.findFile(path)...)
+			for _, f := range da.findFile(path) {
+				if isWithinRoot(rootClean, f) {
+					resolved = append(resolved, f)
+				}
+			}
 		} else {
 			// Handle absolute/module imports
 			path := filepath.Join(da.rootDir, imp)
-			resolved = append(resolved, da.findFile(path)...)
+			for _, f := range da.findFile(path) {
+				if isWithinRoot(rootClean, f) {
+					resolved = append(resolved, f)
+				}
+			}
 		}
 	}
 
 	return resolved
 }
 
+// isWithinRoot checks that a candidate path is inside the workspace root.
+func isWithinRoot(root, candidate string) bool {
+	if root == "" {
+		return true
+	}
+	root = filepath.Clean(root)
+	cand := filepath.Clean(candidate)
+	if cand == root {
+		return true
+	}
+	// Ensure trailing separator on root for prefix checking
+	rootPrefix := root + string(filepath.Separator)
+	return strings.HasPrefix(cand, rootPrefix)
+}
+
 // findFile finds actual file(s) from an import path.
 func (da *DependencyAnalyzer) findFile(basePath string) []string {
 	var found []string
+	rootClean := filepath.Clean(da.rootDir)
+
+	// Helper to validate and add candidate
+	addIfExists := func(path string) {
+		cand := filepath.Clean(path)
+		if !isWithinRoot(rootClean, cand) {
+			return
+		}
+		if _, err := os.Stat(cand); err == nil {
+			found = append(found, cand)
+		}
+	}
 
 	// Try exact match
-	if _, err := os.Stat(basePath); err == nil {
-		found = append(found, basePath)
+	addIfExists(basePath)
+	if len(found) > 0 {
 		return found
 	}
 
 	// Try common extensions
 	extensions := []string{".go", ".ts", ".tsx", ".js", ".jsx", ".py", ".rs"}
 	for _, ext := range extensions {
-		path := basePath + ext
-		if _, err := os.Stat(path); err == nil {
-			found = append(found, path)
-		}
+		addIfExists(basePath + ext)
 	}
 
 	// Try index files
 	indexFiles := []string{"index.ts", "index.tsx", "index.js", "mod.rs", "__init__.py"}
 	for _, idx := range indexFiles {
-		path := filepath.Join(basePath, idx)
-		if _, err := os.Stat(path); err == nil {
-			found = append(found, path)
-		}
+		addIfExists(filepath.Join(basePath, idx))
 	}
 
 	return found

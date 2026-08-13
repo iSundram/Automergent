@@ -2,6 +2,8 @@ package context
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -163,10 +165,15 @@ func (sd *StalenessDetector) CheckBatch(ctx context.Context, paths []string) (ma
 	var mu sync.Mutex
 	errCh := make(chan error, 1)
 
-	// Refresh git status for all files in batch
-	if sd.gitAware && time.Since(sd.lastGitCheck) > sd.gitCheckInterval {
-		if err := sd.refreshGitStatus(ctx); err != nil {
-			// Non-fatal, continue without git info
+	// Refresh git status for all files in batch (protected read of lastGitCheck)
+	if sd.gitAware {
+		sd.mu.RLock()
+		last := sd.lastGitCheck
+		sd.mu.RUnlock()
+		if time.Since(last) > sd.gitCheckInterval {
+			if err := sd.refreshGitStatus(ctx); err != nil {
+				// Non-fatal, continue without git info
+			}
 		}
 	}
 
@@ -293,9 +300,8 @@ func (sd *StalenessDetector) getGitStatus(ctx context.Context, path string) (Git
 		}
 	}
 
-	// Check if file is tracked
-	cmd := exec.CommandContext(ctx, "git", "-C", sd.repoRoot, "ls-files", "--error-unmatch", relPath)
-	if err := cmd.Run(); err != nil {
+	// Check if file is tracked (limit output to avoid OOM)
+	if _, err := runCmdLimited(exec.CommandContext(ctx, "git", "-C", sd.repoRoot, "ls-files", "--error-unmatch", relPath), 1<<20); err != nil {
 		// File is not tracked
 		status.IsTracked = false
 		status.IsNew = true
@@ -304,18 +310,18 @@ func (sd *StalenessDetector) getGitStatus(ctx context.Context, path string) (Git
 	status.IsTracked = true
 
 	// Check for changes
-	cmd = exec.CommandContext(ctx, "git", "-C", sd.repoRoot, "diff", "--name-only", relPath)
-	output, err := cmd.Output()
-	if err == nil && len(strings.TrimSpace(string(output))) > 0 {
-		status.HasChanges = true
+	if out, err := runCmdLimited(exec.CommandContext(ctx, "git", "-C", sd.repoRoot, "diff", "--name-only", relPath), 1<<20); err == nil {
+		if len(strings.TrimSpace(string(out))) > 0 {
+			status.HasChanges = true
+		}
 	}
 
 	// Check for staged changes
-	cmd = exec.CommandContext(ctx, "git", "-C", sd.repoRoot, "diff", "--cached", "--name-only", relPath)
-	output, err = cmd.Output()
-	if err == nil && len(strings.TrimSpace(string(output))) > 0 {
-		status.IsStaged = true
-		status.HasChanges = true
+	if out, err := runCmdLimited(exec.CommandContext(ctx, "git", "-C", sd.repoRoot, "diff", "--cached", "--name-only", relPath), 1<<20); err == nil {
+		if len(strings.TrimSpace(string(out))) > 0 {
+			status.IsStaged = true
+			status.HasChanges = true
+		}
 	}
 
 	return status, nil
@@ -327,16 +333,15 @@ func (sd *StalenessDetector) refreshGitStatus(ctx context.Context) error {
 	sd.lastGitCheck = time.Now()
 	sd.mu.Unlock()
 
-	// Get all changed files
-	cmd := exec.CommandContext(ctx, "git", "-C", sd.repoRoot, "status", "--porcelain", "--untracked-files=all")
-	output, err := cmd.Output()
+	// Get all changed files (limit output size)
+	out, err := runCmdLimited(exec.CommandContext(ctx, "git", "-C", sd.repoRoot, "status", "--porcelain", "--untracked-files=all"), 2<<20)
 	if err != nil {
 		return err
 	}
 
 	// Parse status output
 	changedFiles := make(map[string]GitFileStatus)
-	lines := strings.Split(string(output), "\n")
+	lines := strings.Split(string(out), "\n")
 	for _, line := range lines {
 		if len(line) < 4 {
 			continue
@@ -383,6 +388,24 @@ func (sd *StalenessDetector) refreshGitStatus(ctx context.Context) error {
 	sd.mu.Unlock()
 
 	return nil
+}
+
+// runCmdLimited runs a command and limits the amount of stdout read to maxBytes.
+func runCmdLimited(cmd *exec.Cmd, maxBytes int64) ([]byte, error) {
+	outPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, err
+	}
+	lr := io.LimitReader(outPipe, maxBytes+1)
+	data, _ := io.ReadAll(lr)
+	err = cmd.Wait()
+	if int64(len(data)) > maxBytes {
+		return data[:maxBytes], fmt.Errorf("command output truncated")
+	}
+	return data, err
 }
 
 // GetModifiedFiles returns all files with uncommitted changes.

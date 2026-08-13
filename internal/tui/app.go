@@ -679,6 +679,23 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.statusBar.SetStatus(s)
 		}
 		return a.waitForAgentEvent()
+	case agent.EventNotify:
+		// Payload expected to be map[string]any{"level":..., "title":..., "message":...}
+		if payload, ok := ev.Payload.(map[string]any); ok {
+			lvl, _ := payload["level"].(string)
+			title, _ := payload["title"].(string)
+			msg, _ := payload["message"].(string)
+			if title != "" {
+				a.statusBar.SetStatus(fmt.Sprintf("%s: %s", title, msg))
+			} else {
+				a.statusBar.SetStatus(msg)
+			}
+			// Add to conversation for auditability
+			if msg != "" {
+				a.conversation.AddMessage("system", fmt.Sprintf("[%s] %s", lvl, msg), false)
+			}
+		}
+		return a.waitForAgentEvent()
 	case agent.EventThinking:
 		if thinkingText, ok := ev.Payload.(string); ok {
 			a.statusBar.SetStatus(thinkingText)

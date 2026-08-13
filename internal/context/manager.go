@@ -2,6 +2,7 @@ package context
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
@@ -110,10 +111,11 @@ func (m *Manager) GetContext(ctx context.Context, req ContextRequest) (*ContextR
 		m.recordAccess(f)
 	}
 
-	// Analyze dependencies if needed
+	// Analyze dependencies if needed (collect errors)
+	var analysisErrs []string
 	for _, f := range req.ActiveFiles {
 		if err := m.analyzer.AnalyzeFile(ctx, f); err != nil {
-			// Log but don't fail
+			analysisErrs = append(analysisErrs, fmt.Sprintf("%s: %v", f, err))
 		}
 	}
 
@@ -140,6 +142,11 @@ func (m *Manager) GetContext(ctx context.Context, req ContextRequest) (*ContextR
 
 	// Update budget usage
 	m.budget.UseContextFiles(resp.TotalTokens)
+
+	// If any analysis errors occurred, return response with aggregated error
+	if len(analysisErrs) > 0 {
+		return resp, fmt.Errorf("analysis errors: %s", strings.Join(analysisErrs, "; "))
+	}
 
 	return resp, nil
 }
@@ -423,9 +430,13 @@ func (m *Manager) recordAccess(path string) {
 		timestamp: time.Now(),
 	})
 
-	// Trim if over limit
-	if len(m.accessLog) > m.accessLimit {
-		m.accessLog = m.accessLog[len(m.accessLog)-m.accessLimit:]
+	// Trim if over limit and copy to release backing array to avoid memory leak
+	if m.accessLimit > 0 && len(m.accessLog) > m.accessLimit {
+		sz := m.accessLimit
+		start := len(m.accessLog) - sz
+		newLog := make([]accessEntry, sz)
+		copy(newLog, m.accessLog[start:])
+		m.accessLog = newLog
 	}
 }
 
@@ -618,9 +629,13 @@ func isExported(name string) bool {
 }
 
 func sumTokens(items []ContextItem) int {
-	total := 0
+	// Use int64 accumulator to avoid integer overflow on 32-bit systems
+	var total64 int64
 	for _, item := range items {
-		total += item.Tokens
+		total64 += int64(item.Tokens)
 	}
-	return total
+	if total64 > int64(int(^uint(0)>>1)) { // cap at max int
+		return int(^uint(0) >> 1)
+	}
+	return int(total64)
 }

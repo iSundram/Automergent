@@ -208,11 +208,8 @@ func (ms *MemoryStore) GetProject(projectPath string) (*ProjectMemory, error) {
 	return pm, nil
 }
 
-// SaveProject persists a project's memory to disk.
-func (ms *MemoryStore) SaveProject(pm *ProjectMemory) error {
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
-
+// saveProjectLocked performs the actual save without locking.
+func (ms *MemoryStore) saveProjectLocked(pm *ProjectMemory) error {
 	pm.UpdatedAt = time.Now()
 
 	projDir := ms.projectDir(pm.ProjectPath)
@@ -232,6 +229,14 @@ func (ms *MemoryStore) SaveProject(pm *ProjectMemory) error {
 
 	ms.projects[pm.ProjectPath] = pm
 	return nil
+}
+
+// SaveProject persists a project's memory to disk.
+func (ms *MemoryStore) SaveProject(pm *ProjectMemory) error {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	return ms.saveProjectLocked(pm)
 }
 
 // updateRecentProject adds or updates a project in recent list.
@@ -300,7 +305,7 @@ func (ms *MemoryStore) LearnConvention(projectPath, name, description string, co
 		}
 	}
 
-	return ms.SaveProject(pm)
+	return ms.saveProjectLocked(pm)
 }
 
 // LearnCodePattern adds a code pattern for a project.
@@ -318,7 +323,7 @@ func (ms *MemoryStore) LearnCodePattern(projectPath string, pattern CodePattern)
 	pattern.LastUsed = time.Now()
 
 	pm.CodePatterns = append(pm.CodePatterns, pattern)
-	return ms.SaveProject(pm)
+	return ms.saveProjectLocked(pm)
 }
 
 // RecordFileAccess tracks file access for a project.
@@ -348,7 +353,7 @@ func (ms *MemoryStore) RecordFileAccess(projectPath, filePath string, edited boo
 				[]RecentFile{item},
 				append(pm.RecentFiles[:i], pm.RecentFiles[i+1:]...)...,
 			)
-			return nil
+			return ms.saveProjectLocked(pm)
 		}
 	}
 
@@ -368,7 +373,7 @@ func (ms *MemoryStore) RecordFileAccess(projectPath, filePath string, edited boo
 		pm.RecentFiles = pm.RecentFiles[:maxRecentFiles]
 	}
 
-	return nil
+	return ms.saveProjectLocked(pm)
 }
 
 // SetArchitecture sets architecture decisions for a project.
@@ -382,7 +387,7 @@ func (ms *MemoryStore) SetArchitecture(projectPath string, arch *ArchitectureDec
 	defer ms.mu.Unlock()
 
 	pm.Architecture = arch
-	return ms.SaveProject(pm)
+	return ms.saveProjectLocked(pm)
 }
 
 // GetRecentProjects returns recently accessed projects.
@@ -468,7 +473,7 @@ func (ms *MemoryStore) IncrementPatternUsage(projectPath, patternID string) erro
 		}
 	}
 
-	return ms.SaveProject(pm)
+	return ms.saveProjectLocked(pm)
 }
 
 // SaveAll persists all loaded project memories.

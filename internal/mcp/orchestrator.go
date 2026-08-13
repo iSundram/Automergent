@@ -431,7 +431,24 @@ func (o *Orchestrator) tryFailover(ctx context.Context, call ToolCall, failedSer
 }
 
 func (o *Orchestrator) cacheKey(call ToolCall) string {
-	argsJSON, _ := json.Marshal(call.Args)
+	// Produce a deterministic representation of the args map by sorting keys.
+	if call.Args == nil || len(call.Args) == 0 {
+		return fmt.Sprintf("%s:%s:", call.Server, call.Name)
+	}
+
+	keys := make([]string, 0, len(call.Args))
+	for k := range call.Args {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	// Build an ordered slice of key/value pairs for deterministic marshaling.
+	ordered := make([]map[string]any, 0, len(keys))
+	for _, k := range keys {
+		ordered = append(ordered, map[string]any{"k": k, "v": call.Args[k]})
+	}
+
+	argsJSON, _ := json.Marshal(ordered)
 	return fmt.Sprintf("%s:%s:%s", call.Server, call.Name, string(argsJSON))
 }
 
