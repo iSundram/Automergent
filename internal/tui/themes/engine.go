@@ -44,7 +44,7 @@ func NewThemeEngine() *ThemeEngine {
 	te.RegisterTheme(Modern())
 
 	// Set default
-	te.current = Catppuccin()
+	te.current = Modern()
 	te.styles = NewStyles(te.current)
 
 	return te

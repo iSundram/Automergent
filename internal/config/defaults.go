@@ -16,7 +16,7 @@ func Default() *Config {
 		Model:       "gemini-3.6-flash",
 		Mode:        "edit",
 		Output:      "text",
-		Theme:       "catppuccin",
+		Theme:       "modern",
 		Keybindings: "default",
 		Layout:      "default",
 

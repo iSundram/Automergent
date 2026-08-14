@@ -110,8 +110,8 @@ func DefaultSchema() *Schema {
 			},
 			"theme": {
 				Type:        TypeString,
-				Default:     "catppuccin",
-				Enum:        []string{"catppuccin", "dracula", "nord", "gruvbox", "onedark", "monokai", "default"},
+				Default:     "modern",
+				Enum:        []string{"catppuccin", "dracula", "nord", "gruvbox", "onedark", "monokai", "modern", "default"},
 				Description: "UI theme",
 			},
 			"keybindings": {
