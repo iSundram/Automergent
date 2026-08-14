@@ -241,8 +241,8 @@ type DiagnosticsConfig struct {
 
 // GitConfig holds git-related settings.
 type GitConfig struct {
-	CoAuthor            string `mapstructure:"coAuthor" yaml:"coAuthor"`               // "always", "never", "ask"
-	CoAuthorTrailerLine string `mapstructure:"coAuthorTrailer" yaml:"coAuthorTrailer"` // Custom co-author trailer line
+	CoAuthor        string `mapstructure:"coAuthor" yaml:"coAuthor"`               // "always", "never", "ask"
+	CoAuthorTrailer string `mapstructure:"coAuthorTrailer" yaml:"coAuthorTrailer"` // Custom co-author trailer line
 }
 
 // CoAuthorMode returns the validated co-author mode.
