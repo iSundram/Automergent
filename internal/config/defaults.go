@@ -124,8 +124,8 @@ func Default() *Config {
 			CacheDurationSec: 30,
 		},
 		Git: GitConfig{
-			CoAuthor:            "ask", // "always", "never", "ask"
-			CoAuthorTrailerLine: "Co-authored-by: Automergent <automergent-bot@users.noreply.github.com>",
+			CoAuthor:        "ask", // "always", "never", "ask"
+			CoAuthorTrailer: "Co-authored-by: Automergent <automergent-bot@users.noreply.github.com>",
 		},
 	}
 }

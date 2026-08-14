@@ -3,6 +3,7 @@ package git
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -188,7 +189,7 @@ func runGit(ctx context.Context, args ...string) (tools.Result, error) {
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
 		content := fmt.Sprintf("git %v: %v\n%s", args, err, stderr.String())
-		return tools.Result{IsError: true, Content: content}, fmt.Errorf(content)
+		return tools.Result{IsError: true, Content: content}, errors.New(content)
 	}
 	return tools.Result{Content: stdout.String()}, nil
 }

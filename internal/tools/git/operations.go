@@ -1,10 +1,8 @@
 package git
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
 
 	"github.com/iSundram/Automergent/internal/config"
