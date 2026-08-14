@@ -1093,17 +1093,9 @@ func (a *App) layout() {
 
 	headerH := lipgloss.Height(a.header.View())
 	statusH := lipgloss.Height(a.statusBar.View())
-	footerH := 0
-
-	if a.confirm.Visible() {
-		footerH = lipgloss.Height(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.confirm.View()))
-	} else if a.coAuthorConfirm.Visible() {
-		footerH = lipgloss.Height(lipgloss.PlaceHorizontal(a.width, lipgloss.Center, a.coAuthorConfirm.View()))
-	} else {
-		footerH = lipgloss.Height(a.input.View())
-		if a.thinking {
-			footerH++
-		}
+	footerH := lipgloss.Height(a.input.View())
+	if a.thinking {
+		footerH++
 	}
 
 	mainH := a.height - headerH - statusH - footerH
@@ -1158,10 +1150,10 @@ func (a *App) View() tea.View {
 		sections = append(sections, headerView)
 	}
 
+	var mainRow string
 	if a.sessionBrowser.Visible() {
-		sections = append(sections, a.sessionBrowser.View())
+		mainRow = a.sessionBrowser.View()
 	} else {
-		var mainRow string
 		convView := a.conversation.View()
 		// Only wrap in ActivePane border if we have multiple panes (FileTree or LSP)
 		hasOtherPanes := a.showFileTree || a.lspPanel.Visible()
@@ -1176,8 +1168,12 @@ func (a *App) View() tea.View {
 		if a.lspPanel.Visible() {
 			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", a.lspPanel.View())
 		}
-		sections = append(sections, mainRow)
 	}
+
+	if a.palette.Visible() {
+		mainRow = a.overlayPalette(mainRow, a.palette.View())
+	}
+	sections = append(sections, mainRow)
 
 	// Always show input/footer (confirmation uses overlay now)
 	var footer []string
@@ -1205,11 +1201,6 @@ func (a *App) View() tea.View {
 		fullView = a.overlay(fullView, a.coAuthorConfirm.View())
 	}
 
-	// If palette is visible, overlay it on top of EVERYTHING
-	if a.palette.Visible() {
-		fullView = a.overlay(fullView, a.palette.View())
-	}
-
 	return makeView(fullView)
 }
 
@@ -1229,7 +1220,6 @@ func (a *App) overlay(base, over string) string {
 		top = 0
 	}
 
-	// Calculate max width of overlay once to ensure consistent centering
 	maxOW := 0
 	for _, l := range overLines {
 		w := lipgloss.Width(l)
@@ -1238,66 +1228,101 @@ func (a *App) overlay(base, over string) string {
 		}
 	}
 
-	// Dim the entire background first
 	dimStyle := lipgloss.NewStyle().Foreground(a.styles.T.Muted)
-	for i := range baseLines {
-		baseLines[i] = dimStyle.Render(stripAnsi(baseLines[i]))
-	}
 
-	for i := 0; i < oH && top+i < bH; i++ {
-		oLine := overLines[i]
-		bLine := baseLines[top+i]
+	for i := 0; i < bH; i++ {
+		rawBase := stripAnsi(baseLines[i])
+		bW := lipgloss.Width(rawBase)
 
-		bW := lipgloss.Width(bLine)
+		if i >= top && i < top+oH {
+			oLine := overLines[i-top]
+			leftPad := (bW - maxOW) / 2
+			if leftPad < 0 {
+				leftPad = 0
+			}
 
-		leftPad := (bW - maxOW) / 2
-		if leftPad < 0 {
-			leftPad = 0
+			leftBg := truncateRight(rawBase, leftPad)
+			oWidth := lipgloss.Width(oLine)
+			rightBg := skipLeft(rawBase, leftPad+oWidth)
+
+			baseLines[i] = dimStyle.Render(leftBg) + oLine + dimStyle.Render(rightBg)
+		} else {
+			baseLines[i] = dimStyle.Render(rawBase)
 		}
-
-		baseLines[top+i] = a.blendLines(bLine, oLine, leftPad)
 	}
 
 	return strings.Join(baseLines, "\n")
 }
 
-// blendLines overlays over onto base at the given left offset.
-func (a *App) blendLines(base, over string, left int) string {
-	bgLeft := a.truncate(base, left)
+func (a *App) overlayPalette(base, over string) string {
+	if over == "" {
+		return base
+	}
 
-	overWidth := lipgloss.Width(over)
-	bgRight := a.skip(base, left+overWidth)
+	baseLines := strings.Split(base, "\n")
+	overLines := strings.Split(over, "\n")
 
-	// Pad over with spaces if it's shorter than maxOW (not actually needed if palette.View uses Width())
-	// but good for safety.
-	return bgLeft + over + bgRight
+	bH := len(baseLines)
+	oH := len(overLines)
+
+	top := bH - oH
+	if top < 0 {
+		top = 0
+	}
+
+	maxOW := 0
+	for _, l := range overLines {
+		w := lipgloss.Width(l)
+		if w > maxOW {
+			maxOW = w
+		}
+	}
+
+	dimStyle := lipgloss.NewStyle().Foreground(a.styles.T.Muted)
+
+	for i := 0; i < bH; i++ {
+		rawBase := stripAnsi(baseLines[i])
+		bW := lipgloss.Width(rawBase)
+
+		if i >= top && i < top+oH {
+			oLine := overLines[i-top]
+			leftPad := (bW - maxOW) / 2
+			if leftPad < 0 {
+				leftPad = 0
+			}
+
+			leftBg := truncateRight(rawBase, leftPad)
+			oWidth := lipgloss.Width(oLine)
+			rightBg := skipLeft(rawBase, leftPad+oWidth)
+
+			baseLines[i] = dimStyle.Render(leftBg) + oLine + dimStyle.Render(rightBg)
+		} else {
+			baseLines[i] = dimStyle.Render(rawBase)
+		}
+	}
+
+	return strings.Join(baseLines, "\n")
 }
 
-func (a *App) truncate(s string, w int) string {
+func truncateRight(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
 	return lipgloss.NewStyle().MaxWidth(w).Render(s)
 }
 
-func (a *App) skip(s string, w int) string {
-	// A more robust skip: truncate the string up to 'w' from the left
-	// and return the remaining part.
-	sw := lipgloss.Width(s)
-	if w >= sw {
-		return ""
+func skipLeft(s string, w int) string {
+	if w <= 0 {
+		return s
 	}
-
-	// We want to skip 'w' columns. Since lipgloss doesn't have a direct "skip"
-	// that respects ANSI, we'll use a hacky but effective way:
-	// Use Truncate with an extremely large width to effectively just "cut" from the left.
-	// Actually, a better way is to use a regular expression to strip ANSI codes to calculate
-	// positions if needed, but for TUI backgrounds, we can often just return the rest of the string.
-	// However, lipgloss.Truncate(s, w, "") only gives the prefix.
-
-	// For a TUI background, if it's mostly empty space or simple styled text,
-	// returning empty is safer than misaligning.
-	// If the background contains text we want to KEEP on the right, we'd need a real skip.
+	currentWidth := 0
+	runes := []rune(s)
+	for i, r := range runes {
+		if currentWidth >= w {
+			return string(runes[i:])
+		}
+		currentWidth += lipgloss.Width(string(r))
+	}
 	return ""
 }
 
