@@ -99,56 +99,44 @@ func (c *CoAuthorConfirm) sendResponse(res CoAuthorResponse) {
 	}
 }
 
-// View renders the co-author confirmation dialog.
+// View renders the co-author confirmation as a full-width inline panel.
 func (c CoAuthorConfirm) View() string {
 	if !c.visible {
 		return ""
 	}
 
-	var content strings.Builder
+	icon := lipgloss.NewStyle().Foreground(c.styles.T.Accent).Bold(true).Render("● ")
+	prompt := icon + lipgloss.NewStyle().Bold(true).Render("Include Automergent as co-author?")
 
-	// Header
-	header := lipgloss.NewStyle().
-		Foreground(c.styles.T.Accent).
-		Bold(true).
-		Render("󰊢 CO-AUTHOR")
-	content.WriteString(header + "\n\n")
+	content := lipgloss.JoinVertical(lipgloss.Left, prompt, c.renderOptions())
 
-	// Message
-	content.WriteString("Include Automergent as co-author?\n\n")
-
-	// Buttons
-	content.WriteString(c.renderButtons())
-
-	// Fixed width box with solid background
-	boxWidth := 50
+	w := c.width
+	if w <= 0 {
+		w = lipgloss.Width(content) + 4
+	}
+	w-- // account for the left border added outside the width
 
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.ThickBorder(), false, false, false, true).
 		BorderForeground(c.styles.T.Accent).
-		Background(c.styles.T.Background).
-		Foreground(c.styles.T.Text).
-		Padding(1, 2).
-		Width(boxWidth).
-		Render(content.String())
+		Padding(0, 2).
+		Width(w).
+		Render(content)
 }
 
-func (c CoAuthorConfirm) renderButtons() string {
-	makeButton := func(key, label string, bg color.Color) string {
-		keyStyle := lipgloss.NewStyle().Underline(true).Bold(true)
-		return lipgloss.NewStyle().
-			Background(bg).
-			Foreground(c.styles.T.Background).
-			Bold(true).
-			Padding(0, 1).
-			MarginRight(1).
-			Render(keyStyle.Render(key) + " " + label)
+func (c CoAuthorConfirm) renderOptions() string {
+	makeOption := func(key, label string, fg color.Color) string {
+		keyPart := lipgloss.NewStyle().Foreground(fg).Bold(true).Render(key)
+		labelPart := lipgloss.NewStyle().Foreground(c.styles.T.Subtext).Render(" " + label)
+		return keyPart + labelPart
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Center,
-		makeButton("y", "Yes", c.styles.T.Green),
-		makeButton("n", "No", c.styles.T.Yellow),
-		makeButton("a", "Always", c.styles.T.Accent),
-		makeButton("x", "Never", c.styles.T.Red),
-	)
+	sep := lipgloss.NewStyle().Foreground(c.styles.T.Muted).Render("  ·  ")
+
+	return strings.Join([]string{
+		makeOption("y", "yes", c.styles.T.Green),
+		makeOption("n", "no", c.styles.T.Yellow),
+		makeOption("a", "always", c.styles.T.Accent),
+		makeOption("x", "never", c.styles.T.Red),
+	}, sep)
 }

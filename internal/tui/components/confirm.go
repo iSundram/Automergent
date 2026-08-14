@@ -13,7 +13,7 @@ import (
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
-// Confirm renders a clean confirmation dialog as centered overlay.
+// Confirm renders an inline confirmation panel below the input.
 type Confirm struct {
 	styles    *themes.Styles
 	visible   bool
@@ -23,7 +23,7 @@ type Confirm struct {
 	mode      confirmMode
 	width     int
 	height    int
-	mu        sync.Mutex
+	mu        *sync.Mutex
 	responded bool
 }
 
@@ -43,6 +43,7 @@ func NewConfirm(styles *themes.Styles) Confirm {
 		styles:   styles,
 		feedback: ti,
 		mode:     modeSelection,
+		mu:       &sync.Mutex{},
 	}
 }
 
@@ -80,7 +81,14 @@ func (c Confirm) Visible() bool { return c.visible }
 func (c *Confirm) SetSize(w, h int) {
 	c.width = w
 	c.height = h
-	c.feedback.SetWidth(40)
+	fw := w - 8
+	if fw < 20 {
+		fw = 20
+	}
+	if fw > 80 {
+		fw = 80
+	}
+	c.feedback.SetWidth(fw)
 }
 
 // Update handles confirmation selection and feedback input.
@@ -141,56 +149,49 @@ func (c *Confirm) sendResponse(res agent.ConfirmationResponse) {
 	}
 }
 
-// View renders the confirmation dialog.
+// View renders the confirmation as a full-width inline panel (shown below the input).
 func (c Confirm) View() string {
 	if !c.visible {
 		return ""
 	}
 
-	var content strings.Builder
+	var lines []string
 
 	if c.mode == modeFeedback {
-		// Feedback mode
 		header := lipgloss.NewStyle().
 			Foreground(c.styles.T.Yellow).
 			Bold(true).
-			Render("󰙺 REJECT WITH FEEDBACK")
-		content.WriteString(header + "\n\n")
-		content.WriteString(c.feedback.View() + "\n\n")
-		content.WriteString(c.styles.Dim.Render("[Enter] Submit  [Esc] Cancel"))
+			Render("Reject with feedback")
+		lines = append(lines, header)
+		lines = append(lines, c.feedback.View())
+		lines = append(lines, c.styles.Dim.Render("enter submit · esc back"))
 	} else {
-		// Selection mode - clean and simple
-		header := lipgloss.NewStyle().
-			Foreground(c.styles.T.Accent).
-			Bold(true).
-			Render("󱈸 CONFIRM ACTION")
-		content.WriteString(header + "\n\n")
-
-		// Format the prompt
-		prompt := c.formatPrompt()
-		content.WriteString(prompt + "\n\n")
-
-		// Buttons
-		content.WriteString(c.renderButtons())
+		lines = append(lines, c.formatPrompt())
+		lines = append(lines, c.renderOptions())
 	}
 
-	// Fixed width box with solid background
-	boxWidth := 50
+	content := lipgloss.JoinVertical(lipgloss.Left, lines...)
 
+	w := c.width
+	if w <= 0 {
+		w = lipgloss.Width(content) + 4
+	}
+	w-- // account for the left border added outside the width
+
+	// Full-width inline panel with an accent rule on the left
 	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(c.styles.T.Accent).
-		Background(c.styles.T.Background).
-		Foreground(c.styles.T.Text).
-		Padding(1, 2).
-		Width(boxWidth).
-		Render(content.String())
+		Border(lipgloss.ThickBorder(), false, false, false, true).
+		BorderForeground(c.styles.T.Yellow).
+		Padding(0, 2).
+		Width(w).
+		Render(content)
 }
 
 func (c Confirm) formatPrompt() string {
+	icon := lipgloss.NewStyle().Foreground(c.styles.T.Yellow).Bold(true).Render("● ")
 	prompt := c.prompt
 	if !strings.HasPrefix(prompt, "Allow ") {
-		return prompt
+		return icon + lipgloss.NewStyle().Bold(true).Render(prompt)
 	}
 
 	rest := strings.TrimPrefix(prompt, "Allow ")
@@ -207,25 +208,22 @@ func (c Confirm) formatPrompt() string {
 		Bold(true).
 		Render(actionName)
 
-	return "Allow " + highlighted + remainder
+	return icon + lipgloss.NewStyle().Bold(true).Render("Allow ") + highlighted + remainder
 }
 
-func (c Confirm) renderButtons() string {
-	makeButton := func(key, label string, bg color.Color) string {
-		keyStyle := lipgloss.NewStyle().Underline(true).Bold(true)
-		return lipgloss.NewStyle().
-			Background(bg).
-			Foreground(c.styles.T.Background).
-			Bold(true).
-			Padding(0, 1).
-			MarginRight(1).
-			Render(keyStyle.Render(key) + " " + label)
+func (c Confirm) renderOptions() string {
+	makeOption := func(key, label string, fg color.Color) string {
+		keyPart := lipgloss.NewStyle().Foreground(fg).Bold(true).Render(key)
+		labelPart := lipgloss.NewStyle().Foreground(c.styles.T.Subtext).Render(" " + label)
+		return keyPart + labelPart
 	}
 
-	return lipgloss.JoinHorizontal(lipgloss.Center,
-		makeButton("y", "Allow", c.styles.T.Green),
-		makeButton("a", "Always", c.styles.T.Accent),
-		makeButton("n", "Reject", c.styles.T.Red),
-		makeButton("f", "Feedback", c.styles.T.Yellow),
-	)
+	sep := lipgloss.NewStyle().Foreground(c.styles.T.Muted).Render("  ·  ")
+
+	return strings.Join([]string{
+		makeOption("y", "allow", c.styles.T.Green),
+		makeOption("a", "always", c.styles.T.Accent),
+		makeOption("n", "reject", c.styles.T.Red),
+		makeOption("f", "feedback", c.styles.T.Yellow),
+	}, sep)
 }

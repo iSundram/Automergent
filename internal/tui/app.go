@@ -595,10 +595,24 @@ func (a *App) updatePalette() {
 			items = a.fuzzyFilter(modelItems, filter)
 		}
 	case "provider":
+		providerDescriptions := map[string]string{
+			"google": "Gemini models by Google",
+		}
+		providerIcons := map[string]string{
+			"google": "󰊭",
+		}
 		var providerItems []components.PaletteItem
 		for _, p := range a.availableProviders {
+			desc := providerDescriptions[p]
+			if desc == "" {
+				desc = "AI provider"
+			}
+			icon := providerIcons[p]
+			if icon == "" {
+				icon = "🔌"
+			}
 			providerItems = append(providerItems, components.PaletteItem{
-				Label: p, Description: "AI provider", Value: p, Icon: "🔌",
+				Label: p, Description: desc, Value: p, Icon: icon,
 			})
 		}
 		items = a.fuzzyFilter(providerItems, filter)
@@ -1097,6 +1111,16 @@ func (a *App) layout() {
 	if a.thinking {
 		footerH++
 	}
+	// Palette and confirmations render inline below the input.
+	if a.palette.Visible() {
+		footerH += a.palette.Height()
+	}
+	if a.confirm.Visible() {
+		footerH += lipgloss.Height(a.confirm.View())
+	}
+	if a.coAuthorConfirm.Visible() {
+		footerH += lipgloss.Height(a.coAuthorConfirm.View())
+	}
 
 	mainH := a.height - headerH - statusH - footerH
 	if mainH < 1 {
@@ -1170,17 +1194,23 @@ func (a *App) View() tea.View {
 		}
 	}
 
-	if a.palette.Visible() {
-		mainRow = a.overlayPalette(mainRow, a.palette.View())
-	}
 	sections = append(sections, mainRow)
 
-	// Always show input/footer (confirmation uses overlay now)
+	// Footer: spinner, input, then inline palette/confirmation panels below the input.
 	var footer []string
 	if a.thinking {
 		footer = append(footer, "  "+a.spin.View())
 	}
 	footer = append(footer, a.input.View())
+	if a.palette.Visible() {
+		footer = append(footer, a.palette.View())
+	}
+	if a.confirm.Visible() {
+		footer = append(footer, a.confirm.View())
+	}
+	if a.coAuthorConfirm.Visible() {
+		footer = append(footer, a.coAuthorConfirm.View())
+	}
 	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, footer...))
 	sections = append(sections, statusView)
 
@@ -1191,162 +1221,7 @@ func (a *App) View() tea.View {
 		fullView = a.diffPane.View()
 	}
 
-	// Overlay confirmation on top of everything (like palette)
-	if a.confirm.Visible() {
-		fullView = a.overlay(fullView, a.confirm.View())
-	}
-
-	// Overlay co-author confirmation
-	if a.coAuthorConfirm.Visible() {
-		fullView = a.overlay(fullView, a.coAuthorConfirm.View())
-	}
-
 	return makeView(fullView)
-}
-
-func (a *App) overlay(base, over string) string {
-	if over == "" {
-		return base
-	}
-
-	baseLines := strings.Split(base, "\n")
-	overLines := strings.Split(over, "\n")
-
-	bH := len(baseLines)
-	oH := len(overLines)
-
-	top := (bH - oH) / 2
-	if top < 0 {
-		top = 0
-	}
-
-	maxOW := 0
-	for _, l := range overLines {
-		w := lipgloss.Width(l)
-		if w > maxOW {
-			maxOW = w
-		}
-	}
-
-	dimStyle := lipgloss.NewStyle().Foreground(a.styles.T.Muted)
-
-	for i := 0; i < bH; i++ {
-		rawBase := stripAnsi(baseLines[i])
-		bW := lipgloss.Width(rawBase)
-
-		if i >= top && i < top+oH {
-			oLine := overLines[i-top]
-			leftPad := (bW - maxOW) / 2
-			if leftPad < 0 {
-				leftPad = 0
-			}
-
-			leftBg := truncateRight(rawBase, leftPad)
-			oWidth := lipgloss.Width(oLine)
-			rightBg := skipLeft(rawBase, leftPad+oWidth)
-
-			baseLines[i] = dimStyle.Render(leftBg) + oLine + dimStyle.Render(rightBg)
-		} else {
-			baseLines[i] = dimStyle.Render(rawBase)
-		}
-	}
-
-	return strings.Join(baseLines, "\n")
-}
-
-func (a *App) overlayPalette(base, over string) string {
-	if over == "" {
-		return base
-	}
-
-	baseLines := strings.Split(base, "\n")
-	overLines := strings.Split(over, "\n")
-
-	bH := len(baseLines)
-	oH := len(overLines)
-
-	top := bH - oH
-	if top < 0 {
-		top = 0
-	}
-
-	maxOW := 0
-	for _, l := range overLines {
-		w := lipgloss.Width(l)
-		if w > maxOW {
-			maxOW = w
-		}
-	}
-
-	dimStyle := lipgloss.NewStyle().Foreground(a.styles.T.Muted)
-
-	for i := 0; i < bH; i++ {
-		rawBase := stripAnsi(baseLines[i])
-		bW := lipgloss.Width(rawBase)
-
-		if i >= top && i < top+oH {
-			oLine := overLines[i-top]
-			leftPad := (bW - maxOW) / 2
-			if leftPad < 0 {
-				leftPad = 0
-			}
-
-			leftBg := truncateRight(rawBase, leftPad)
-			oWidth := lipgloss.Width(oLine)
-			rightBg := skipLeft(rawBase, leftPad+oWidth)
-
-			baseLines[i] = dimStyle.Render(leftBg) + oLine + dimStyle.Render(rightBg)
-		} else {
-			baseLines[i] = dimStyle.Render(rawBase)
-		}
-	}
-
-	return strings.Join(baseLines, "\n")
-}
-
-func truncateRight(s string, w int) string {
-	if w <= 0 {
-		return ""
-	}
-	return lipgloss.NewStyle().MaxWidth(w).Render(s)
-}
-
-func skipLeft(s string, w int) string {
-	if w <= 0 {
-		return s
-	}
-	currentWidth := 0
-	runes := []rune(s)
-	for i, r := range runes {
-		if currentWidth >= w {
-			return string(runes[i:])
-		}
-		currentWidth += lipgloss.Width(string(r))
-	}
-	return ""
-}
-
-// stripAnsi removes ANSI escape sequences from a string.
-func stripAnsi(s string) string {
-	var result strings.Builder
-	i := 0
-	for i < len(s) {
-		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
-			// Skip until we find a letter (end of escape sequence)
-			j := i + 2
-			for j < len(s) && !((s[j] >= 'A' && s[j] <= 'Z') || (s[j] >= 'a' && s[j] <= 'z')) {
-				j++
-			}
-			if j < len(s) {
-				j++ // skip the final letter
-			}
-			i = j
-		} else {
-			result.WriteByte(s[i])
-			i++
-		}
-	}
-	return result.String()
 }
 
 func computeSimpleDiff(filename, old, new string) string {
@@ -1447,7 +1322,7 @@ func computeWordDiff(dmp *diffmatchpatch.DiffMatchPatch, oldLine, newLine string
 	}
 
 	if hasChanges {
-		return fmt.Sprintf("-" + oldSb.String() + "\n+" + newSb.String() + "\n")
+		return "-" + oldSb.String() + "\n+" + newSb.String() + "\n"
 	}
 	return " " + oldLine + "\n"
 }

@@ -6,6 +6,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
@@ -29,6 +30,20 @@ func NewInput(styles *themes.Styles) Input {
 	ta.SetHeight(1)
 	ta.MaxHeight = 8
 	ta.CharLimit = 0
+	ta.Prompt = "❯ "
+
+	// Inline look: accent prompt, muted placeholder, no boxes or highlights.
+	st := ta.Styles()
+	st.Focused.Prompt = lipgloss.NewStyle().Foreground(styles.T.Accent).Bold(true)
+	st.Blurred.Prompt = lipgloss.NewStyle().Foreground(styles.T.Muted)
+	st.Focused.Placeholder = lipgloss.NewStyle().Foreground(styles.T.Muted)
+	st.Blurred.Placeholder = lipgloss.NewStyle().Foreground(styles.T.Muted)
+	st.Focused.Text = lipgloss.NewStyle().Foreground(styles.T.Text)
+	st.Blurred.Text = lipgloss.NewStyle().Foreground(styles.T.Text)
+	st.Focused.CursorLine = lipgloss.NewStyle()
+	st.Blurred.CursorLine = lipgloss.NewStyle()
+	ta.SetStyles(st)
+
 	ta.Focus()
 
 	return Input{ta: ta, styles: styles, histIdx: -1, focused: true}
@@ -37,7 +52,7 @@ func NewInput(styles *themes.Styles) Input {
 // SetWidth updates the input width.
 func (i *Input) SetWidth(w int) {
 	i.width = w
-	taW := w - 8 // account for margins and borders
+	taW := w - 2 // account for horizontal padding
 	if taW < 10 {
 		taW = 10
 	}
@@ -247,7 +262,10 @@ func (i Input) View() string {
 		return ""
 	}
 	if i.focused {
-		return i.styles.InputFocused.Render(i.ta.View())
+		return i.styles.InputFocused.Width(i.width).Render(i.ta.View())
 	}
-	return i.styles.Input.Render(i.ta.View())
+	return i.styles.Input.Width(i.width).Render(i.ta.View())
 }
+
+// Focused reports whether the input has focus.
+func (i Input) Focused() bool { return i.focused }

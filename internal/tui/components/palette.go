@@ -61,17 +61,7 @@ func (p *CommandPalette) SetItems(items []PaletteItem) {
 }
 
 func (p *CommandPalette) updateScroll() {
-	maxItems := 10
-	if p.height > 0 {
-		// Dynamically adjust max items based on height if possible,
-		// but 10 is a good safe default for the spotlight look.
-		if p.height < 15 {
-			maxItems = p.height - 5
-		}
-	}
-	if maxItems < 1 {
-		maxItems = 1
-	}
+	maxItems := p.MaxVisibleItems()
 
 	if p.cursor < p.scrollOffset {
 		p.scrollOffset = p.cursor
@@ -133,50 +123,17 @@ func (p CommandPalette) Update(msg tea.Msg) (CommandPalette, tea.Cmd) {
 	return p, nil
 }
 
-// View renders the "Spotlight" command palette.
+// View renders the palette as a full-width inline list (shown below the input).
 func (p CommandPalette) View() string {
 	if !p.visible || p.width <= 0 || p.height <= 0 {
 		return ""
 	}
 
-	// 1. Calculate palette dimensions
-	palWidth := int(float64(p.width) * 0.8)
-	if palWidth < 40 {
-		palWidth = p.width
-	}
-	if palWidth > 80 {
-		palWidth = 80
-	}
+	innerW := p.width
 
-	innerW := palWidth - 2 // Width inside the border
-
-	// 2. Search Header
-	searchIcon := lipgloss.NewStyle().Foreground(p.styles.T.Accent).Render("󰍉 ")
-	queryText := p.query
-	if queryText == "" {
-		queryText = lipgloss.NewStyle().Foreground(p.styles.T.Muted).Render("Search commands...")
-	} else {
-		queryText = lipgloss.NewStyle().Foreground(p.styles.T.Text).Bold(true).Render(queryText)
-	}
-
-	headerStr := searchIcon + queryText
-	// Ensure header fills innerW
-	header := lipgloss.NewStyle().
-		Padding(0, 1).
-		Border(lipgloss.NormalBorder(), false, false, true, false).
-		BorderForeground(p.styles.T.BorderNormal).
-		Width(innerW).
-		Render(headerStr)
-
-	// 3. Items List with Scrolling
+	// Items list with scrolling
 	var rows []string
-	maxItems := 10
-	if p.height < 15 {
-		maxItems = p.height - 5
-	}
-	if maxItems < 1 {
-		maxItems = 1
-	}
+	maxItems := p.MaxVisibleItems()
 
 	end := p.scrollOffset + maxItems
 	if end > len(p.items) {
@@ -187,35 +144,51 @@ func (p CommandPalette) View() string {
 		rows = append(rows, p.renderItem(p.items[i], i == p.cursor, innerW))
 	}
 
-	// Fill empty space if fewer items than maxItems
-	for len(rows) < maxItems {
-		rows = append(rows, lipgloss.NewStyle().Width(innerW).Render(""))
+	if len(rows) == 0 {
+		rows = append(rows, lipgloss.NewStyle().
+			Foreground(p.styles.T.Muted).
+			Italic(true).
+			PaddingLeft(3).
+			Render("No matches"))
 	}
 
 	list := lipgloss.JoinVertical(lipgloss.Left, rows...)
 
-	// 4. Footer
-	footerText := fmt.Sprintf("%d/%d", p.cursor+1, len(p.items))
-	footer := lipgloss.NewStyle().
-		Foreground(p.styles.T.Background).
-		Background(p.styles.T.Accent).
-		Bold(true).
-		Padding(0, 1).
-		Render(footerText)
+	// Footer hint line: position + navigation help
+	pos := fmt.Sprintf("%d/%d", p.cursor+1, len(p.items))
+	hint := lipgloss.NewStyle().
+		Foreground(p.styles.T.Muted).
+		PaddingLeft(3).
+		Render(fmt.Sprintf("%s  ↑↓ navigate · ⏎ select · esc dismiss", pos))
 
-	// Place footer on the right
-	footerRow := lipgloss.PlaceHorizontal(innerW, lipgloss.Right, footer)
+	return lipgloss.JoinVertical(lipgloss.Left, list, hint)
+}
 
-	// 5. Final Assembly
-	content := lipgloss.JoinVertical(lipgloss.Left, header, list, footerRow)
+// MaxVisibleItems returns how many rows the palette shows at once.
+func (p CommandPalette) MaxVisibleItems() int {
+	maxItems := 8
+	if p.height > 0 && p.height < 15 {
+		maxItems = p.height - 6
+	}
+	if maxItems < 1 {
+		maxItems = 1
+	}
+	return maxItems
+}
 
-	return lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(p.styles.T.Accent).
-		Background(p.styles.T.Background).
-		Padding(0).
-		Width(palWidth).
-		Render(content)
+// Height returns the total rendered height of the palette (list + hint line).
+func (p CommandPalette) Height() int {
+	if !p.visible {
+		return 0
+	}
+	visible := len(p.items) - p.scrollOffset
+	if max := p.MaxVisibleItems(); visible > max {
+		visible = max
+	}
+	if visible < 1 {
+		visible = 1 // "No matches" row
+	}
+	return visible + 1 // + hint line
 }
 
 func (p CommandPalette) renderItem(item PaletteItem, selected bool, width int) string {
@@ -225,10 +198,10 @@ func (p CommandPalette) renderItem(item PaletteItem, selected bool, width int) s
 		rowStyle = rowStyle.Background(p.styles.T.Surface)
 	}
 
-	// 2. Indicator (▋ or two spaces)
-	indicator := "  "
+	// 2. Indicator (▍ or space), aligned with the input prompt
+	indicator := "   "
 	if selected {
-		indicator = lipgloss.NewStyle().Foreground(p.styles.T.Accent).Render("▋ ")
+		indicator = " " + lipgloss.NewStyle().Foreground(p.styles.T.Accent).Render("▍") + " "
 	}
 
 	// 3. Label (Left part)
@@ -241,14 +214,11 @@ func (p CommandPalette) renderItem(item PaletteItem, selected bool, width int) s
 	left := lipgloss.JoinHorizontal(lipgloss.Top, indicator, labelPart)
 	leftW := lipgloss.Width(left)
 
-	// 4. Description (Right part)
-	descStyle := lipgloss.NewStyle().Foreground(p.styles.T.Muted).Italic(true)
-	if selected {
-		descStyle = descStyle.Foreground(p.styles.T.Muted)
-	}
+	// 4. Description follows the label on the same line
+	descStyle := lipgloss.NewStyle().Foreground(p.styles.T.Muted)
 
 	// Calculate available space for description
-	maxDescW := width - leftW - 2
+	maxDescW := width - leftW - 4
 	desc := item.Description
 	if maxDescW < 5 {
 		desc = ""
@@ -257,17 +227,17 @@ func (p CommandPalette) renderItem(item PaletteItem, selected bool, width int) s
 	}
 	descPart := descStyle.Render(desc)
 
-	// 5. Join with calculated gap
-	gapW := width - leftW - lipgloss.Width(descPart) - 1
-	if gapW < 0 {
-		gapW = 0
+	// Pad label column so descriptions align
+	labelColW := 22
+	gapW := labelColW - leftW
+	if gapW < 2 {
+		gapW = 2
 	}
 
 	content := lipgloss.JoinHorizontal(lipgloss.Top,
 		left,
 		strings.Repeat(" ", gapW),
 		descPart,
-		" ",
 	)
 
 	return rowStyle.Render(content)

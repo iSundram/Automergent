@@ -118,17 +118,15 @@ func NewStyles(t *Theme) *Styles {
 	s.StatusBarRight = lipgloss.NewStyle().
 		Foreground(t.Subtext)
 
-	// Input
+	// Input (inline, no box — a thin top rule separates it from the conversation)
 	s.Input = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
+		Border(lipgloss.NormalBorder(), true, false, false, false).
 		BorderForeground(t.BorderNormal).
-		Padding(0, 1).
-		Margin(0, 2)
+		Padding(0, 1)
 	s.InputFocused = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.Accent).
-		Padding(0, 1).
-		Margin(0, 2)
+		Border(lipgloss.NormalBorder(), true, false, false, false).
+		BorderForeground(t.BorderNormal).
+		Padding(0, 1)
 
 	// User message (Right-aligned look via margins in rendering, styled bubble here)
 	s.UserLabel = lipgloss.NewStyle().

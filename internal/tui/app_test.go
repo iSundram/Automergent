@@ -14,6 +14,7 @@ import (
 	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
+	"github.com/iSundram/Automergent/internal/tui/components"
 )
 
 func newTestApp(t *testing.T) *App {
@@ -28,7 +29,7 @@ func newTestApp(t *testing.T) *App {
 		APIKey:       cfg.Providers["google"].APIKey,
 		DefaultModel: cfg.Model,
 	}), sess, reg)
-	app := NewApp(cfg, ag, sess, nil, "")
+	app := NewApp(cfg, ag, sess, nil, "", false)
 	return app
 }
 
@@ -122,8 +123,8 @@ func TestHandleAgentEventToolDoneRendersResult(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected a tool result message")
 	}
-	if last.Role != "tool_result" {
-		t.Fatalf("expected tool_result role, got %s", last.Role)
+	if last.Role != "tool_call" || last.Status != "done" {
+		t.Fatalf("expected completed tool_call, got role=%s status=%s", last.Role, last.Status)
 	}
 }
 
@@ -142,8 +143,8 @@ func TestHandleAgentEventToolDoneRendersError(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected an error message")
 	}
-	if last.Role != "tool_result" || !last.IsError {
-		t.Fatalf("expected tool_result error message, got role=%s isError=%v", last.Role, last.IsError)
+	if last.Role != "tool_call" || last.Status != "error" || !last.IsError {
+		t.Fatalf("expected errored tool_call message, got role=%s status=%s isError=%v", last.Role, last.Status, last.IsError)
 	}
 }
 
@@ -251,7 +252,7 @@ func TestLayoutThinkingReservesHeightWithoutPaletteShift(t *testing.T) {
 	}
 }
 
-func TestPaletteVisibilityDoesNotResizeConversation(t *testing.T) {
+func TestPaletteVisibilityResizesConversation(t *testing.T) {
 	app := newTestApp(t)
 	app.width = 120
 	app.height = 40
@@ -259,13 +260,16 @@ func TestPaletteVisibilityDoesNotResizeConversation(t *testing.T) {
 	baseView := app.conversation.View()
 	baseLines := strings.Count(baseView, "\n")
 
-	app.palette.Show(nil, "")
+	app.palette.Show([]components.PaletteItem{
+		{Label: "/help", Description: "Show help", Value: "help"},
+		{Label: "/clear", Description: "Clear conversation", Value: "clear"},
+	}, "")
 	app.layout()
 	withPaletteView := app.conversation.View()
 	withPaletteLines := strings.Count(withPaletteView, "\n")
 
-	if withPaletteLines != baseLines {
-		t.Fatalf("expected palette to avoid resizing conversation; base=%d with_palette=%d", baseLines, withPaletteLines)
+	if withPaletteLines >= baseLines {
+		t.Fatalf("expected inline palette to shrink conversation; base=%d with_palette=%d", baseLines, withPaletteLines)
 	}
 }
 
