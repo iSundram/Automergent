@@ -157,12 +157,31 @@ func (t *AskUserTool) Execute(ctx context.Context, args map[string]any) (tools.R
 		}, 1)
 
 		// Call responder in a goroutine since it may block on stdin/TUI
+		// Wrap in another goroutine to respect context cancellation
 		go func() {
-			ans, err := t.responder(question)
-			responseCh <- struct {
+			doneCh := make(chan struct {
 				ans string
 				err error
-			}{ans: ans, err: err}
+			}, 1)
+
+			// Actual responder call
+			go func() {
+				ans, err := t.responder(question)
+				doneCh <- struct {
+					ans string
+					err error
+				}{ans: ans, err: err}
+			}()
+
+			// Wait for responder or context cancellation
+			select {
+			case result := <-doneCh:
+				responseCh <- result
+			case <-childCtx.Done():
+				// Context cancelled, don't send to responseCh
+				// The responder goroutine will complete eventually without leaking
+				return
+			}
 		}()
 
 		select {

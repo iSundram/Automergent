@@ -163,7 +163,11 @@ func (ms *MemoryStore) projectDir(projectPath string) string {
 func (ms *MemoryStore) GetProject(projectPath string) (*ProjectMemory, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()
+	return ms.getProjectLocked(projectPath)
+}
 
+// getProjectLocked retrieves or creates memory for a project (caller must hold ms.mu).
+func (ms *MemoryStore) getProjectLocked(projectPath string) (*ProjectMemory, error) {
 	if pm, ok := ms.projects[projectPath]; ok {
 		pm.AccessCount++
 		pm.UpdatedAt = time.Now()
@@ -278,13 +282,13 @@ func (ms *MemoryStore) updateRecentProject(path, name string) {
 
 // LearnConvention adds or updates a convention for a project.
 func (ms *MemoryStore) LearnConvention(projectPath, name, description string, confidence float64) error {
-	pm, err := ms.GetProject(projectPath)
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	pm, err := ms.getProjectLocked(projectPath)
 	if err != nil {
 		return err
 	}
-
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
 
 	if pm.Conventions == nil {
 		pm.Conventions = make(map[string]Convention)
@@ -310,13 +314,13 @@ func (ms *MemoryStore) LearnConvention(projectPath, name, description string, co
 
 // LearnCodePattern adds a code pattern for a project.
 func (ms *MemoryStore) LearnCodePattern(projectPath string, pattern CodePattern) error {
-	pm, err := ms.GetProject(projectPath)
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	pm, err := ms.getProjectLocked(projectPath)
 	if err != nil {
 		return err
 	}
-
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
 
 	pattern.ID = fmt.Sprintf("p_%d", time.Now().UnixNano())
 	pattern.LearnedAt = time.Now()
@@ -328,13 +332,13 @@ func (ms *MemoryStore) LearnCodePattern(projectPath string, pattern CodePattern)
 
 // RecordFileAccess tracks file access for a project.
 func (ms *MemoryStore) RecordFileAccess(projectPath, filePath string, edited bool) error {
-	pm, err := ms.GetProject(projectPath)
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	pm, err := ms.getProjectLocked(projectPath)
 	if err != nil {
 		return err
 	}
-
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
 
 	if pm.RecentFiles == nil {
 		pm.RecentFiles = []RecentFile{}
@@ -378,13 +382,13 @@ func (ms *MemoryStore) RecordFileAccess(projectPath, filePath string, edited boo
 
 // SetArchitecture sets architecture decisions for a project.
 func (ms *MemoryStore) SetArchitecture(projectPath string, arch *ArchitectureDecisions) error {
-	pm, err := ms.GetProject(projectPath)
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	pm, err := ms.getProjectLocked(projectPath)
 	if err != nil {
 		return err
 	}
-
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
 
 	pm.Architecture = arch
 	return ms.saveProjectLocked(pm)
@@ -457,13 +461,13 @@ func (ms *MemoryStore) GetMostUsedPatterns(projectPath string, limit int) []Code
 
 // IncrementPatternUsage increments usage count for a pattern.
 func (ms *MemoryStore) IncrementPatternUsage(projectPath, patternID string) error {
-	pm, err := ms.GetProject(projectPath)
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
+
+	pm, err := ms.getProjectLocked(projectPath)
 	if err != nil {
 		return err
 	}
-
-	ms.mu.Lock()
-	defer ms.mu.Unlock()
 
 	for i, p := range pm.CodePatterns {
 		if p.ID == patternID {

@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/iSundram/Automergent/internal/ai"
 )
@@ -185,6 +186,7 @@ func buildGeminiContents(messages []ai.Message) []geminiContent {
 			var parts []geminiPart
 			if partsRaw, ok := m.Metadata["google_parts"]; ok {
 				if b, err := json.Marshal(partsRaw); err == nil {
+					// Note: Errors unmarshaling metadata are not fatal - we can rebuild from Content
 					_ = json.Unmarshal(b, &parts)
 				}
 			}
@@ -446,11 +448,13 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 
 	// Streaming logic: Gemini returns a JSON array of objects during streamGenerateContent
 	ch := make(chan ai.Chunk, 128)
-	toolCallsPtr := &[]ai.ToolCall{}
-	stopReasonPtr := new(ai.StopReason)
-	*stopReasonPtr = ai.StopReasonEnd
-	usagePtr := &ai.Usage{}
-	rawPartsPtr := &[]geminiPart{}
+
+	// Protect shared state with mutex
+	var mu sync.Mutex
+	toolCalls := []ai.ToolCall{}
+	stopReason := ai.StopReasonEnd
+	usage := ai.Usage{}
+	rawParts := []geminiPart{}
 
 	go func() {
 		defer resp.Body.Close()
@@ -476,7 +480,7 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 			}
 
 			if gr2.UsageMetadata.TotalTokenCount > 0 {
-				*usagePtr = ai.Usage{
+				usage = ai.Usage{
 					InputTokens:  gr2.UsageMetadata.PromptTokenCount,
 					OutputTokens: gr2.UsageMetadata.CandidatesTokenCount,
 					TotalTokens:  gr2.UsageMetadata.TotalTokenCount,
@@ -485,12 +489,12 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 
 			if len(gr2.Candidates) > 0 {
 				cand := gr2.Candidates[0]
-				if cand.FinishReason != "" && *stopReasonPtr != ai.StopReasonTools {
+				if cand.FinishReason != "" && stopReason != ai.StopReasonTools {
 					switch cand.FinishReason {
 					case "MAX_TOKENS":
-						*stopReasonPtr = ai.StopReasonLength
+						stopReason = ai.StopReasonLength
 					case "STOP":
-						*stopReasonPtr = ai.StopReasonEnd
+						stopReason = ai.StopReasonEnd
 					}
 				}
 
@@ -503,8 +507,9 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 						continue
 					}
 
-					// Save raw parts for context preservation
-					*rawPartsPtr = append(*rawPartsPtr, geminiPart{
+					// Save raw parts for context preservation (protected by mutex)
+					mu.Lock()
+					rawParts = append(rawParts, geminiPart{
 						Text:             part.Text,
 						Thought:          part.Thought,
 						ThoughtSignature: part.ThoughtSignature,
@@ -513,10 +518,18 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 								return nil
 							}
 							var args map[string]any
-							_ = json.Unmarshal(part.FunctionCall.Args, &args)
+							if err := json.Unmarshal(part.FunctionCall.Args, &args); err != nil {
+								// Send error chunk
+								ch <- ai.Chunk{
+									Error: fmt.Errorf("google: parsing tool args for %s: %w", part.FunctionCall.Name, err),
+									Done:  true,
+								}
+								return nil
+							}
 							return &geminiFunctionCall{Name: part.FunctionCall.Name, Args: args}
 						}(),
 					})
+					mu.Unlock()
 
 					chunk := ai.Chunk{}
 					if part.Thought {
@@ -528,23 +541,34 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 					if part.FunctionCall != nil {
 						var args map[string]any
 						if len(part.FunctionCall.Args) > 0 {
-							_ = json.Unmarshal(part.FunctionCall.Args, &args)
+							if err := json.Unmarshal(part.FunctionCall.Args, &args); err != nil {
+								ch <- ai.Chunk{
+									Error: fmt.Errorf("google: invalid tool arguments for %s: %w", part.FunctionCall.Name, err),
+									Done:  true,
+								}
+								mu.Unlock()
+								return
+							}
 						}
 						if args == nil {
 							args = map[string]any{}
 						}
+
+						mu.Lock()
 						id := part.FunctionCall.ID
 						if id == "" {
-							id = fmt.Sprintf("gemini_%d", len(*toolCallsPtr))
+							id = fmt.Sprintf("gemini_%d", len(toolCalls))
 						}
 						tc := ai.ToolCall{
 							ID:   id,
 							Name: part.FunctionCall.Name,
 							Args: args,
 						}
-						*toolCallsPtr = append(*toolCallsPtr, tc)
+						toolCalls = append(toolCalls, tc)
+						stopReason = ai.StopReasonTools
+						mu.Unlock()
+
 						chunk.ToolCalls = append(chunk.ToolCalls, tc)
-						*stopReasonPtr = ai.StopReasonTools
 					}
 					ch <- chunk
 				}
@@ -556,10 +580,11 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 	res := ai.NewChannelResponse(ch, ai.StopReasonEnd, ai.Usage{})
 	return &geminiStreamResponse{
 		res:        res,
-		toolCalls:  toolCallsPtr,
-		stopReason: stopReasonPtr,
-		usage:      usagePtr,
-		rawParts:   rawPartsPtr,
+		toolCalls:  &toolCalls,
+		stopReason: &stopReason,
+		usage:      &usage,
+		rawParts:   &rawParts,
+		mu:         &mu,
 	}, nil
 }
 
@@ -569,14 +594,27 @@ type geminiStreamResponse struct {
 	stopReason *ai.StopReason
 	usage      *ai.Usage
 	rawParts   *[]geminiPart
+	mu         *sync.Mutex
 }
 
 func (r *geminiStreamResponse) Stream() <-chan ai.Chunk { return r.res.Stream() }
 func (r *geminiStreamResponse) ToolCalls() []ai.ToolCall {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return *r.toolCalls
 }
-func (r *geminiStreamResponse) StopReason() ai.StopReason { return *r.stopReason }
-func (r *geminiStreamResponse) Usage() ai.Usage           { return *r.usage }
+func (r *geminiStreamResponse) StopReason() ai.StopReason {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return *r.stopReason
+}
+func (r *geminiStreamResponse) Usage() ai.Usage {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return *r.usage
+}
 func (r *geminiStreamResponse) GetMetadata() map[string]any {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return map[string]any{"google_parts": *r.rawParts}
 }
