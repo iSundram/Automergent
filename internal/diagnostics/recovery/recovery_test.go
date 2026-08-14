@@ -58,3 +58,25 @@ func TestSummarizeBuildsUserMessage(t *testing.T) {
 		t.Fatalf("primary cause = %s, want %s", report.Primary.Cause, CauseSyntax)
 	}
 }
+
+func TestRetryPolicyAdapterDecision(t *testing.T) {
+	policy := RetryPolicy{
+		Retryable:    true,
+		MaxAttempts:  2,
+		InitialDelay: time.Millisecond,
+		MaxDelay:     time.Millisecond,
+		Multiplier:   2,
+	}
+
+	adapted := policy.AsRecoveryPolicy()
+	if d := adapted.Decide(1, errSentinel{}); !d.Retry {
+		t.Fatalf("expected retry decision, got %+v", d)
+	}
+	if d := adapted.Decide(3, errSentinel{}); d.Retry {
+		t.Fatalf("expected retry stop, got %+v", d)
+	}
+}
+
+type errSentinel struct{}
+
+func (errSentinel) Error() string { return "boom" }

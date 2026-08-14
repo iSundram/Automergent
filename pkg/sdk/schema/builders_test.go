@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -374,5 +375,47 @@ func TestClone(t *testing.T) {
 	}
 	if clonedSchema.Description != "cloned" {
 		t.Errorf("cloned description not updated")
+	}
+}
+
+func TestStringBuilder_DefaultMaxLength(t *testing.T) {
+	schema := String().Build("body")
+	value := strings.Repeat("a", 64*1024+1)
+
+	err := schema.Validate(value)
+	if err == nil {
+		t.Fatal("expected max length validation error")
+	}
+	if !strings.Contains(err.Error(), `parameter "body" must be at most 65536 characters`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestArrayBuilder_DefaultMaxItems(t *testing.T) {
+	schema := Array().Build("items")
+	value := make([]any, 1001)
+
+	err := schema.Validate(value)
+	if err == nil {
+		t.Fatal("expected max items validation error")
+	}
+	if !strings.Contains(err.Error(), `parameter "items" must have at most 1000 items`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestObjectBuilder_UnknownProperty(t *testing.T) {
+	schema := Object().Property("name", String().Required()).Build("user")
+	value := map[string]any{
+		"name":  "alice",
+		"admin": true,
+	}
+
+	err := schema.Validate(value)
+	if err == nil {
+		t.Fatal("expected unknown property validation error")
+	}
+	if !strings.Contains(err.Error(), `parameter "user" has unknown property "admin"`) {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

@@ -24,6 +24,7 @@ type Config struct {
 	MaxSessionAge      string `mapstructure:"maxSessionAge" yaml:"maxSessionAge"`
 
 	MaxContextTokens      int     `mapstructure:"maxContextTokens" yaml:"maxContextTokens"`
+	MaxToolOutputChars    int     `mapstructure:"maxToolOutputChars" yaml:"maxToolOutputChars"`
 	WarnAtContextFraction float64 `mapstructure:"warnAtContextFraction" yaml:"warnAtContextFraction"`
 	AutoCompressAt        float64 `mapstructure:"autoCompressAt" yaml:"autoCompressAt"`
 	CompressionKeepRecent int     `mapstructure:"compressionKeepRecent" yaml:"compressionKeepRecent"`
@@ -33,11 +34,14 @@ type Config struct {
 	MaxTreeDepth        int      `mapstructure:"maxTreeDepth" yaml:"maxTreeDepth"`
 	ExcludePatterns     []string `mapstructure:"excludePatterns" yaml:"excludePatterns"`
 
-	NoAnimation bool `mapstructure:"noAnimation" yaml:"noAnimation"`
-	NoColor     bool `mapstructure:"noColor" yaml:"noColor"`
-	NoTUI       bool `mapstructure:"noTui" yaml:"noTui"`
-	Quiet       bool `mapstructure:"quiet" yaml:"quiet"`
-	Verbose     bool `mapstructure:"verbose" yaml:"verbose"`
+	NoAnimation bool   `mapstructure:"noAnimation" yaml:"noAnimation"`
+	NoColor     bool   `mapstructure:"noColor" yaml:"noColor"`
+	NoTUI       bool   `mapstructure:"noTui" yaml:"noTui"`
+	Output      string `mapstructure:"output" yaml:"output"`
+	Quiet       bool   `mapstructure:"quiet" yaml:"quiet"`
+	Verbose     bool   `mapstructure:"verbose" yaml:"verbose"`
+
+	ReasoningPreAnalysis bool `mapstructure:"reasoningPreAnalysis" yaml:"reasoningPreAnalysis"`
 
 	Security  SecurityConfig            `mapstructure:"security" yaml:"security"`
 	Tools     map[string]ToolConfig     `mapstructure:"tools" yaml:"tools"`
@@ -49,6 +53,7 @@ type Config struct {
 
 	// Diagnostics holds error detection configuration
 	Diagnostics DiagnosticsConfig `mapstructure:"diagnostics" yaml:"diagnostics"`
+	Cache       CacheConfig       `mapstructure:"cache" yaml:"cache"`
 
 	ContextFiles []string `mapstructure:"contextFiles" yaml:"contextFiles,omitempty"`
 	SkillsDir    string   `mapstructure:"skillsDir" yaml:"skillsDir,omitempty"`
@@ -67,6 +72,16 @@ type Config struct {
 	// ConfigFile is the path to the config file used for loading and saving.
 	// It is not persisted to the config file itself.
 	ConfigFile string `mapstructure:"-" yaml:"-"`
+}
+
+// CacheConfig holds cache policy configuration.
+type CacheConfig struct {
+	Prompt PromptCacheConfig `mapstructure:"prompt" yaml:"prompt"`
+}
+
+// PromptCacheConfig controls prompt-cache integration behavior.
+type PromptCacheConfig struct {
+	Enabled bool `mapstructure:"enabled" yaml:"enabled"`
 }
 
 // Save writes the current configuration back to disk.
@@ -135,6 +150,7 @@ type CLIFlags struct {
 	ConfigFile   string
 	NoColor      bool
 	Session      string
+	Resume       bool
 	NewSession   bool
 	SessionDir   string
 	ContextFiles []string

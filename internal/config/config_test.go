@@ -7,6 +7,9 @@ func TestDefaultAndApplyFlags(t *testing.T) {
 	if cfg.Provider == "" || cfg.SessionDir == "" {
 		t.Fatalf("unexpected defaults: %+v", cfg)
 	}
+	if cfg.ReasoningPreAnalysis {
+		t.Fatalf("expected reasoning pre-analysis default to be false")
+	}
 
 	cfg.ApplyFlags(&CLIFlags{Provider: "google", Model: "gemini-3.6-flash", NoSandbox: true, ContextFiles: []string{"a.md"}, APIKey: "secret", BaseURL: "https://example.com"})
 	if cfg.Provider != "google" || cfg.Model != "gemini-3.6-flash" {

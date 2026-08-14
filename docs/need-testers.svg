@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="1920" viewBox="0 0 1080 1920" role="img" aria-labelledby="title desc">
+  <title id="title">Automergent - We Need Testers</title>
+  <desc id="desc">Detailed 9:16 grayscale announcement poster for OSS testing call.</desc>
+
+  <defs>
+    <style>
+      .mono { font-family: "JetBrains Mono", "Fira Code", "Cascadia Mono", monospace; }
+      .sans { font-family: "Inter", "Montserrat", "Segoe UI", Arial, sans-serif; }
+      .serif { font-family: "Playfair Display", "Merriweather", Georgia, serif; }
+    </style>
+  </defs>
+
+  <rect width="1080" height="1920" fill="#2b2b2b" />
+  <rect x="48" y="48" width="984" height="1824" rx="34" fill="none" stroke="#b2b2b2" stroke-width="2" />
+  <line x1="84" y1="220" x2="996" y2="220" stroke="#b2b2b2" stroke-width="1.5" />
+  <line x1="84" y1="1676" x2="996" y2="1676" stroke="#b2b2b2" stroke-width="1.5" />
+
+  <rect x="96" y="96" width="260" height="74" rx="16" fill="#b2b2b2" />
+  <text x="128" y="144" class="mono" fill="#2b2b2b" font-size="34" font-weight="800" letter-spacing="1.2">AUTOMERGENT</text>
+
+  <text x="96" y="330" class="serif" fill="#ffffff" font-size="104" font-weight="900">WE NEED</text>
+  <text x="96" y="442" class="sans" fill="#d4d4d4" font-size="130" font-weight="900" letter-spacing="1.5">TESTERS</text>
+
+  <text x="96" y="524" class="sans" fill="#b2b2b2" font-size="34" font-weight="500">
+    <tspan x="96" dy="0">We are preparing Automergent for a public OSS release,</tspan>
+    <tspan x="96" dy="42">and we want serious testers.</tspan>
+  </text>
+
+  <rect x="96" y="572" width="888" height="340" rx="22" fill="#2b2b2b" stroke="#b2b2b2" stroke-width="2.2" />
+  <text x="132" y="648" class="serif" fill="#ffffff" font-size="48" font-weight="800">Why join this testing wave?</text>
+  <text x="132" y="714" class="sans" fill="#d4d4d4" font-size="33">
+    <tspan x="132" dy="0">• The project is going open source (OSS), and your feedback can directly shape</tspan>
+    <tspan x="132" dy="44">  product direction before broader adoption.</tspan>
+  </text>
+  <text x="132" y="814" class="sans" fill="#d4d4d4" font-size="33">
+    <tspan x="132" dy="0">• You get early access to rapid improvements and can stress-test real workflows</tspan>
+    <tspan x="132" dy="44">  in terminal-native coding sessions.</tspan>
+  </text>
+
+  <rect x="96" y="948" width="888" height="262" rx="22" fill="#2b2b2b" stroke="#b2b2b2" stroke-width="2.2" />
+  <text x="132" y="1020" class="mono" fill="#b2b2b2" font-size="28" font-weight="700" letter-spacing="1.5">CURRENT BENCHMARK SIGNAL</text>
+  <text x="132" y="1092" class="sans" fill="#ffffff" font-size="58" font-weight="900">Outperforming Gemini CLI*</text>
+  <text x="132" y="1146" class="sans" fill="#d4d4d4" font-size="30">
+    <tspan x="132" dy="0">*Important note: current test runs have only been executed with Gemini model</tspan>
+    <tspan x="132" dy="38">families. We need broader, real-world testing from more users and setups.</tspan>
+  </text>
+
+  <rect x="96" y="1242" width="888" height="360" rx="24" fill="#2b2b2b" stroke="#ffffff" stroke-width="2.6" />
+  <text x="132" y="1320" class="serif" fill="#ffffff" font-size="62" font-weight="900">Please DM for testing</text>
+  <text x="132" y="1388" class="sans" fill="#d4d4d4" font-size="32">
+    <tspan x="132" dy="0">If you want in, send a DM with your platform, coding stack, and typical tasks.</tspan>
+    <tspan x="132" dy="42">We are especially looking for diverse workflows and edge-case feedback.</tspan>
+  </text>
+
+  <rect x="132" y="1450" width="816" height="136" rx="16" fill="#b2b2b2" />
+  <text x="168" y="1504" class="mono" fill="#2b2b2b" font-size="31" font-weight="800">
+    <tspan x="168" dy="0">DM:</tspan>
+    <tspan x="168" dy="38">"Automergent Testing Access Request"</tspan>
+  </text>
+
+  <text x="96" y="1742" class="serif" fill="#d4d4d4" font-size="40" font-weight="700">Build with us. Break it. Improve it. Ship it.</text>
+  <text x="96" y="1804" class="mono" fill="#b2b2b2" font-size="22">
+    <tspan x="96" dy="0">9:16 poster · grayscale theme</tspan>
+    <tspan x="96" dy="30">#ffffff #d4d4d4 #b2b2b2 #2b2b2b</tspan>
+  </text>
+</svg>

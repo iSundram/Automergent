@@ -41,6 +41,7 @@ func NewThemeEngine() *ThemeEngine {
 	te.RegisterTheme(SolarizedLight())
 	te.RegisterTheme(HighContrast())
 	te.RegisterTheme(Monokai())
+	te.RegisterTheme(Modern())
 
 	// Set default
 	te.current = Catppuccin()

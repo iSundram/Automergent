@@ -37,17 +37,55 @@ type AsyncSession struct {
 
 	// Cancel function for context-based cancellation
 	cancel context.CancelFunc
+
+	// Whether this session was exposed as a background operation.
+	background bool
 }
 
 // SessionManager manages async shell sessions.
 type SessionManager struct {
 	mu       sync.RWMutex
 	sessions map[string]*AsyncSession
+	history  map[string]SessionRecord
+	hooks    []func(SessionNotification)
 	counter  int
+}
+
+// SessionStatus is the lifecycle status for a background shell operation.
+type SessionStatus string
+
+const (
+	SessionStatusRunning   SessionStatus = "running"
+	SessionStatusCompleted SessionStatus = "completed"
+	SessionStatusFailed    SessionStatus = "failed"
+	SessionStatusCancelled SessionStatus = "cancelled"
+)
+
+// SessionRecord is a durable history entry for a shell operation.
+type SessionRecord struct {
+	ID          string
+	Command     string
+	Status      SessionStatus
+	StartedAt   time.Time
+	CompletedAt time.Time
+	ExitCode    int
+	Detached    bool
+	ErrMessage  string
+}
+
+// SessionNotification captures completion/failure updates.
+type SessionNotification struct {
+	ID         string
+	Command    string
+	Status     SessionStatus
+	ExitCode   int
+	ErrMessage string
+	Duration   time.Duration
 }
 
 var globalManager = &SessionManager{
 	sessions: make(map[string]*AsyncSession),
+	history:  make(map[string]SessionRecord),
 }
 
 // GetManager returns the global session manager.
@@ -59,6 +97,12 @@ func (m *SessionManager) Create(id string, session *AsyncSession) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.sessions[id] = session
+	m.history[id] = SessionRecord{
+		ID:        id,
+		Command:   session.Command,
+		Status:    SessionStatusRunning,
+		StartedAt: session.Started,
+	}
 }
 
 func (m *SessionManager) Get(id string) (*AsyncSession, bool) {
@@ -72,6 +116,82 @@ func (m *SessionManager) Delete(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.sessions, id)
+}
+
+// MarkBackground marks a session as a user-visible background operation.
+func (m *SessionManager) MarkBackground(id string, background bool, detached bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if s, ok := m.sessions[id]; ok {
+		s.background = background
+	}
+	rec, ok := m.history[id]
+	if !ok {
+		return
+	}
+	rec.Detached = detached
+	m.history[id] = rec
+}
+
+func isTerminalSessionStatus(status SessionStatus) bool {
+	return status == SessionStatusCompleted || status == SessionStatusFailed || status == SessionStatusCancelled
+}
+
+// UpdateStatus updates the stored status and emits notification hooks for background terminal transitions.
+func (m *SessionManager) UpdateStatus(id string, status SessionStatus, exitCode int, err error) bool {
+	m.mu.Lock()
+	rec, ok := m.history[id]
+	if !ok {
+		m.mu.Unlock()
+		return false
+	}
+	previousStatus := rec.Status
+	rec.Status = status
+	rec.ExitCode = exitCode
+	if isTerminalSessionStatus(status) {
+		rec.CompletedAt = time.Now()
+	}
+	if err != nil {
+		rec.ErrMessage = err.Error()
+	}
+	m.history[id] = rec
+
+	session := m.sessions[id]
+	background := session != nil && session.background
+	command := rec.Command
+	hooks := append([]func(SessionNotification){}, m.hooks...)
+	m.mu.Unlock()
+
+	if !background || !isTerminalSessionStatus(status) {
+		return true
+	}
+	if previousStatus == status && isTerminalSessionStatus(previousStatus) {
+		return true
+	}
+
+	duration := rec.CompletedAt.Sub(rec.StartedAt)
+	n := SessionNotification{
+		ID:         id,
+		Command:    command,
+		Status:     status,
+		ExitCode:   exitCode,
+		ErrMessage: rec.ErrMessage,
+		Duration:   duration,
+	}
+	for _, hook := range hooks {
+		hook(n)
+	}
+	return true
+}
+
+// RegisterStatusHook registers completion/failure notification hooks.
+func (m *SessionManager) RegisterStatusHook(hook func(SessionNotification)) {
+	if hook == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hooks = append(m.hooks, hook)
 }
 
 // Cleanup removes completed sessions older than maxAge to prevent memory leaks.
@@ -101,6 +221,13 @@ func (m *SessionManager) Cleanup(maxAge time.Duration) int {
 			m.mu.Unlock()
 		}
 	}
+	m.mu.Lock()
+	for id, rec := range m.history {
+		if isTerminalSessionStatus(rec.Status) && !rec.CompletedAt.IsZero() && rec.CompletedAt.Before(cutoff) {
+			delete(m.history, id)
+		}
+	}
+	m.mu.Unlock()
 	return removed
 }
 
@@ -112,6 +239,28 @@ func (m *SessionManager) List() []*AsyncSession {
 		result = append(result, s)
 	}
 	return result
+}
+
+// GetRecord returns a history entry for a session.
+func (m *SessionManager) GetRecord(id string) (SessionRecord, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	rec, ok := m.history[id]
+	return rec, ok
+}
+
+// ListRecords returns session history, optionally including completed entries.
+func (m *SessionManager) ListRecords(includeCompleted bool) []SessionRecord {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]SessionRecord, 0, len(m.history))
+	for _, rec := range m.history {
+		if !includeCompleted && isTerminalSessionStatus(rec.Status) {
+			continue
+		}
+		out = append(out, rec)
+	}
+	return out
 }
 
 func (m *SessionManager) NextID() string {
@@ -398,7 +547,13 @@ func (t *AsyncRunnerTool) executeSync(ctx context.Context, command, cwd string, 
 		if cmd.ProcessState != nil {
 			session.ExitCode = cmd.ProcessState.ExitCode()
 		}
+		exitCode := session.ExitCode
 		session.mu.Unlock()
+		status := SessionStatusCompleted
+		if err != nil {
+			status = SessionStatusFailed
+		}
+		_ = GetManager().UpdateStatus(shellID, status, exitCode, err)
 		close(done)
 	}()
 
@@ -424,6 +579,7 @@ func (t *AsyncRunnerTool) executeSync(ctx context.Context, command, cwd string, 
 		return tools.Result{Content: out}, nil
 	case <-time.After(time.Duration(initialWait) * time.Second):
 		// still running - return session id for async reads/writes
+		GetManager().MarkBackground(shellID, true, false)
 		return tools.Result{
 			Content: fmt.Sprintf("started async command (shell_id: %s)\nUse read_shell to get output, write_shell to send input", shellID),
 			Metadata: map[string]any{
@@ -497,6 +653,7 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 	}
 
 	GetManager().Create(shellID, session)
+	GetManager().MarkBackground(shellID, true, detach)
 
 	// Send initial stdin if provided
 	if stdinInput != "" {
@@ -555,7 +712,13 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 		if cmd.ProcessState != nil {
 			session.ExitCode = cmd.ProcessState.ExitCode()
 		}
+		exitCode := session.ExitCode
 		session.mu.Unlock()
+		status := SessionStatusCompleted
+		if err != nil {
+			status = SessionStatusFailed
+		}
+		_ = GetManager().UpdateStatus(shellID, status, exitCode, err)
 	}()
 
 	return tools.Result{
@@ -617,6 +780,21 @@ func (t *ReadShellTool) Execute(_ context.Context, args map[string]any) (tools.R
 
 	session, ok := GetManager().Get(shellID)
 	if !ok {
+		if rec, found := GetManager().GetRecord(shellID); found {
+			status := string(rec.Status)
+			if rec.Status == SessionStatusCompleted && rec.ExitCode == 0 {
+				status = "completed successfully"
+			}
+			content := fmt.Sprintf("(session output unavailable)\n\n[%s]", status)
+			return tools.Result{
+				Content: content,
+				Metadata: map[string]any{
+					"shell_id":  shellID,
+					"completed": isTerminalSessionStatus(rec.Status),
+					"exit_code": rec.ExitCode,
+				},
+			}, nil
+		}
 		return tools.Result{IsError: true, Content: fmt.Sprintf("shell session not found: %s", shellID)}, nil
 	}
 
@@ -828,7 +1006,14 @@ func (t *StopShellTool) Execute(_ context.Context, args map[string]any) (tools.R
 
 	session.mu.Lock()
 	if session.Completed {
+		exitCode := session.ExitCode
+		exitErr := session.Error
 		session.mu.Unlock()
+		status := SessionStatusCompleted
+		if exitCode != 0 {
+			status = SessionStatusFailed
+		}
+		_ = GetManager().UpdateStatus(shellID, status, exitCode, exitErr)
 		GetManager().Delete(shellID)
 		return tools.Result{Content: fmt.Sprintf("shell %s was already completed, session cleaned up", shellID)}, nil
 	}
@@ -843,6 +1028,7 @@ func (t *StopShellTool) Execute(_ context.Context, args map[string]any) (tools.R
 	if session.Cmd.Process != nil {
 		session.Cmd.Process.Kill()
 	}
+	_ = GetManager().UpdateStatus(shellID, SessionStatusCancelled, -1, nil)
 
 	GetManager().Delete(shellID)
 
@@ -853,7 +1039,7 @@ func (t *StopShellTool) Execute(_ context.Context, args map[string]any) (tools.R
 type ListShellsTool struct{}
 
 func (t *ListShellsTool) Name() string                          { return "list_shells" }
-func (t *ListShellsTool) Description() string                   { return "List all active shell sessions." }
+func (t *ListShellsTool) Description() string                   { return "List shell sessions and background history." }
 func (t *ListShellsTool) RequiresConfirmation(mode string) bool { return false }
 
 func (t *ListShellsTool) EstimatedCost() tools.ToolCost {
@@ -866,31 +1052,43 @@ func (t *ListShellsTool) EstimatedCost() tools.ToolCost {
 
 func (t *ListShellsTool) Schema() map[string]any {
 	return map[string]any{
-		"type":       "object",
-		"properties": map[string]any{},
+		"type": "object",
+		"properties": map[string]any{
+			"include_completed": map[string]any{
+				"type":        "boolean",
+				"description": "Include completed/failed/cancelled sessions (default: true).",
+			},
+		},
 	}
 }
 
-func (t *ListShellsTool) Execute(_ context.Context, _ map[string]any) (tools.Result, error) {
-	sessions := GetManager().List()
-
-	if len(sessions) == 0 {
+func (t *ListShellsTool) Execute(_ context.Context, args map[string]any) (tools.Result, error) {
+	includeCompleted := true
+	if v, ok := tools.ArgBool(args, "include_completed"); ok {
+		includeCompleted = v
+	}
+	records := GetManager().ListRecords(includeCompleted)
+	if len(records) == 0 {
 		return tools.Result{Content: "no active shell sessions"}, nil
 	}
 
 	var lines []string
-	for _, s := range sessions {
-		s.mu.Lock()
-		status := "running"
-		if s.Completed {
-			status = fmt.Sprintf("completed (exit %d)", s.ExitCode)
+	for _, rec := range records {
+		duration := time.Since(rec.StartedAt).Truncate(time.Second)
+		if !rec.CompletedAt.IsZero() {
+			duration = rec.CompletedAt.Sub(rec.StartedAt).Truncate(time.Second)
 		}
-		duration := time.Since(s.Started).Truncate(time.Second)
-		lines = append(lines, fmt.Sprintf("- %s: %s [%s, %s]", s.ID, truncateCommand(s.Command), status, duration))
-		s.mu.Unlock()
+		status := string(rec.Status)
+		if rec.Status == SessionStatusCompleted {
+			status = fmt.Sprintf("completed (exit %d)", rec.ExitCode)
+		}
+		if rec.Status == SessionStatusFailed {
+			status = fmt.Sprintf("failed (exit %d)", rec.ExitCode)
+		}
+		lines = append(lines, fmt.Sprintf("- %s: %s [%s, %s]", rec.ID, truncateCommand(rec.Command), status, duration))
 	}
 
-	return tools.Result{Content: fmt.Sprintf("%d session(s):\n%s", len(sessions), joinLines(lines))}, nil
+	return tools.Result{Content: fmt.Sprintf("%d session(s):\n%s", len(records), joinLines(lines))}, nil
 }
 
 func truncateCommand(cmd string) string {

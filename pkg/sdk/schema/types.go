@@ -6,6 +6,11 @@ import (
 	"regexp"
 )
 
+const (
+	defaultMaxStringLength = 64 * 1024
+	defaultMaxArrayItems   = 1000
+)
+
 // Type represents a JSON schema type.
 type Type string
 
@@ -149,8 +154,12 @@ func (p *ParamSchema) validateString(value any) error {
 	if p.MinLength != nil && len(s) < *p.MinLength {
 		return fmt.Errorf("parameter %q must be at least %d characters", p.Name, *p.MinLength)
 	}
-	if p.MaxLength != nil && len(s) > *p.MaxLength {
-		return fmt.Errorf("parameter %q must be at most %d characters", p.Name, *p.MaxLength)
+	maxLength := defaultMaxStringLength
+	if p.MaxLength != nil {
+		maxLength = *p.MaxLength
+	}
+	if len(s) > maxLength {
+		return fmt.Errorf("parameter %q must be at most %d characters", p.Name, maxLength)
 	}
 	if p.Pattern != nil && !p.Pattern.MatchString(s) {
 		return fmt.Errorf("parameter %q must match pattern %s", p.Name, p.Pattern.String())
@@ -227,8 +236,12 @@ func (p *ParamSchema) validateArray(value any) error {
 	if p.MinItems != nil && len(arr) < *p.MinItems {
 		return fmt.Errorf("parameter %q must have at least %d items", p.Name, *p.MinItems)
 	}
-	if p.MaxItems != nil && len(arr) > *p.MaxItems {
-		return fmt.Errorf("parameter %q must have at most %d items", p.Name, *p.MaxItems)
+	maxItems := defaultMaxArrayItems
+	if p.MaxItems != nil {
+		maxItems = *p.MaxItems
+	}
+	if len(arr) > maxItems {
+		return fmt.Errorf("parameter %q must have at most %d items", p.Name, maxItems)
 	}
 
 	if p.Items != nil {
@@ -246,6 +259,14 @@ func (p *ParamSchema) validateObject(value any) error {
 	obj, ok := value.(map[string]any)
 	if !ok {
 		return fmt.Errorf("parameter %q must be an object, got %T", p.Name, value)
+	}
+
+	if len(p.Properties) > 0 {
+		for key := range obj {
+			if _, exists := p.Properties[key]; !exists {
+				return fmt.Errorf("parameter %q has unknown property %q", p.Name, key)
+			}
+		}
 	}
 
 	for name, prop := range p.Properties {

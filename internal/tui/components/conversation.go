@@ -86,11 +86,9 @@ func (c *Conversation) SetSize(w, h int) {
 }
 
 func (c *Conversation) AddMessage(role, content string, isError bool) {
+	c.FinalizeStreaming()
 	c.ensureViewport()
 	shouldFollow := c.viewport.AtBottom()
-	c.streaming = false
-	c.currentBuilder = nil
-	c.currentThoughtBuilder = nil
 	c.messages = append(c.messages, ConversationMsg{
 		Role:      role,
 		Content:   content,
@@ -101,8 +99,8 @@ func (c *Conversation) AddMessage(role, content string, isError bool) {
 }
 
 func (c *Conversation) AddToolLifecycleStart(id, name, args, context string) {
+	c.FinalizeStreaming()
 	shouldFollow := c.viewport.AtBottom()
-	c.streaming = false
 	if id != "" {
 		for i := len(c.messages) - 1; i >= 0; i-- {
 			if c.messages[i].Role == "tool_call" && c.messages[i].Status == "running" && c.messages[i].ToolID == id {
@@ -129,8 +127,8 @@ func (c *Conversation) AddToolLifecycleStart(id, name, args, context string) {
 }
 
 func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, duration time.Duration, result tools.Result, reviewMode bool) {
+	c.FinalizeStreaming()
 	shouldFollow := c.viewport.AtBottom()
-	c.streaming = false
 	if id != "" {
 		for i := len(c.messages) - 1; i >= 0; i-- {
 			if c.messages[i].Role == "tool_call" && c.messages[i].Status == "running" && c.messages[i].ToolID == id {

@@ -218,8 +218,9 @@ func (l *Loader) loadDefaults() error {
 	if err != nil {
 		return err
 	}
-	l.layers[LayerDefaults] = data
-	for k := range data {
+	flat := flattenMap(data)
+	l.layers[LayerDefaults] = flat
+	for k := range flat {
 		l.sources[k] = LayerSource{Layer: LayerDefaults, Key: k}
 	}
 	return nil
@@ -239,8 +240,9 @@ func (l *Loader) loadGlobal() error {
 		return err
 	}
 
-	l.layers[LayerGlobal] = data
-	for k := range data {
+	flat := flattenMap(data)
+	l.layers[LayerGlobal] = flat
+	for k := range flat {
 		l.sources[k] = LayerSource{Layer: LayerGlobal, File: l.globalPath, Key: k}
 	}
 
@@ -266,8 +268,9 @@ func (l *Loader) loadProject() error {
 		return err
 	}
 
-	l.layers[LayerProject] = data
-	for k := range data {
+	flat := flattenMap(data)
+	l.layers[LayerProject] = flat
+	for k := range flat {
 		l.sources[k] = LayerSource{Layer: LayerProject, File: l.projectPath, Key: k}
 	}
 
@@ -300,8 +303,9 @@ func (l *Loader) loadProfile() error {
 		return err
 	}
 
-	l.layers[LayerProfile] = data
-	for k := range data {
+	flat := flattenMap(data)
+	l.layers[LayerProfile] = flat
+	for k := range flat {
 		l.sources[k] = LayerSource{Layer: LayerProfile, File: profilePath, Key: k}
 	}
 
@@ -548,6 +552,41 @@ func applyLayerToConfig(cfg *Config, data map[string]any) error {
 	return nil
 }
 
+// flattenMap converts nested map values into dot-notation keys.
+func flattenMap(data map[string]any) map[string]any {
+	out := make(map[string]any)
+	var walk func(prefix string, value any)
+	walk = func(prefix string, value any) {
+		switch v := value.(type) {
+		case map[string]any:
+			for k, child := range v {
+				next := k
+				if prefix != "" {
+					next = prefix + "." + k
+				}
+				walk(next, child)
+			}
+		case map[any]any:
+			for k, child := range v {
+				key := fmt.Sprintf("%v", k)
+				next := key
+				if prefix != "" {
+					next = prefix + "." + key
+				}
+				walk(next, child)
+			}
+		default:
+			if prefix != "" {
+				out[prefix] = v
+			}
+		}
+	}
+	for k, v := range data {
+		walk(k, v)
+	}
+	return out
+}
+
 // SetConfigField sets a config field by path (e.g., "security.sandbox").
 func SetConfigField(cfg *Config, path string, value any) error {
 	parts := strings.Split(path, ".")
@@ -623,6 +662,8 @@ func setTopLevelField(cfg *Config, key string, value any) error {
 		cfg.Quiet = toBool(value)
 	case "verbose":
 		cfg.Verbose = toBool(value)
+	case "reasoningPreAnalysis":
+		cfg.ReasoningPreAnalysis = toBool(value)
 	case "zeroDataRetention":
 		cfg.ZeroDataRetention = toBool(value)
 	case "telemetry":
@@ -794,6 +835,32 @@ func (l *Loader) GetSource(key string) (LayerSource, bool) {
 	defer l.mu.RUnlock()
 	src, ok := l.sources[key]
 	return src, ok
+}
+
+// Sources returns a snapshot of key->source mappings.
+func (l *Loader) Sources() map[string]LayerSource {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	out := make(map[string]LayerSource, len(l.sources))
+	for k, v := range l.sources {
+		out[k] = v
+	}
+	return out
+}
+
+// Layers returns a snapshot of layer values.
+func (l *Loader) Layers() map[Layer]map[string]any {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+	out := make(map[Layer]map[string]any, len(l.layers))
+	for layer, values := range l.layers {
+		cloned := make(map[string]any, len(values))
+		for k, v := range values {
+			cloned[k] = v
+		}
+		out[layer] = cloned
+	}
+	return out
 }
 
 // watchLoop handles hot reload of config files.

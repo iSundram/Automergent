@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -41,7 +42,9 @@ type AutomergentError struct {
 	// Retriable indicates whether the operation can be retried
 	Retriable bool
 
-	// RetryAfter suggests how long to wait before retrying
+	// RetryAfter suggests how long to wait before retrying.
+	// When unset, retry delay may still be derived from known context fields
+	// (retry_after, retry_after_ms, retry_delay, ...).
 	RetryAfter time.Duration
 
 	// Stack contains the call stack at the point of error creation
@@ -122,7 +125,11 @@ func (e *AutomergentError) WithSuggestion(suggestion string) *AutomergentError {
 // WithRetry marks the error as retriable.
 func (e *AutomergentError) WithRetry(after time.Duration) *AutomergentError {
 	e.Retriable = true
-	e.RetryAfter = after
+	if after > 0 {
+		e.RetryAfter = after
+	} else {
+		e.RetryAfter = 0
+	}
 	return e
 }
 
@@ -344,10 +351,78 @@ func IsRetriable(err error) bool {
 }
 
 // GetRetryAfter returns how long to wait before retrying.
+// It prefers RetryAfter and falls back to known retry delay context fields.
 func GetRetryAfter(err error) time.Duration {
 	var oce *AutomergentError
-	if errors.As(err, &oce) && oce.Retriable {
+	if !errors.As(err, &oce) || !oce.Retriable {
+		return 0
+	}
+	if oce.RetryAfter > 0 {
 		return oce.RetryAfter
+	}
+
+	return parseRetryDelayFromContext(oce.Context)
+}
+
+func parseRetryDelayFromContext(ctx map[string]any) time.Duration {
+	if len(ctx) == 0 {
+		return 0
+	}
+
+	maxDelay := time.Duration(0)
+
+	for _, key := range []string{"retry_after_ms", "retryAfterMs", "retry_delay_ms", "retryDelayMs"} {
+		if value, ok := ctx[key]; ok {
+			if delay := parseRetryDelayValue(value, time.Millisecond); delay > maxDelay {
+				maxDelay = delay
+			}
+		}
+	}
+
+	for _, key := range []string{"retry_after", "retryAfter", "retry_after_seconds", "retryAfterSeconds", "retry_delay", "retryDelay", "retry_delay_seconds"} {
+		if value, ok := ctx[key]; ok {
+			if delay := parseRetryDelayValue(value, time.Second); delay > maxDelay {
+				maxDelay = delay
+			}
+		}
+	}
+
+	return maxDelay
+}
+
+func parseRetryDelayValue(value any, unit time.Duration) time.Duration {
+	switch v := value.(type) {
+	case int:
+		if v > 0 {
+			return time.Duration(v) * unit
+		}
+	case int32:
+		if v > 0 {
+			return time.Duration(v) * unit
+		}
+	case int64:
+		if v > 0 {
+			return time.Duration(v) * unit
+		}
+	case float32:
+		if v > 0 {
+			return time.Duration(float64(v) * float64(unit))
+		}
+	case float64:
+		if v > 0 {
+			return time.Duration(v * float64(unit))
+		}
+	case string:
+		text := strings.TrimSpace(v)
+		if text == "" {
+			return 0
+		}
+		if numeric, err := strconv.ParseFloat(text, 64); err == nil && numeric > 0 {
+			return time.Duration(numeric * float64(unit))
+		}
+		if duration, err := time.ParseDuration(text); err == nil && duration > 0 {
+			return duration
+		}
 	}
 	return 0
 }

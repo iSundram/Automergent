@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
+	"strings"
 )
 
 // Args provides type-safe argument binding and extraction.
@@ -24,8 +26,26 @@ func NewArgs(raw map[string]any, params map[string]*ParamSchema) *Args {
 // Validate checks all arguments against their schemas.
 func (a *Args) Validate() error {
 	a.errors = nil
+	if a.raw == nil {
+		a.raw = make(map[string]any)
+	}
 
-	for name, schema := range a.params {
+	if len(a.params) > 0 {
+		for key := range a.raw {
+			if _, ok := a.params[key]; !ok {
+				a.errors = append(a.errors, fmt.Errorf("unexpected parameter %q", key))
+			}
+		}
+	}
+
+	names := make([]string, 0, len(a.params))
+	for name := range a.params {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		schema := a.params[name]
 		value, exists := a.raw[name]
 		if !exists {
 			if schema.Default != nil {
@@ -40,7 +60,11 @@ func (a *Args) Validate() error {
 	}
 
 	if len(a.errors) > 0 {
-		return fmt.Errorf("validation errors: %v", a.errors)
+		parts := make([]string, len(a.errors))
+		for i, err := range a.errors {
+			parts[i] = err.Error()
+		}
+		return fmt.Errorf("validation failed: %s", strings.Join(parts, "; "))
 	}
 	return nil
 }

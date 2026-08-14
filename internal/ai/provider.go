@@ -1,6 +1,9 @@
 package ai
 
-import "context"
+import (
+	"context"
+	"net/http"
+)
 
 // Role identifies who authored a message.
 type Role string
@@ -53,6 +56,11 @@ type CompletionRequest struct {
 	// Thinking enables extended thinking for supported models (Gemini).
 	// When enabled, the model uses additional tokens to reason before responding.
 	Thinking *ThinkingConfig
+}
+
+// Validate checks request-level protocol constraints.
+func (r CompletionRequest) Validate() error {
+	return ValidateMessageSequence(r.Messages)
 }
 
 // ThinkingConfig controls extended thinking behavior.
@@ -148,12 +156,14 @@ type Model struct {
 
 // ProviderConfig holds provider-level credentials and defaults.
 type ProviderConfig struct {
-	APIKey       string
-	BaseURL      string
-	DefaultModel string
-	OrgID        string
-	Project      string
-	Location     string
+	APIKey             string
+	BaseURL            string
+	DefaultModel       string
+	OrgID              string
+	Project            string
+	Location           string
+	PromptCacheEnabled *bool
+	HTTPClient         *http.Client
 }
 
 // Event is a generic event emitted during a completion.

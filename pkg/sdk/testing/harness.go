@@ -414,12 +414,7 @@ func NewSchemaValidator(params map[string]*schema.ParamSchema) *SchemaValidator 
 
 // Validate checks if the arguments are valid.
 func (v *SchemaValidator) Validate(args map[string]any) error {
-	for name, param := range v.params {
-		if err := param.Validate(args[name]); err != nil {
-			return err
-		}
-	}
-	return nil
+	return schema.NewArgs(args, v.params).Validate()
 }
 
 // ValidateWithDefaults validates and applies defaults.
@@ -429,16 +424,12 @@ func (v *SchemaValidator) ValidateWithDefaults(args map[string]any) (map[string]
 		result[k] = v
 	}
 
-	for name, param := range v.params {
-		if result[name] == nil && param.Default != nil {
-			result[name] = param.Default
-		}
-		if err := param.Validate(result[name]); err != nil {
-			return nil, err
-		}
+	validated := schema.NewArgs(result, v.params)
+	if err := validated.Validate(); err != nil {
+		return nil, err
 	}
 
-	return result, nil
+	return validated.RawMap(), nil
 }
 
 // FluentToolTestHelper provides additional helpers for FluentTool.

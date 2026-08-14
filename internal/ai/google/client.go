@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/iSundram/Automergent/internal/ai"
+	automergentErrors "github.com/iSundram/Automergent/internal/errors"
 )
 
 const (
@@ -263,6 +265,9 @@ func functionDeclarations(schemas []ai.ToolSchema) []map[string]any {
 }
 
 func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.CompletionResponse, error) {
+	if err := req.Validate(); err != nil {
+		return nil, fmt.Errorf("google: invalid message sequence: %w", err)
+	}
 	contents := buildGeminiContents(req.Messages)
 	if len(contents) == 0 {
 		contents = []geminiContent{{Role: "user", Parts: []geminiPart{{Text: " "}}}}
@@ -327,21 +332,37 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 
 	url := fmt.Sprintf("%s/models/%s:%s?key=%s", c.baseURL, c.model, method, c.apiKey)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("content-type", "application/json")
+	// Wrap the request in a retry loop
+	policy := automergentErrors.AggressiveRetryPolicy()
+	// Customize policy: keep retrying on 503 as requested
+	policy.MaxAttempts = 10
 
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
+	var resp *http.Response
+	retryResult := automergentErrors.Retry(ctx, policy, func() error {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		httpReq.Header.Set("content-type", "application/json")
 
-	if resp.StatusCode != http.StatusOK {
+		resp, err = c.httpClient.Do(httpReq)
+		if err != nil {
+			return automergentErrors.NewConnectionError(c.baseURL, err)
+		}
+
+		if resp.StatusCode == http.StatusOK {
+			return nil
+		}
+
+		// Handle error response
 		defer resp.Body.Close()
 		data, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("google: status %d: %s", resp.StatusCode, data)
+
+		return c.parseErrorResponse(resp.StatusCode, data, url)
+	})
+
+	if !retryResult.Successful {
+		return nil, retryResult.LastError
 	}
 
 	if !req.Stream {
@@ -617,4 +638,66 @@ func (r *geminiStreamResponse) GetMetadata() map[string]any {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return map[string]any{"google_parts": *r.rawParts}
+}
+
+type geminiErrorResponse struct {
+	Error struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+		Status  string `json:"status"`
+		Details []struct {
+			Reason string `json:"reason"`
+			Domain string `json:"domain"`
+		} `json:"details"`
+	} `json:"error"`
+}
+
+func (c *Client) parseErrorResponse(status int, data []byte, url string) error {
+	var errRes geminiErrorResponse
+	if err := json.Unmarshal(data, &errRes); err != nil {
+		// Fallback to generic HTTP error
+		return automergentErrors.NewHTTPError(status, string(data), url)
+	}
+
+	msg := errRes.Error.Message
+	if msg == "" {
+		msg = fmt.Sprintf("Google API error (status %d)", status)
+	}
+
+	// Default mapping based on HTTP status
+	code := automergentErrors.CodeHTTPError
+	switch status {
+	case 429:
+		code = automergentErrors.CodeRateLimited
+		// Check for quota vs rate limit
+		for _, detail := range errRes.Error.Details {
+			if detail.Reason == "QUOTA_EXCEEDED" {
+				code = automergentErrors.CodeQuotaExceeded
+				break
+			}
+		}
+		// If message contains "quota", treat as quota exceeded
+		if code == automergentErrors.CodeRateLimited && strings.Contains(strings.ToLower(msg), "quota") {
+			code = automergentErrors.CodeQuotaExceeded
+		}
+	case 401:
+		code = automergentErrors.CodeUnauthorized
+	case 403:
+		code = automergentErrors.CodeForbidden
+	case 503:
+		code = automergentErrors.CodeServiceUnavailable
+	case 500:
+		code = automergentErrors.CodeServerError
+	}
+
+	oce := automergentErrors.New(code, msg).
+		WithResource(url).
+		WithContext("status_code", status).
+		WithContext("google_status", errRes.Error.Status)
+
+	if status == 429 || status >= 500 {
+		oce.WithRetry(30 * time.Second)
+	}
+
+	return oce
 }

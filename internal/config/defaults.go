@@ -15,6 +15,7 @@ func Default() *Config {
 		Provider:    "google",
 		Model:       "gemini-3.6-flash",
 		Mode:        "edit",
+		Output:      "text",
 		Theme:       "catppuccin",
 		Keybindings: "default",
 		Layout:      "default",
@@ -37,11 +38,12 @@ func Default() *Config {
 			"*.pyc", "*.o", "*.a", "vendor",
 		},
 
-		NoAnimation: false,
-		NoColor:     false,
-		NoTUI:       false,
-		Quiet:       false,
-		Verbose:     false,
+		NoAnimation:          false,
+		NoColor:              false,
+		NoTUI:                false,
+		Quiet:                false,
+		Verbose:              false,
+		ReasoningPreAnalysis: false,
 
 		Security: SecurityConfig{
 			Sandbox:                "auto",
@@ -123,6 +125,11 @@ func Default() *Config {
 			MaxFileSizeBytes: 1 << 20, // 1 MB
 			CacheDurationSec: 30,
 		},
+		Cache: CacheConfig{
+			Prompt: PromptCacheConfig{
+				Enabled: true,
+			},
+		},
 		Git: GitConfig{
 			CoAuthor:        "ask", // "always", "never", "ask"
 			CoAuthorTrailer: "Co-authored-by: Automergent <automergent-bot@users.noreply.github.com>",
@@ -140,6 +147,9 @@ func (c *Config) ApplyFlags(f *CLIFlags) {
 	}
 	if f.Mode != "" {
 		c.Mode = f.Mode
+	}
+	if f.Output != "" {
+		c.Output = f.Output
 	}
 	if f.Theme != "" {
 		c.Theme = f.Theme

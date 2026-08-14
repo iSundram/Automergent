@@ -11,24 +11,32 @@ import (
 
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
+	automergentErrors "github.com/iSundram/Automergent/internal/errors"
+	"github.com/iSundram/Automergent/internal/reasoning"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
 	subagent "github.com/iSundram/Automergent/internal/tools/agent"
+	"github.com/iSundram/Automergent/internal/verification"
 )
 
 // Agent is the core AI coding agent.
 type Agent struct {
-	cfg                 *config.Config
-	provider            ai.Provider
-	sess                *session.Session
-	tools               *tools.Registry
-	events              chan Event
-	closeOnce           sync.Once
-	eventsClosed        bool
-	sessionPersist      func()
-	mu                  sync.RWMutex
-	sessionAllowedTools map[string]bool
-	firstMessageHandled bool
+	cfg                      *config.Config
+	provider                 ai.Provider
+	sess                     *session.Session
+	tools                    *tools.Registry
+	events                   chan Event
+	closeOnce                sync.Once
+	eventsClosed             bool
+	sessionPersist           func()
+	mu                       sync.RWMutex
+	sessionAllowedTools      map[string]bool
+	firstMessageHandled      bool
+	decisionRecords          []ToolDecisionRecord
+	reasoningPreAnalyze      func(context.Context, string) (string, error)
+	currentComplexity        reasoning.Complexity
+	currentTaskType          reasoning.TaskType
+	consecutiveVerifications int
 }
 
 // Execute implements the AgentExecutor interface for sub-agents.
@@ -110,6 +118,7 @@ type ToolCallEvent struct {
 	Name      string
 	Context   string
 	Args      map[string]any
+	Decision  ToolDecisionRecord
 	StartedAt time.Time
 }
 
@@ -121,11 +130,13 @@ type ToolDoneEvent struct {
 	FinishedAt time.Time
 	Duration   time.Duration
 	Result     tools.Result
+	Decision   ToolDecisionRecord
 }
 
 type toolCallBatch struct {
-	calls    []ai.ToolCall
-	parallel bool
+	calls     []ai.ToolCall
+	decisions []ToolDecisionRecord
+	parallel  bool
 }
 
 type executedToolCall struct {
@@ -134,6 +145,7 @@ type executedToolCall struct {
 	startedAt  time.Time
 	finishedAt time.Time
 	result     tools.Result
+	decision   ToolDecisionRecord
 }
 
 const (
@@ -149,6 +161,11 @@ const (
 	EventNotify    = "notify"
 	EventStatus    = "status"
 	EventThinking  = "thinking"
+)
+
+const (
+	triageInjectedMetadataKey     = "triage_injected"
+	originalUserPromptMetadataKey = "original_user_prompt"
 )
 
 // New creates a new Agent.
@@ -196,6 +213,54 @@ func (a *Agent) checkAndMarkFirstMessage() bool {
 	return isFirst
 }
 
+func (a *Agent) runReasoningPreAnalysis(ctx context.Context, prompt string) (string, error) {
+	if a.reasoningPreAnalyze != nil {
+		return a.reasoningPreAnalyze(ctx, prompt)
+	}
+
+	engine := reasoning.NewEngine(nil)
+	analysis, err := engine.Analyze(ctx, prompt)
+	if err != nil {
+		return "", err
+	}
+
+	a.mu.Lock()
+	a.currentTaskType = analysis.TaskType
+	a.currentComplexity = analysis.Complexity
+	a.mu.Unlock()
+
+	return fmt.Sprintf("%s/%s", analysis.TaskType, analysis.Scope), nil
+}
+
+func (a *Agent) getThinkingBudget() int {
+	a.mu.RLock()
+	complexity := a.currentComplexity
+	a.mu.RUnlock()
+
+	// Default budget
+	budget := 10000
+
+	switch complexity {
+	case reasoning.ComplexityTrivial:
+		budget = 2000
+	case reasoning.ComplexitySimple:
+		budget = 4000
+	case reasoning.ComplexityModerate:
+		budget = 8000
+	case reasoning.ComplexityComplex:
+		budget = 16000
+	case reasoning.ComplexityMajor:
+		budget = 32000
+	}
+
+	// Override from config if explicitly set
+	if a.cfg.MaxContextTokens > 0 && budget > a.cfg.MaxContextTokens/4 {
+		budget = a.cfg.MaxContextTokens / 4
+	}
+
+	return budget
+}
+
 // Events returns the channel of agent events.
 func (a *Agent) Events() <-chan Event { return a.events }
 
@@ -225,6 +290,7 @@ func (a *Agent) SetSession(sess *session.Session) {
 
 // Run executes the agent loop for the given user prompt.
 func (a *Agent) Run(ctx context.Context, prompt string) error {
+	originalUserPrompt := prompt
 
 	// 1. Initial Triage Phase (Dynamic Workflow)
 	// If this is the very first message, we run a hidden triage loop
@@ -235,6 +301,15 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		prompt = TriageInstruction + "\n\nUser Request: " + prompt
 	}
 
+	if a.cfg != nil && a.cfg.ReasoningPreAnalysis {
+		a.Emit(EventStatus, "reasoning: pre-analyzing prompt")
+		if summary, err := a.runReasoningPreAnalysis(ctx, originalUserPrompt); err != nil {
+			a.Emit(EventStatus, "reasoning: unavailable, continuing")
+		} else if summary != "" {
+			a.Emit(EventStatus, fmt.Sprintf("reasoning: %s", summary))
+		}
+	}
+
 	// In edit mode, check that we are inside a git repository when required.
 	if a.cfg.Mode == "edit" && a.cfg.Security.RequireGitForAutoModes {
 		cwd, _ := os.Getwd()
@@ -243,27 +318,46 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		}
 	}
 
-	a.sess.AddMessage(ai.NewTextMessage(ai.RoleUser, prompt))
+	userMsg := ai.NewTextMessage(ai.RoleUser, prompt)
+	if isFirstMessage {
+		userMsg.Metadata = map[string]any{
+			triageInjectedMetadataKey:     true,
+			originalUserPromptMetadataKey: originalUserPrompt,
+		}
+	}
+	a.sess.AddMessage(userMsg)
 
 	for {
 		provider := a.Provider()
 
 		// Check context window usage and emit warnings.
-		// If usage is high (e.g., > 80%), perform lightweight compaction.
+		// If usage is high (e.g., > 80% or autoCompressAt), perform intelligent compaction.
 		tokens, _ := provider.TokenCount(a.sess.Messages)
 		limit := a.cfg.MaxContextTokens
 		if limit <= 0 {
 			limit = provider.ContextLimit()
 		}
-		if limit > 0 && float64(tokens)/float64(limit) > 0.80 {
-			a.Emit(EventStatus, "Compacting message history to free up context window...")
+
+		autoCompressAt := 0.80
+		if a.cfg.AutoCompressAt > 0 {
+			autoCompressAt = a.cfg.AutoCompressAt
+		}
+
+		if limit > 0 && float64(tokens)/float64(limit) > autoCompressAt {
+			a.Emit(EventStatus, "Neural Compaction: Freeing up context window...")
 			a.sess.Messages = a.CompactSessionMessages(ctx, a.sess.Messages)
+		} else {
+			// Even if not compacting, ghost large tool outputs to keep context lean
+			a.sess.Messages = a.GhostLargeOutputs(a.sess.Messages)
 		}
 
 		a.checkContextLimit(provider, a.sess.Messages)
 
 		systemPrompt := buildSystemPrompt(a.cfg, a.tools, a.sess.Messages)
 		toolSchemas := buildToolSchemas(a.tools)
+
+		// Dynamically adjust thinking budget based on complexity
+		thinkingBudget := a.getThinkingBudget()
 
 		req := ai.CompletionRequest{
 			Messages:    a.sess.Messages,
@@ -274,13 +368,19 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			Stream:      true,
 			Thinking: &ai.ThinkingConfig{
 				Type:         "enabled",
-				BudgetTokens: 10000,
+				BudgetTokens: thinkingBudget,
+				Stream:       true,
 			},
 		}
 
 		a.Emit(EventStatus, "thinking")
 		resp, err := provider.Complete(ctx, req)
 		if err != nil {
+			if automergentErrors.Is(err, automergentErrors.CodeQuotaExceeded) {
+				if a.handleQuotaExceeded(ctx, err) {
+					continue
+				}
+			}
 			a.Emit(EventError, err)
 			a.tryPersist()
 			return fmt.Errorf("agent: complete: %w", err)
@@ -317,22 +417,37 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			a.sess.AddMessage(msg)
 		}
 
-		// Pruning Logic: If we just finished the first turn which had the Triage instruction,
-		// remove that instruction from the first message but keep the user's intent.
-		if isFirstMessage && len(a.sess.Messages) > 0 {
-			if first := &a.sess.Messages[0]; first.Role == ai.RoleUser {
-				if parts := strings.Split(first.TextContent(), "User Request: "); len(parts) > 1 {
-					first.Content[0].Text = parts[1] // Keep only the user request
-				}
-			}
+		// Pruning Logic: If we just finished the first turn which had the triage instruction,
+		// restore the original user message from metadata.
+		if isFirstMessage {
+			a.pruneFirstMessageTriage()
 			isFirstMessage = false // Only prune once
 		}
 
+		// 3. Handle Stop Condition (Verification Gate)
 		if stop != ai.StopReasonTools || len(toolCalls) == 0 {
+			// Even if the model says it's done, we run a verification gate
+			if a.consecutiveVerifications < 2 && a.shouldVerify(a.sess.Messages) {
+				a.consecutiveVerifications++
+				a.Emit(EventStatus, "Verification Gate: Confirming task integrity...")
+				vResult, err := a.verifyTaskCompletion(ctx)
+				if err != nil || (vResult != nil && vResult.TotalIssues > 0) {
+					// Verification failed! Force a recovery turn.
+					a.Emit(EventStatus, "Verification Gate: Failures detected. Triggering recovery turn.")
+					recoveryMsg := a.triggerRecoveryTurn(vResult, err)
+					a.sess.AddMessage(recoveryMsg)
+					continue // Back into the loop
+				}
+				a.Emit(EventStatus, "Verification Gate: Integrity confirmed.")
+			}
+
 			a.Emit(EventDone, text)
 			a.tryPersist()
 			return nil
 		}
+
+		// If we are executing tools, reset the verification counter
+		a.consecutiveVerifications = 0
 
 		for _, executed := range a.executeToolCallsParallel(ctx, toolCalls) {
 			a.Emit(EventToolDone, ToolDoneEvent{
@@ -343,6 +458,13 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 				FinishedAt: executed.finishedAt,
 				Duration:   executed.finishedAt.Sub(executed.startedAt),
 				Result:     executed.result,
+				Decision:   executed.decision,
+			})
+			a.Emit(EventStatus, LongTaskStatus{
+				TaskID:      executed.call.ID,
+				Phase:       executed.call.Name,
+				ProgressPct: 100,
+				Log:         executed.result.Summary,
 			})
 
 			toolMsg := ai.Message{Role: ai.RoleTool}
@@ -360,84 +482,82 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	}
 }
 
-func (a *Agent) partitionToolCalls(toolCalls []ai.ToolCall) []toolCallBatch {
-	batches := make([]toolCallBatch, 0, len(toolCalls))
-	var current toolCallBatch
-
-	flush := func() {
-		if len(current.calls) == 0 {
-			return
-		}
-		batches = append(batches, current)
-		current = toolCallBatch{}
-	}
-
-	for _, tc := range toolCalls {
-		tool, ok := a.tools.Get(tc.Name)
-		canParallelize := ok && tool.IsReadOnly(tc.Args) && tool.IsConcurrencySafe(tc.Args) && !tool.RequiresConfirmation(a.cfg.Mode)
-
-		if !canParallelize {
-			flush()
-			batches = append(batches, toolCallBatch{
-				calls:    []ai.ToolCall{tc},
-				parallel: false,
-			})
-			continue
-		}
-
-		if !current.parallel {
-			flush()
-			current.parallel = true
-		}
-		if len(current.calls) == 10 {
-			flush()
-			current.parallel = true
-		}
-		current.calls = append(current.calls, tc)
-	}
-
-	flush()
-	return batches
-}
-
 func (a *Agent) executeToolCallsParallel(ctx context.Context, toolCalls []ai.ToolCall) []executedToolCall {
-	batches := a.partitionToolCalls(toolCalls)
-	results := make([]executedToolCall, 0, len(toolCalls))
+	decisionByCallID := make(map[string]ToolDecisionRecord, len(toolCalls))
+	decisionRecords := make([]ToolDecisionRecord, 0, len(toolCalls))
+	requestCalls := make([]tools.OrchestrationCall, len(toolCalls))
 
-	for _, batch := range batches {
-		if !batch.parallel {
-			for _, tc := range batch.calls {
-				results = append(results, a.executeSingleToolCall(ctx, tc))
-			}
-			continue
+	for i, tc := range toolCalls {
+		decision := a.evaluateToolDecision(tc)
+		decisionByCallID[tc.ID] = decision
+		decisionRecords = append(decisionRecords, decision)
+		requestCalls[i] = tools.OrchestrationCall{
+			ID:   tc.ID,
+			Name: tc.Name,
+			Args: tc.Args,
 		}
+	}
+	a.storeDecisionRecords(decisionRecords)
 
-		batchResults := make([]executedToolCall, len(batch.calls))
-		var wg sync.WaitGroup
-		wg.Add(len(batch.calls))
-		for i, tc := range batch.calls {
-			i, tc := i, tc
-			go func() {
-				defer wg.Done()
-				batchResults[i] = a.executeSingleToolCall(ctx, tc)
-			}()
+	mode := ""
+	if a.cfg != nil {
+		mode = a.cfg.Mode
+	}
+
+	orchestrator := tools.NewOrchestrator(
+		func(name string) (tools.Tool, bool) { return a.tools.Get(name) },
+		func(execCtx context.Context, call tools.OrchestrationCall) (tools.Result, error) {
+			return a.executeOrchestrationCall(execCtx, call)
+		},
+	)
+
+	response := orchestrator.Execute(ctx, tools.ExecutionRequest{
+		Calls:            requestCalls,
+		Mode:             mode,
+		MaxParallelBatch: 10,
+	})
+
+	results := make([]executedToolCall, 0, len(response.Records))
+	for _, record := range response.Records {
+		tc := ai.ToolCall{
+			ID:   record.Call.ID,
+			Name: record.Call.Name,
+			Args: record.Call.Args,
 		}
-		wg.Wait()
-		results = append(results, batchResults...)
+		decision, ok := decisionByCallID[tc.ID]
+		if !ok {
+			decision = a.evaluateToolDecision(tc)
+		}
+		results = append(results, executedToolCall{
+			call:       tc,
+			context:    toolCallContext(tc),
+			startedAt:  record.StartedAt,
+			finishedAt: record.FinishedAt,
+			result:     record.Result,
+			decision:   decision,
+		})
 	}
 
 	return results
 }
 
-func (a *Agent) executeSingleToolCall(ctx context.Context, tc ai.ToolCall) executedToolCall {
+func (a *Agent) executeOrchestrationCall(ctx context.Context, call tools.OrchestrationCall) (tools.Result, error) {
+	tc := ai.ToolCall{
+		ID:   call.ID,
+		Name: call.Name,
+		Args: call.Args,
+	}
+
 	startedAt := time.Now()
 	context := toolCallContext(tc)
+	decision := a.evaluateToolDecision(tc)
 
 	a.Emit(EventToolCall, ToolCallEvent{
 		ID:        tc.ID,
 		Name:      tc.Name,
 		Context:   context,
 		Args:      tc.Args,
+		Decision:  decision,
 		StartedAt: startedAt,
 	})
 
@@ -445,20 +565,14 @@ func (a *Agent) executeSingleToolCall(ctx context.Context, tc ai.ToolCall) execu
 	if context != "" {
 		status = fmt.Sprintf("running %s (%s)", tc.Name, context)
 	}
-	a.Emit(EventStatus, status)
+	a.Emit(EventStatus, LongTaskStatus{
+		TaskID:      tc.ID,
+		Phase:       tc.Name,
+		ProgressPct: 0,
+		Message:     status,
+	})
 
-	result, err := a.executeTool(ctx, tc)
-	if err != nil {
-		result = tools.Result{IsError: true, Content: err.Error()}
-	}
-
-	return executedToolCall{
-		call:       tc,
-		context:    context,
-		startedAt:  startedAt,
-		finishedAt: time.Now(),
-		result:     result,
-	}
+	return a.executeTool(ctx, tc)
 }
 
 func toolCallContext(tc ai.ToolCall) string {
@@ -520,9 +634,11 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 	if !ok {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("unknown tool: %s", tc.Name)}, nil
 	}
+	approvalScope := toolApprovalScope(tc, t)
+	legacyScope := legacyToolApprovalScope(tc, t)
 
 	a.mu.RLock()
-	allowed := a.sessionAllowedTools[tc.Name]
+	allowed := a.sessionAllowedTools[approvalScope] || a.sessionAllowedTools[legacyScope]
 	a.mu.RUnlock()
 
 	if !allowed && t.RequiresConfirmation(a.cfg.Mode) {
@@ -536,12 +652,56 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 		}
 		if res.Always {
 			a.mu.Lock()
-			a.sessionAllowedTools[tc.Name] = true
+			a.sessionAllowedTools[approvalScope] = true
 			a.mu.Unlock()
 		}
 	}
 
 	return t.Execute(ctx, tc.Args)
+}
+
+func toolApprovalScope(tc ai.ToolCall, t tools.Tool) string {
+	action, risk := toolApprovalDimensions(tc, t)
+	return fmt.Sprintf("name=%q;action=%s;risk=%s", tc.Name, action, risk)
+}
+
+func legacyToolApprovalScope(tc ai.ToolCall, t tools.Tool) string {
+	action, risk := toolApprovalDimensions(tc, t)
+	return fmt.Sprintf("%s|%s|%s", tc.Name, action, risk)
+}
+
+func toolApprovalDimensions(tc ai.ToolCall, t tools.Tool) (action string, risk string) {
+	action = "read"
+	if !t.IsReadOnly(tc.Args) {
+		action = "write"
+	}
+	if t.IsDestructive(tc.Args) {
+		action = "destructive"
+	}
+	risk = strings.TrimSpace(strings.ToLower(t.EstimatedCost().RiskLevel))
+	if risk == "" {
+		risk = "unknown"
+	}
+	return action, risk
+}
+
+func (a *Agent) pruneFirstMessageTriage() {
+	if len(a.sess.Messages) == 0 {
+		return
+	}
+	first := &a.sess.Messages[0]
+	if first.Role != ai.RoleUser || first.Metadata == nil {
+		return
+	}
+	original, ok := first.Metadata[originalUserPromptMetadataKey].(string)
+	if ok {
+		first.Content = []ai.ContentPart{{Type: ai.ContentTypeText, Text: original}}
+	}
+	delete(first.Metadata, triageInjectedMetadataKey)
+	delete(first.Metadata, originalUserPromptMetadataKey)
+	if len(first.Metadata) == 0 {
+		first.Metadata = nil
+	}
 }
 
 func (a *Agent) requestConfirmation(tc ai.ToolCall) ConfirmationResponse {
@@ -559,6 +719,30 @@ func (a *Agent) requestConfirmation(tc ai.ToolCall) ConfirmationResponse {
 		return res
 	case <-time.After(timeout):
 		return ConfirmationResponse{Allow: false}
+	}
+}
+
+// handleQuotaExceeded prompts the user when AI quota is exceeded.
+func (a *Agent) handleQuotaExceeded(ctx context.Context, err error) bool {
+	a.Emit(EventStatus, "AI quota exceeded for "+a.provider.Name())
+
+	ch := make(chan string, 1)
+	a.Emit(EventAskUser, map[string]any{
+		"question": "AI quota exceeded. Press Enter to retry once you've resolved it (e.g., upgraded plan or waited), or type 'abort' to stop:",
+		"reply":    ch,
+	})
+
+	select {
+	case res := <-ch:
+		if strings.ToLower(strings.TrimSpace(res)) == "abort" {
+			return false
+		}
+		a.Emit(EventStatus, "retrying after quota resolution...")
+		return true
+	case <-ctx.Done():
+		return false
+	case <-time.After(1 * time.Hour): // Wait up to an hour for user intervention
+		return false
 	}
 }
 
@@ -694,4 +878,99 @@ func (a *Agent) Close() error {
 		a.mu.Unlock()
 	})
 	return err
+}
+
+// shouldVerify determines if the current session state warrants a verification gate.
+func (a *Agent) shouldVerify(messages []ai.Message) bool {
+	// Only verify in edit or plan mode
+	if a.cfg.Mode != "edit" && a.cfg.Mode != "plan" {
+		return false
+	}
+
+	// Only verify if there was a tool call that likely modified state
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == ai.RoleAssistant {
+			for _, tc := range messages[i].ToolCallParts() {
+				name := strings.ToLower(tc.Name)
+				if strings.Contains(name, "edit") || strings.Contains(name, "write") ||
+					strings.Contains(name, "create") || strings.Contains(name, "delete") ||
+					strings.Contains(name, "apply") || strings.Contains(name, "test") {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// verifyTaskCompletion runs the full verification suite against the current workspace.
+func (a *Agent) verifyTaskCompletion(ctx context.Context) (*verification.Result, error) {
+	engine := verification.NewDefaultEngine()
+	cwd, _ := os.Getwd()
+
+	// Identify changed files from session history for targeted verification
+	changedFiles := make([]string, 0)
+	for _, m := range a.sess.Messages {
+		if m.Role == ai.RoleAssistant {
+			for _, tc := range m.ToolCallParts() {
+				if path, ok := tc.Args["path"].(string); ok {
+					changedFiles = append(changedFiles, path)
+				} else if path, ok := tc.Args["file_path"].(string); ok {
+					changedFiles = append(changedFiles, path)
+				}
+			}
+		}
+	}
+
+	vCtx := &verification.Context{
+		WorkingDir:   cwd,
+		ChangedFiles: changedFiles,
+	}
+
+	return engine.Verify(vCtx)
+}
+
+// triggerRecoveryTurn creates a system message explaining the verification failures.
+func (a *Agent) triggerRecoveryTurn(result *verification.Result, err error) ai.Message {
+	var sb strings.Builder
+	sb.WriteString("# Verification Failed\n\n")
+	sb.WriteString("I've analyzed your latest response and the state of the workspace. The task is NOT complete because the following issues were detected:\n\n")
+
+	if err != nil {
+		sb.WriteString(fmt.Sprintf("## System Error\n%v\n\n", err))
+	}
+
+	if result != nil {
+		for _, layer := range result.Layers {
+			if len(layer.Issues) > 0 {
+				sb.WriteString(fmt.Sprintf("## %s Issues\n", layer.Layer))
+				for _, issue := range layer.Issues {
+					sb.WriteString(fmt.Sprintf("- [%s] %s", issue.Severity, issue.Message))
+					if issue.File != "" {
+						sb.WriteString(fmt.Sprintf(" (in %s", issue.File))
+						if issue.Line > 0 {
+							sb.WriteString(fmt.Sprintf(":%d", issue.Line))
+						}
+						sb.WriteString(")")
+					}
+					if issue.FixSuggestion != "" {
+						sb.WriteString(fmt.Sprintf("\n  *Suggestion:* %s", issue.FixSuggestion))
+					}
+					sb.WriteString("\n")
+				}
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	sb.WriteString("## Requirement\n")
+	sb.WriteString("Please analyze these failures, identify the root cause, and continue until all verification layers pass. Do not report completion until the workspace is in a healthy state.")
+
+	return ai.Message{
+		Role: ai.RoleSystem,
+		Content: []ai.ContentPart{{
+			Type: ai.ContentTypeText,
+			Text: sb.String(),
+		}},
+	}
 }

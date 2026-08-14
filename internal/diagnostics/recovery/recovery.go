@@ -10,6 +10,7 @@ import (
 
 	"github.com/iSundram/Automergent/internal/diagnostics/compiler"
 	"github.com/iSundram/Automergent/internal/diagnostics/types"
+	recoverypolicy "github.com/iSundram/Automergent/internal/recovery"
 )
 
 // Cause classifies the likely root cause of a diagnostic.
@@ -70,6 +71,23 @@ func (p RetryPolicy) Delay(attempt int, rng *rand.Rand) time.Duration {
 		delay = float64(p.MaxDelay)
 	}
 	return time.Duration(delay)
+}
+
+// AsRecoveryPolicy adapts diagnostic retry settings to the unified policy contract.
+func (p RetryPolicy) AsRecoveryPolicy() recoverypolicy.Policy {
+	return &recoverypolicy.ExponentialPolicy{
+		MaxAttempts:  p.MaxAttempts + 1,
+		InitialDelay: p.InitialDelay,
+		MaxDelay:     p.MaxDelay,
+		Multiplier:   p.Multiplier,
+		Jitter:       p.Jitter,
+		ShouldRetry: func(err error) (bool, string) {
+			if p.Retryable {
+				return true, "diagnostic-policy-retryable"
+			}
+			return false, "diagnostic-policy-non-retryable"
+		},
+	}
 }
 
 // Classification describes how to recover from a diagnostic.

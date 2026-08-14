@@ -15,7 +15,7 @@ LDFLAGS_INSTALLER := -s -w \
   -X '$(MODULE)/internal/installer.Commit=$(COMMIT)' \
   -X '$(MODULE)/internal/installer.BuildDate=$(BUILD_DATE)'
 
-.PHONY: all build clean test lint fmt tidy install
+.PHONY: all build clean test lint fmt tidy install ci
 
 all: build build-installer
 
@@ -43,6 +43,11 @@ fmt:
 
 tidy:
 	go mod tidy
+
+ci:
+	CGO_ENABLED=1 go test ./...
+	go vet ./...
+	golangci-lint run ./...
 
 .PHONY: release
 release:

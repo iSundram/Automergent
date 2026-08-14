@@ -112,6 +112,16 @@ type PromptCache struct {
 
 	// Analytics
 	stats *CacheStats
+
+	// Observability
+	eventMu      sync.RWMutex
+	events       []CacheEvent
+	maxEvents    int
+	eventHandler func(CacheEvent)
+
+	invalidationMu      sync.RWMutex
+	lastInvalidation    invalidationState
+	invalidationVersion int64
 }
 
 // CacheStats tracks cache performance metrics.
@@ -153,6 +163,7 @@ func NewPromptCache(opts ...CacheOption) *PromptCache {
 		defaultTTL:    5 * time.Minute,
 		longTTL:       time.Hour,
 		stats:         &CacheStats{},
+		maxEvents:     256,
 	}
 
 	for _, opt := range opts {
@@ -209,12 +220,14 @@ func (c *PromptCache) CacheSystemPrompt(key string, prompt string, longTTL bool)
 			atomic.AddInt64(&c.stats.Hits, 1)
 			atomic.AddInt64(&c.stats.SystemPromptHits, 1)
 			atomic.AddInt64(&c.stats.TotalRequests, 1)
+			c.emitHitMiss("system_prompt", key, true, "hash_match")
 			return entry.Data.(*CachedPrompt)
 		}
 	}
 
 	atomic.AddInt64(&c.stats.Misses, 1)
 	atomic.AddInt64(&c.stats.TotalRequests, 1)
+	c.emitHitMiss("system_prompt", key, false, "not_cached")
 
 	// Build cached prompt with cache control
 	blocks := splitPromptForCaching(prompt)
@@ -252,10 +265,12 @@ func (c *PromptCache) GetSystemPrompt(key string) (*CachedPrompt, bool) {
 
 	entry, ok := c.systemPrompts[key]
 	if !ok || entry.IsExpired() {
+		c.emitHitMiss("system_prompt", key, false, "not_found_or_expired")
 		return nil, false
 	}
 
 	entry.Touch()
+	c.emitHitMiss("system_prompt", key, true, "get")
 	return entry.Data.(*CachedPrompt), true
 }
 
@@ -272,12 +287,14 @@ func (c *PromptCache) CacheContext(key string, content string, longTTL bool) {
 			atomic.AddInt64(&c.stats.Hits, 1)
 			atomic.AddInt64(&c.stats.ContextHits, 1)
 			atomic.AddInt64(&c.stats.TotalRequests, 1)
+			c.emitHitMiss("context", key, true, "hash_match")
 			return
 		}
 	}
 
 	atomic.AddInt64(&c.stats.Misses, 1)
 	atomic.AddInt64(&c.stats.TotalRequests, 1)
+	c.emitHitMiss("context", key, false, "not_cached")
 
 	ttl := c.defaultTTL
 	if longTTL {
@@ -305,10 +322,12 @@ func (c *PromptCache) GetContext(key string) (string, bool) {
 
 	entry, ok := c.contexts[key]
 	if !ok || entry.IsExpired() {
+		c.emitHitMiss("context", key, false, "not_found_or_expired")
 		return "", false
 	}
 
 	entry.Touch()
+	c.emitHitMiss("context", key, true, "get")
 	return entry.Data.(string), true
 }
 
@@ -325,12 +344,14 @@ func (c *PromptCache) CacheToolSchemas(key string, tools []ai.ToolSchema) {
 			atomic.AddInt64(&c.stats.Hits, 1)
 			atomic.AddInt64(&c.stats.ToolHits, 1)
 			atomic.AddInt64(&c.stats.TotalRequests, 1)
+			c.emitHitMiss("tools", key, true, "hash_match")
 			return
 		}
 	}
 
 	atomic.AddInt64(&c.stats.Misses, 1)
 	atomic.AddInt64(&c.stats.TotalRequests, 1)
+	c.emitHitMiss("tools", key, false, "not_cached")
 
 	// Use long TTL for tools as they rarely change
 	size := estimateToolSchemaSize(tools)
@@ -354,10 +375,12 @@ func (c *PromptCache) GetToolSchemas(key string) ([]ai.ToolSchema, bool) {
 
 	entry, ok := c.tools[key]
 	if !ok || entry.IsExpired() {
+		c.emitHitMiss("tools", key, false, "not_found_or_expired")
 		return nil, false
 	}
 
 	entry.Touch()
+	c.emitHitMiss("tools", key, true, "get")
 	return entry.Data.([]ai.ToolSchema), true
 }
 
@@ -374,12 +397,14 @@ func (c *PromptCache) CacheConversation(sessionID string, messages []ai.Message)
 			atomic.AddInt64(&c.stats.Hits, 1)
 			atomic.AddInt64(&c.stats.ConversationHits, 1)
 			atomic.AddInt64(&c.stats.TotalRequests, 1)
+			c.emitHitMiss("conversation", sessionID, true, "hash_match")
 			return
 		}
 	}
 
 	atomic.AddInt64(&c.stats.Misses, 1)
 	atomic.AddInt64(&c.stats.TotalRequests, 1)
+	c.emitHitMiss("conversation", sessionID, false, "not_cached")
 
 	size := estimateMessagesSize(messages)
 	c.maybeEvict(size)
@@ -402,10 +427,12 @@ func (c *PromptCache) GetConversation(sessionID string) ([]ai.Message, bool) {
 
 	entry, ok := c.conversations[sessionID]
 	if !ok || entry.IsExpired() {
+		c.emitHitMiss("conversation", sessionID, false, "not_found_or_expired")
 		return nil, false
 	}
 
 	entry.Touch()
+	c.emitHitMiss("conversation", sessionID, true, "get")
 	return entry.Data.([]ai.Message), true
 }
 
@@ -417,6 +444,7 @@ func (c *PromptCache) InvalidateContext(key string) {
 	if entry, ok := c.contexts[key]; ok {
 		c.currentSize -= entry.Size
 		delete(c.contexts, key)
+		c.emitInvalidation("context", key, "manual_invalidation", 1, entry.Size)
 	}
 }
 
@@ -428,6 +456,7 @@ func (c *PromptCache) InvalidateConversation(sessionID string) {
 	if entry, ok := c.conversations[sessionID]; ok {
 		c.currentSize -= entry.Size
 		delete(c.conversations, sessionID)
+		c.emitInvalidation("conversation", sessionID, "manual_invalidation", 1, entry.Size)
 	}
 }
 
@@ -436,11 +465,14 @@ func (c *PromptCache) Clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	clearedEntries := len(c.systemPrompts) + len(c.contexts) + len(c.conversations) + len(c.tools)
+	clearedBytes := c.currentSize
 	c.systemPrompts = make(map[string]*CacheEntry)
 	c.contexts = make(map[string]*CacheEntry)
 	c.conversations = make(map[string]*CacheEntry)
 	c.tools = make(map[string]*CacheEntry)
 	c.currentSize = 0
+	c.emitInvalidation("all", "", "clear_all", clearedEntries, clearedBytes)
 }
 
 // Stats returns a copy of the cache statistics.
@@ -524,6 +556,7 @@ func (c *PromptCache) maybeEvict(incoming int64) {
 		}
 		c.currentSize -= e.size
 		atomic.AddInt64(&c.stats.Evictions, 1)
+		c.emitInvalidation(e.category, e.key, "eviction", 1, e.size)
 	}
 }
 
@@ -542,28 +575,41 @@ func (c *PromptCache) cleanup() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	var expiredEntries int
+	var expiredBytes int64
 	for k, e := range c.systemPrompts {
 		if e.IsExpired() {
 			c.currentSize -= e.Size
 			delete(c.systemPrompts, k)
+			expiredEntries++
+			expiredBytes += e.Size
 		}
 	}
 	for k, e := range c.contexts {
 		if e.IsExpired() {
 			c.currentSize -= e.Size
 			delete(c.contexts, k)
+			expiredEntries++
+			expiredBytes += e.Size
 		}
 	}
 	for k, e := range c.conversations {
 		if e.IsExpired() {
 			c.currentSize -= e.Size
 			delete(c.conversations, k)
+			expiredEntries++
+			expiredBytes += e.Size
 		}
 	}
 	for k, e := range c.tools {
 		if e.IsExpired() {
 			c.currentSize -= e.Size
 			delete(c.tools, k)
+			expiredEntries++
+			expiredBytes += e.Size
 		}
+	}
+	if expiredEntries > 0 {
+		c.emitInvalidation("all", "", "ttl_expired", expiredEntries, expiredBytes)
 	}
 }

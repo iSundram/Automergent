@@ -63,6 +63,18 @@ type AgentManager struct {
 	agents   map[string]*AgentInstance
 	counter  int
 	executor AgentExecutor
+	hooks    []func(AgentNotification)
+}
+
+// AgentNotification captures a terminal status update for an agent.
+type AgentNotification struct {
+	AgentID    string
+	Name       string
+	Type       AgentType
+	Status     AgentStatus
+	Duration   time.Duration
+	Result     string
+	ErrMessage string
 }
 
 // AgentExecutor is the interface for actually running agents.
@@ -110,12 +122,73 @@ func (m *AgentManager) List(includeCompleted bool) []*AgentInstance {
 	defer m.mu.RUnlock()
 	result := make([]*AgentInstance, 0)
 	for _, a := range m.agents {
-		if !includeCompleted && (a.Status == AgentStatusCompleted || a.Status == AgentStatusFailed) {
+		if !includeCompleted && (a.Status == AgentStatusCompleted || a.Status == AgentStatusFailed || a.Status == AgentStatusCancelled) {
 			continue
 		}
 		result = append(result, a)
 	}
 	return result
+}
+
+// RegisterCompletionHook registers a callback for terminal status updates.
+func (m *AgentManager) RegisterCompletionHook(hook func(AgentNotification)) {
+	if hook == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.hooks = append(m.hooks, hook)
+}
+
+func isTerminalAgentStatus(status AgentStatus) bool {
+	return status == AgentStatusCompleted || status == AgentStatusFailed || status == AgentStatusCancelled
+}
+
+// UpdateStatus updates agent status and emits completion hooks for terminal states.
+func (m *AgentManager) UpdateStatus(id string, status AgentStatus, result string, err error) bool {
+	m.mu.RLock()
+	agent, ok := m.agents[id]
+	hooks := append([]func(AgentNotification){}, m.hooks...)
+	m.mu.RUnlock()
+	if !ok || agent == nil {
+		return false
+	}
+
+	agent.mu.Lock()
+	previousStatus := agent.Status
+	agent.Status = status
+	agent.Result = result
+	agent.Error = err
+	if isTerminalAgentStatus(status) {
+		agent.CompletedAt = time.Now()
+	}
+	duration := time.Since(agent.StartedAt)
+	if !agent.CompletedAt.IsZero() {
+		duration = agent.CompletedAt.Sub(agent.StartedAt)
+	}
+	notification := AgentNotification{
+		AgentID:  agent.ID,
+		Name:     agent.Name,
+		Type:     agent.Type,
+		Status:   agent.Status,
+		Duration: duration,
+		Result:   agent.Result,
+	}
+	if agent.Error != nil {
+		notification.ErrMessage = agent.Error.Error()
+	}
+	agent.mu.Unlock()
+
+	if !isTerminalAgentStatus(status) {
+		return true
+	}
+	if previousStatus == status && isTerminalAgentStatus(previousStatus) {
+		return true
+	}
+	for _, hook := range hooks {
+		hook(notification)
+	}
+	return true
 }
 
 // Cleanup removes completed/failed agents older than maxAge to prevent memory leaks.
@@ -269,17 +342,11 @@ func (t *TaskTool) Execute(ctx context.Context, args map[string]any) (tools.Resu
 	GetAgentManager().Create(agent)
 
 	finish := func(result string, err error, status AgentStatus) {
-		agent.mu.Lock()
-		defer agent.mu.Unlock()
-		agent.CompletedAt = time.Now()
 		if err != nil {
-			agent.Status = AgentStatusFailed
-			agent.Error = err
-			agent.Result = err.Error()
+			_ = GetAgentManager().UpdateStatus(agent.ID, AgentStatusFailed, err.Error(), err)
 			return
 		}
-		agent.Status = status
-		agent.Result = result
+		_ = GetAgentManager().UpdateStatus(agent.ID, status, result, nil)
 	}
 
 	if mode == "background" {
@@ -413,7 +480,7 @@ func (t *ReadAgentTool) Execute(ctx context.Context, args map[string]any) (tools
 		agent.mu.Lock()
 		status := agent.Status
 		agent.mu.Unlock()
-		if status != AgentStatusCompleted && status != AgentStatusFailed {
+		if status != AgentStatusCompleted && status != AgentStatusFailed && status != AgentStatusCancelled {
 			// wait using agent.done channel and context; timeout respected
 			timer := time.NewTimer(time.Duration(timeout) * time.Second)
 			defer timer.Stop()

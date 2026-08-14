@@ -32,6 +32,10 @@ func Get(name string) *Theme {
 		return Dracula()
 	case "nord":
 		return Nord()
+	case "catppuccin":
+		return Catppuccin()
+	case "modern":
+		return Modern()
 	default:
 		return Catppuccin()
 	}

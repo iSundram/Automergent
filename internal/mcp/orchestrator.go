@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	recoverypolicy "github.com/iSundram/Automergent/internal/recovery"
 	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
@@ -183,16 +184,32 @@ func (o *Orchestrator) addServer(ctx context.Context, cfg *ServerConfig) error {
 		defer cancel()
 	}
 
-	if err := server.Connect(connectCtx); err != nil {
-		// Retry if configured
-		for i := 0; i < cfg.RetryCount; i++ {
-			time.Sleep(time.Second * time.Duration(i+1))
-			if err = server.Connect(connectCtx); err == nil {
-				break
-			}
+	policy := serverRecoveryPolicy(cfg)
+	var err error
+	for attempt := 1; ; attempt++ {
+		err = server.Connect(connectCtx)
+		if err == nil {
+			break
 		}
-		if err != nil {
-			return err
+
+		decision := policy.Decide(attempt, err)
+		if !decision.Retry {
+			return fmt.Errorf("connect server %s failed after %d attempt(s): %w", cfg.Name, attempt, err)
+		}
+
+		if o.onServerEvent != nil {
+			o.onServerEvent(ServerEvent{
+				Type:      EventError,
+				Server:    cfg.Name,
+				Error:     fmt.Sprintf("connection attempt %d failed: %v (retry in %s, reason=%s)", attempt, err, decision.Delay, decision.Reason),
+				Timestamp: time.Now(),
+			})
+		}
+
+		select {
+		case <-connectCtx.Done():
+			return fmt.Errorf("connect server %s cancelled while retrying: %w", cfg.Name, connectCtx.Err())
+		case <-time.After(decision.Delay):
 		}
 	}
 
@@ -201,6 +218,22 @@ func (o *Orchestrator) addServer(ctx context.Context, cfg *ServerConfig) error {
 	o.mu.Unlock()
 
 	return nil
+}
+
+func serverRecoveryPolicy(cfg *ServerConfig) recoverypolicy.Policy {
+	return &recoverypolicy.ExponentialPolicy{
+		MaxAttempts:  cfg.RetryCount + 1,
+		InitialDelay: time.Second,
+		MaxDelay:     30 * time.Second,
+		Multiplier:   2.0,
+		Jitter:       0.2,
+		ShouldRetry: func(err error) (bool, string) {
+			if err == nil {
+				return false, "no-error"
+			}
+			return true, "server-connect-retry"
+		},
+	}
 }
 
 // handleServerEvent processes events from managed servers.

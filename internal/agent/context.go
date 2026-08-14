@@ -5,10 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/iSundram/Automergent/internal/ai"
+	"github.com/iSundram/Automergent/internal/cache"
 	"github.com/iSundram/Automergent/internal/config"
+	contextmgr "github.com/iSundram/Automergent/internal/context"
 	"github.com/iSundram/Automergent/internal/tools"
 	"github.com/iSundram/Automergent/internal/version"
 )
@@ -28,19 +31,7 @@ func DetectPhase(messages []ai.Message) AgentPhase {
 		return PhaseResearch
 	}
 
-	hasResearched := false
-	for _, m := range messages {
-		if m.Role == ai.RoleTool {
-			for _, p := range m.Content {
-				if p.Type == ai.ContentTypeToolResult {
-					name := p.ToolResult.ToolCallID
-					if strings.Contains(name, "grep") || strings.Contains(name, "glob") || strings.Contains(name, "read") {
-						hasResearched = true
-					}
-				}
-			}
-		}
-	}
+	hasResearched := hasResearchToolResult(messages)
 
 	if hasResearched {
 		// Check if a plan file was created
@@ -54,32 +45,92 @@ func DetectPhase(messages []ai.Message) AgentPhase {
 	return PhaseResearch
 }
 
-// buildSystemPrompt orchestrates the modular prompt construction.
+func hasResearchToolResult(messages []ai.Message) bool {
+	toolNameByCallID := make(map[string]string)
+	for _, m := range messages {
+		for _, tc := range m.ToolCallParts() {
+			if tc.ID != "" {
+				toolNameByCallID[tc.ID] = tc.Name
+			}
+		}
+	}
+
+	for _, m := range messages {
+		if m.Role != ai.RoleTool {
+			continue
+		}
+		metadataToolName := toolNameFromMetadata(m.Metadata)
+		for _, p := range m.Content {
+			if p.Type != ai.ContentTypeToolResult || p.ToolResult == nil {
+				continue
+			}
+			toolName := toolNameByCallID[p.ToolResult.ToolCallID]
+			if toolName == "" {
+				toolName = metadataToolName
+			}
+			if isResearchToolName(toolName) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func toolNameFromMetadata(metadata map[string]any) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	for _, key := range []string{"tool_name", "toolName", "tool_call_name", "toolCallName"} {
+		raw, ok := metadata[key]
+		if !ok {
+			continue
+		}
+		name, ok := raw.(string)
+		if ok {
+			return name
+		}
+	}
+	return ""
+}
+
+func isResearchToolName(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+	return strings.HasPrefix(name, "grep") ||
+		strings.HasPrefix(name, "glob") ||
+		strings.HasPrefix(name, "read") ||
+		name == "view" ||
+		strings.Contains(name, "search")
+}
+
+type promptSection struct {
+	name         string
+	content      string
+	classifyAs   cache.ContentClassification
+	isCacheBreak bool
+}
+
+const (
+	maxPromptContextFiles  = 4
+	maxPromptContextTokens = 2000
+	maxPromptContextChars  = 1600
+)
+
+// buildSystemPrompt orchestrates the modular prompt construction with explicit cache policy boundaries.
 func buildSystemPrompt(cfg *config.Config, reg *tools.Registry, messages []ai.Message) string {
-	var sb strings.Builder
-
-	// 1. Identity & Role
-	sb.WriteString(renderIdentity())
-
-	// 2. Core Task Protocol (Investigation-Driven Workflow)
-	sb.WriteString(renderTaskProtocol())
-
-	// 3. Safety & Blast Radius
-	sb.WriteString(renderSafetyProtocols())
-
-	// 4. Collaborative Judgment & Engineering Standards
-	sb.WriteString(renderCollaborativeJudgment())
-
-	// 5. Verification Gate (The "Contract")
-	sb.WriteString(renderVerificationGate())
-
-	// 6. Tool & Context Efficiency
-	sb.WriteString(renderEfficiencyProtocols(reg))
-
-	// 7. Dynamic Project Context
-	sb.WriteString(renderProjectContext(cfg, messages))
-
-	return sb.String()
+	sections := []promptSection{
+		{name: "identity", content: renderIdentity(), classifyAs: cache.ClassificationStatic},
+		{name: "task-protocol", content: renderTaskProtocol(), classifyAs: cache.ClassificationStatic},
+		{name: "safety", content: renderSafetyProtocols(), classifyAs: cache.ClassificationStatic},
+		{name: "collaboration", content: renderCollaborativeJudgment(), classifyAs: cache.ClassificationStatic},
+		{name: "verification", content: renderVerificationGate(), classifyAs: cache.ClassificationStatic},
+		{name: "efficiency", content: renderEfficiencyProtocols(reg), classifyAs: cache.ClassificationSemiStatic},
+		{name: "cache-break", isCacheBreak: true},
+		{name: "project-context", content: renderProjectContext(cfg, messages), classifyAs: cache.ClassificationDynamic},
+	}
+	return assemblePromptSections(sections)
 }
 
 func renderIdentity() string {
@@ -88,29 +139,33 @@ func renderIdentity() string {
 
 func renderTaskProtocol() string {
 	return `
-# Core Task Protocol
-Follow this unified, self-correcting workflow for every request:
+# System-Level Engineering Protocol
+You are a full-system autonomous engineer operating in large-scale codebases. You must execute true system-level engineering rather than shallow, file-level edits. Your workflow must rigorously adhere to the following lifecycle:
 
-1. **Classify:** Determine the task type:
-   - **Inquiry:** Answer questions or analyze code. DO NOT modify files unless explicitly requested.
-   - **Bug Fix:** Reproduce the issue first, identify the root cause, then fix.
-   - **Feature:** Plan the implementation, add the feature, and write tests.
-   - **Refactor:** Improve structure without changing behavior. Verify with existing tests.
-2. **Investigate:** Never guess. Use grep, glob, and read tools to map the codebase. Understand the *why* before the *how*.
-3. **Plan:** Outline your approach before making non-trivial changes. For complex tasks, use a Plan file to track state.
-4. **Execute:** Perform surgical, idiomatic edits.
-5. **Verify & Self-Correct:** Every change must be verified. If it isn't tested, it's broken.
-   - **Failure Handling:** If verification fails, DO NOT report completion. Analyze the failure, identify the root cause, generate a revised plan, and retry execution.
-   - **Retry Limits:** After 3 consecutive failed attempts at the same step, stop and report the blocking condition and your uncertainty to the user.
+1. **Mandatory Exploration Phase (System Discovery):**
+   - **Active Search & Symbol Lookup:** You MUST actively use grep, glob, and read tools to identify *all* related components before any modification. Do not guess.
+   - **Component Mapping:** Trace definitions, usages, imports, initialization points, and integration layers across the entire repository.
+   - **Relevance Filtering:** Filter your discoveries. Select the most critical structural files rather than acting on shallow matches.
 
-**Tool Economy:**
-- Minimize redundant operations. Combine independent actions (e.g., reading multiple files) into a single turn.
-- Favor high-value actions. Don't read a whole file if 'grep -C' provides enough context.
+2. **Deep Analysis & Blast Radius:**
+   - Identify the root cause for bugs or full system requirements for features.
+   - Map the "Blast Radius" of your intended change across all modules and dependencies.
 
-**Communication Style:** 
-- State your intent briefly *before* your first major tool call (e.g., "I'll start by searching for the API endpoint definition...").
-- Provide short updates at key milestones (e.g., "Root cause identified; proceeding with the fix.").
-- No conversational filler or "Let me..." preambles. No emojis.
+3. **System-Aware Strategic Plan:**
+   - For all non-trivial changes, present a structured plan before editing:
+     ### 🎯 Objective: [System-level summary]
+     ### 🔍 Findings: [Key definitions, usages, and integration points discovered]
+     ### 🛠️ Proposed Changes: [Comprehensive list of all affected files to be updated]
+     ### ✅ System Verification Strategy: [Post-execution scan & test plan]
+
+4. **System Integration Guarantee (Execution):**
+   - **No Partial Edits:** You MUST update ALL affected files across the codebase. Treat a single-file update as INCOMPLETE if multiple integration points, imports, or usages exist.
+   - Maintain strict correctness and idiomatic consistency across all modified layers.
+
+5. **Post-Execution Validation Phase:**
+   - **Re-Scan the Codebase:** You MUST re-scan the codebase using search tools to confirm the feature is fully wired, reachable in runtime flow, and free of missing references or partial implementations.
+   - **Forbidden:** Do NOT mark tasks as complete without this explicit tool-based verification.
+   - A task is NOT complete until all syntax, logic, system references, and tests pass.
 `
 }
 
@@ -177,8 +232,115 @@ func renderProjectContext(cfg *config.Config, messages []ai.Message) string {
 		sb.WriteString("\n## Project Mandates (AUTOMERGENT.md)\n")
 		sb.WriteString(string(data))
 	}
+	renderManagedContextSelection(&sb, cfg, messages, cwd)
 
 	return sb.String()
+}
+
+func assemblePromptSections(sections []promptSection) string {
+	var staticSections []string
+	var dynamicSections []string
+	for _, section := range sections {
+		if section.isCacheBreak {
+			continue
+		}
+		content := strings.TrimSpace(section.content)
+		if content == "" {
+			continue
+		}
+		content += "\n\n"
+		switch section.classifyAs {
+		case cache.ClassificationDynamic, cache.ClassificationVolatile:
+			dynamicSections = append(dynamicSections, content)
+		default:
+			staticSections = append(staticSections, content)
+		}
+	}
+
+	staticPart := strings.TrimSpace(strings.Join(staticSections, ""))
+	dynamicPart := strings.TrimSpace(strings.Join(dynamicSections, ""))
+	return cache.InsertBoundaryMarker(staticPart, dynamicPart)
+}
+
+func renderManagedContextSelection(sb *strings.Builder, cfg *config.Config, messages []ai.Message, cwd string) {
+	activeFiles := resolveExistingContextFiles(cwd, cfg.ContextFiles)
+	if len(activeFiles) == 0 {
+		return
+	}
+
+	managerCfg := contextmgr.DefaultManagerConfig()
+	managerCfg.ModelLimits = contextmgr.GetModelLimits(cfg.Model)
+	manager := contextmgr.NewManager(cwd, managerCfg)
+	intent := latestUserIntent(messages)
+	resp, err := manager.GetContext(context.Background(), contextmgr.ContextRequest{
+		Intent:      intent,
+		ActiveFiles: activeFiles,
+		TokenBudget: maxPromptContextTokens,
+		IncludeDeps: true,
+	})
+	if err != nil && resp == nil {
+		return
+	}
+
+	items := resp.Items
+	if len(items) == 0 {
+		return
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].Priority > items[j].Priority })
+	if len(items) > maxPromptContextFiles {
+		items = items[:maxPromptContextFiles]
+	}
+
+	sb.WriteString("\n## Selected File Context\n")
+	for _, item := range items {
+		sb.WriteString(fmt.Sprintf("- %s (%d tokens)\n", item.Path, item.Tokens))
+		sb.WriteString("```text\n")
+		sb.WriteString(truncateContextContent(item.Content, maxPromptContextChars))
+		sb.WriteString("\n```\n")
+	}
+}
+
+func resolveExistingContextFiles(cwd string, configured []string) []string {
+	seen := make(map[string]bool, len(configured))
+	files := make([]string, 0, len(configured))
+	for _, path := range configured {
+		if strings.TrimSpace(path) == "" {
+			continue
+		}
+		resolved := path
+		if !filepath.IsAbs(resolved) {
+			resolved = filepath.Join(cwd, resolved)
+		}
+		if seen[resolved] {
+			continue
+		}
+		if info, err := os.Stat(resolved); err == nil && !info.IsDir() {
+			seen[resolved] = true
+			files = append(files, resolved)
+		}
+	}
+	return files
+}
+
+func latestUserIntent(messages []ai.Message) string {
+	for i := len(messages) - 1; i >= 0; i-- {
+		if messages[i].Role == ai.RoleUser {
+			text := strings.TrimSpace(messages[i].TextContent())
+			if text != "" {
+				return text
+			}
+		}
+	}
+	return "current task"
+}
+
+func truncateContextContent(content string, maxChars int) string {
+	content = strings.TrimSpace(content)
+	if len(content) <= maxChars {
+		return content
+	}
+	half := maxChars / 2
+	return content[:half] + "\n... [truncated] ...\n" + content[len(content)-half:]
 }
 
 // isImportantMessage reports whether a message should be preserved during compaction.
@@ -267,21 +429,69 @@ func (a *Agent) summarizeWithLLM(ctx context.Context, messages []ai.Message, pro
 	return summary.String()
 }
 
+// GhostLargeOutputs truncates large tool results to save context space,
+// replacing the full content with a summary and a hint for the model.
+func (a *Agent) GhostLargeOutputs(messages []ai.Message) []ai.Message {
+	maxChars := 32768
+	if a.cfg != nil && a.cfg.MaxToolOutputChars > 0 {
+		maxChars = a.cfg.MaxToolOutputChars
+	}
+
+	ghosted := make([]ai.Message, len(messages))
+	for i, msg := range messages {
+		if msg.Role != ai.RoleTool {
+			ghosted[i] = msg
+			continue
+		}
+
+		newMsg := msg
+		newMsg.Content = make([]ai.ContentPart, len(msg.Content))
+		for j, part := range msg.Content {
+			if part.Type == ai.ContentTypeToolResult && part.ToolResult != nil && len(part.ToolResult.Content) > maxChars {
+				// Ghost the result
+				limit := 500
+				if len(part.ToolResult.Content) < limit {
+					limit = len(part.ToolResult.Content)
+				}
+				summary := fmt.Sprintf("[Output too large (%d chars). Truncated to first %d chars...]\n\n%s\n\n... [output continues for %d more chars. Use 'read_file' or specific 'grep' if you need more details.]",
+					len(part.ToolResult.Content),
+					limit,
+					part.ToolResult.Content[:limit],
+					len(part.ToolResult.Content)-limit)
+
+				newResult := *part.ToolResult
+				newResult.Content = summary
+				newMsg.Content[j] = ai.ContentPart{
+					Type:       ai.ContentTypeToolResult,
+					ToolResult: &newResult,
+				}
+			} else {
+				newMsg.Content[j] = part
+			}
+		}
+		ghosted[i] = newMsg
+	}
+	return ghosted
+}
+
 // CompactSessionMessages provides intelligent context compaction with LLM-based summarization.
 // This should be called by the Agent loop when context usage is high.
 func (a *Agent) CompactSessionMessages(ctx context.Context, messages []ai.Message) []ai.Message {
+	// 0. Pre-process large tool outputs
+	messages = a.GhostLargeOutputs(messages)
+
 	// Respect configured compaction thresholds
-	keepRecent := 6
+	keepRecent := 8
 	if a.cfg != nil && a.cfg.CompressionKeepRecent > 0 {
 		keepRecent = a.cfg.CompressionKeepRecent
 	}
 
-	if len(messages) <= 10 || len(messages) <= keepRecent+2 {
+	if len(messages) <= 12 || len(messages) <= keepRecent+4 {
 		return messages
 	}
 
 	compacted := make([]ai.Message, 0)
-	// Keep the first message (system prompt)
+	// Keep the first message (Original Intent / System Prompt)
 	compacted = append(compacted, messages[0])
 
 	// Determine the range to compact
@@ -307,25 +517,42 @@ func (a *Agent) CompactSessionMessages(ctx context.Context, messages []ai.Messag
 	// Generate LLM-based summary if there are messages to summarize
 	var summaryText string
 	if len(messagesToSummarize) > 0 {
-		prompt := "Summarize key actions, decisions, context. Focus on files modified, problems solved, constraints. Max 500 words."
+		prompt := `Summarize this segment of the coding session history. 
+Focus on:
+1. The specific problem being addressed.
+2. Key files investigated or modified.
+3. Decisions made and rationale provided.
+4. Any constraints or requirements identified.
+5. Successful vs. failed attempts.
+
+Keep the summary technical and concise (max 800 words).`
 
 		summaryText = a.summarizeWithLLM(ctx, messagesToSummarize, prompt)
 	} else {
 		summaryText = "[No additional messages required summarization]"
 	}
 
-	// Add the LLM-generated summary as a system message
+	// Add the LLM-generated summary as a system message with a "Neural" header
 	summaryMsg := ai.Message{
 		Role: ai.RoleSystem,
 		Content: []ai.ContentPart{{
 			Type: ai.ContentTypeText,
-			Text: fmt.Sprintf("[Context Compaction Summary]\n%s\n\nThe following important messages from the compacted history are preserved below.", summaryText),
+			Text: fmt.Sprintf("# Neural Context Summary\n\n> This is a compressed representation of the earlier conversation to maintain context efficiency.\n\n%s\n\n---", summaryText),
 		}},
 	}
 	compacted = append(compacted, summaryMsg)
 
-	// Add important messages
-	compacted = append(compacted, importantMessages...)
+	// Add important messages (Preserved context)
+	if len(importantMessages) > 0 {
+		compacted = append(compacted, ai.Message{
+			Role: ai.RoleSystem,
+			Content: []ai.ContentPart{{
+				Type: ai.ContentTypeText,
+				Text: "## Preserved Key Context\nThe following high-signal messages from the compacted history have been preserved for reference:",
+			}},
+		})
+		compacted = append(compacted, importantMessages...)
+	}
 
 	// Keep the most recent messages
 	compacted = append(compacted, messages[startIdx:]...)

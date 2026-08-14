@@ -226,6 +226,11 @@ func DefaultSchema() *Schema {
 				Default:     false,
 				Description: "Verbose output",
 			},
+			"reasoningPreAnalysis": {
+				Type:        TypeBool,
+				Default:     false,
+				Description: "Enable reasoning pre-analysis for each prompt",
+			},
 			"security.sandbox": {
 				Type:        TypeString,
 				Default:     "auto",

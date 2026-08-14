@@ -7,6 +7,8 @@ import (
 	"math/rand"
 	"sync"
 	"time"
+
+	recoverypolicy "github.com/iSundram/Automergent/internal/recovery"
 )
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -137,8 +139,42 @@ func (p *RetryPolicy) ShouldRetry(err error) bool {
 	return false
 }
 
+// Decide returns an explicit retry decision for the given failed attempt.
+func (p *RetryPolicy) Decide(attempt int, err error) recoverypolicy.Decision {
+	return p.AsRecoveryPolicy().Decide(attempt, err)
+}
+
+// AsRecoveryPolicy adapts RetryPolicy to the shared recovery policy contract.
+func (p *RetryPolicy) AsRecoveryPolicy() recoverypolicy.Policy {
+	if p == nil {
+		p = DefaultRetryPolicy()
+	}
+
+	return &recoverypolicy.ExponentialPolicy{
+		MaxAttempts:  p.MaxAttempts,
+		InitialDelay: p.InitialDelay,
+		MaxDelay:     p.MaxDelay,
+		Multiplier:   p.Multiplier,
+		Jitter:       p.Jitter,
+		ShouldRetry: func(err error) (bool, string) {
+			if p.ShouldRetry(err) {
+				return true, "error-is-retriable"
+			}
+			return false, "error-is-not-retriable"
+		},
+		RetryAfter: func(err error) time.Duration {
+			return GetRetryAfter(err)
+		},
+	}
+}
+
 // CalculateDelay calculates the delay for a given attempt number.
 func (p *RetryPolicy) CalculateDelay(attempt int) time.Duration {
+	return p.CalculateDelayForError(attempt, nil)
+}
+
+// CalculateDelayForError calculates retry delay and honors RetryAfter when available.
+func (p *RetryPolicy) CalculateDelayForError(attempt int, err error) time.Duration {
 	if attempt <= 0 {
 		attempt = 1
 	}
@@ -160,10 +196,9 @@ func (p *RetryPolicy) CalculateDelay(attempt int) time.Duration {
 		delay = float64(p.MaxDelay)
 	}
 
-	// Honor RetryAfter from error if present
-	var oce *AutomergentError
-	if errors.As(errors.New(""), &oce) && oce.RetryAfter > 0 && oce.RetryAfter > time.Duration(delay) {
-		return oce.RetryAfter
+	// Honor RetryAfter from error/context if present
+	if retryAfter := GetRetryAfter(err); retryAfter > time.Duration(delay) {
+		return retryAfter
 	}
 
 	return time.Duration(delay)
@@ -189,8 +224,10 @@ func Retry(ctx context.Context, policy *RetryPolicy, operation func() error) Ret
 
 	start := time.Now()
 	var lastErr error
+	lastAttempt := 0
 
 	for attempt := 1; attempt <= policy.MaxAttempts; attempt++ {
+		lastAttempt = attempt
 		if err := ctx.Err(); err != nil {
 			return RetryResult{
 				Attempts:   attempt,
@@ -209,23 +246,14 @@ func Retry(ctx context.Context, policy *RetryPolicy, operation func() error) Ret
 			}
 		}
 
-		// Check if we should retry
-		if attempt >= policy.MaxAttempts || !policy.ShouldRetry(lastErr) {
+		decision := policy.Decide(attempt, lastErr)
+		if !decision.Retry {
 			break
-		}
-
-		// Calculate and apply delay
-		delay := policy.CalculateDelay(attempt)
-
-		// Honor RetryAfter from AutomergentError
-		var oce *AutomergentError
-		if errors.As(lastErr, &oce) && oce.RetryAfter > delay {
-			delay = oce.RetryAfter
 		}
 
 		// Notify callback
 		if policy.OnRetry != nil {
-			policy.OnRetry(attempt, lastErr, delay)
+			policy.OnRetry(attempt, lastErr, decision.Delay)
 		}
 
 		// Wait with context awareness
@@ -237,13 +265,13 @@ func Retry(ctx context.Context, policy *RetryPolicy, operation func() error) Ret
 				TotalTime:  time.Since(start),
 				Successful: false,
 			}
-		case <-time.After(delay):
+		case <-time.After(decision.Delay):
 			// Continue to next attempt
 		}
 	}
 
 	return RetryResult{
-		Attempts:   policy.MaxAttempts,
+		Attempts:   lastAttempt,
 		LastError:  lastErr,
 		TotalTime:  time.Since(start),
 		Successful: false,

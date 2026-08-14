@@ -22,6 +22,7 @@ import (
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/ai"
 	googleProvider "github.com/iSundram/Automergent/internal/ai/google"
+	"github.com/iSundram/Automergent/internal/cache"
 	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
@@ -34,40 +35,45 @@ type agentEventMsg struct{ ev agent.Event }
 type modelsFetchedMsg []ai.Model
 type clearCtrlCStatusMsg struct{}
 type hideDiffPaneMsg struct{} // Message to safely hide diff pane from main loop
+type sessionsLoadedMsg struct {
+	sessions []*session.Session
+}
 
 type App struct {
-	cfg             *config.Config
-	ag              *agent.Agent
-	sess            *session.Session
-	storage         *session.Storage
-	keys            *keys.Bindings
-	styles          *themes.Styles
-	theme           *themes.Theme
-	conversation    components.Conversation
-	diffPane        components.Diff
-	input           components.Input
-	header          components.Header
-	statusBar       components.StatusBar
-	spin            components.Spinner
-	confirm         components.Confirm
-	coAuthorConfirm components.CoAuthorConfirm
-	sessionBrowser  components.SessionBrowser
-	lspPanel        components.LSPPanel
-	stats           components.Stats
-	helpOverlay     components.HelpOverlay
-	fileTree        components.FileTree
-	palette         components.CommandPalette
-	width           int
-	height          int
-	thinking        bool
-	statusMsg       string
-	showFileTree    bool
-	showHelp        bool
-	focusMode       bool // When true, show Diff on top and Confirm on bottom
-	ctx             context.Context
-	cancel          context.CancelFunc
-	initialPrompt   string
-	focus           string
+	cfg               *config.Config
+	ag                *agent.Agent
+	sess              *session.Session
+	storage           *session.Storage
+	keys              *keys.Bindings
+	styles            *themes.Styles
+	theme             *themes.Theme
+	conversation      components.Conversation
+	diffPane          components.Diff
+	input             components.Input
+	header            components.Header
+	statusBar         components.StatusBar
+	spin              components.Spinner
+	confirm           components.Confirm
+	coAuthorConfirm   components.CoAuthorConfirm
+	sessionBrowser    components.SessionBrowser
+	lspPanel          components.LSPPanel
+	stats             components.Stats
+	helpOverlay       components.HelpOverlay
+	fileTree          components.FileTree
+	palette           components.CommandPalette
+	width             int
+	height            int
+	thinking          bool
+	showSessionPicker bool
+	statusMsg         string
+
+	showFileTree  bool
+	showHelp      bool
+	focusMode     bool // When true, show Diff on top and Confirm on bottom
+	ctx           context.Context
+	cancel        context.CancelFunc
+	initialPrompt string
+	focus         string
 
 	availableModels    []ai.Model
 	fetchingModels     bool
@@ -84,7 +90,7 @@ type App struct {
 	pendingCommitReplyCh  chan agent.ConfirmationResponse
 }
 
-func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string) *App {
+func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string, showSessionPicker bool) *App {
 	theme := themes.Get(cfg.Theme)
 	styles := themes.NewStyles(theme)
 	kb := keys.Get(cfg.Keybindings)
@@ -115,6 +121,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		ctx:                ctx,
 		cancel:             cancel,
 		initialPrompt:      initialPrompt,
+		showSessionPicker:  showSessionPicker,
 		statusMsg:          "Ready",
 		focus:              "input",
 		availableProviders: []string{"google"},
@@ -134,6 +141,16 @@ func (a *App) Init() tea.Cmd {
 		a.input.Focus(),
 		a.spin.Tick(),
 		a.fileTree.Load("."),
+	}
+
+	if a.showSessionPicker && a.storage != nil {
+		cmds = append(cmds, func() tea.Msg {
+			sessions, err := a.storage.List()
+			if err != nil {
+				return nil
+			}
+			return sessionsLoadedMsg{sessions: sessions}
+		})
 	}
 	if a.initialPrompt != "" {
 		cmds = append(cmds, a.startAgent(a.initialPrompt))
@@ -282,6 +299,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.availableModels = m
 		a.fetchingModels = false
 		a.updatePalette()
+	case sessionsLoadedMsg:
+		a.sessionBrowser.SetSessions(m.sessions)
+		a.sessionBrowser.Show()
+		a.layout()
+		return a, nil
 	case clearCtrlCStatusMsg:
 		// Only clear if still showing the Ctrl+C message
 		if a.statusBar.View() != "" && !a.thinking {
@@ -1475,14 +1497,14 @@ func isTransientStatus(s string) bool {
 	return strings.HasPrefix(n, "running ")
 }
 
-func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string) error {
+func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string, showSessionPicker bool) error {
 	// Enter alternate screen immediately before TUI starts to prevent
 	// any flash of existing terminal content
 	fmt.Print("\x1b[?1049h") // Enter alt screen
 	fmt.Print("\x1b[H")      // Move cursor to home position
 	fmt.Print("\x1b[2J")     // Clear entire screen
 
-	app := NewApp(cfg, ag, sess, storage, initialPrompt)
+	app := NewApp(cfg, ag, sess, storage, initialPrompt, showSessionPicker)
 	p := tea.NewProgram(app)
 	_, err := p.Run()
 
@@ -1663,20 +1685,43 @@ func defaultModelForProvider(provider string) string {
 
 func buildProviderFromConfig(cfg *config.Config) (ai.Provider, error) {
 	pc := cfg.Providers[cfg.Provider]
+	enablePromptCache := shouldEnablePromptCache(cfg, cfg.Provider)
 	aiCfg := ai.ProviderConfig{
-		APIKey:       pc.APIKey,
-		BaseURL:      pc.BaseURL,
-		DefaultModel: cfg.Model,
-		OrgID:        pc.OrgID,
+		APIKey:             pc.APIKey,
+		BaseURL:            pc.BaseURL,
+		DefaultModel:       cfg.Model,
+		OrgID:              pc.OrgID,
+		PromptCacheEnabled: &enablePromptCache,
 	}
 
+	var provider ai.Provider
 	switch cfg.Provider {
 	case "google":
-		return googleProvider.New(aiCfg), nil
+		provider = googleProvider.New(aiCfg)
 	default:
 		if p, ok := ai.Get(cfg.Provider); ok {
-			return p, nil
+			provider = p
+			break
 		}
 		return nil, fmt.Errorf("unknown provider %q", cfg.Provider)
 	}
+
+	if shouldWrapPromptCacheProvider(cfg, provider) {
+		return cache.NewCachingProvider(provider, cache.NewPromptCache()), nil
+	}
+	return provider, nil
+}
+
+func shouldEnablePromptCache(cfg *config.Config, provider string) bool {
+	if !cfg.Cache.Prompt.Enabled {
+		return false
+	}
+	switch provider {
+	default:
+		return false
+	}
+}
+
+func shouldWrapPromptCacheProvider(cfg *config.Config, provider ai.Provider) bool {
+	return shouldEnablePromptCache(cfg, provider.Name())
 }

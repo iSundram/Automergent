@@ -1,6 +1,7 @@
 package schema
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -179,6 +180,25 @@ func TestArgs_Validate(t *testing.T) {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestArgs_ValidateRejectsUnknownParameters(t *testing.T) {
+	params := map[string]*ParamSchema{
+		"name": String().Required().Build("name"),
+	}
+
+	args := NewArgs(map[string]any{
+		"name":  "John",
+		"extra": true,
+	}, params)
+
+	err := args.Validate()
+	if err == nil {
+		t.Fatal("expected validation error for unknown parameter")
+	}
+	if !strings.Contains(err.Error(), `unexpected parameter "extra"`) {
+		t.Fatalf("expected unknown parameter error, got: %v", err)
 	}
 }
 

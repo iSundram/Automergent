@@ -118,7 +118,7 @@ func SaveUpdateConfig(config *UpdateConfig) error {
 		return err
 	}
 
-	return os.WriteFile(configPath, data, 0644)
+	return atomicWriteFile(configPath, data, 0644)
 }
 
 // CheckForUpdates checks if a new version is available
@@ -245,6 +245,13 @@ func PerformUpdate(info *UpdateInfo, progressChan chan float64) (*UpdateResult, 
 		ToVersion:   info.LatestVersion,
 	}
 
+	updateLock, err := AcquireUpdateLock()
+	if err != nil {
+		result.Error = fmt.Sprintf("failed to acquire update lock: %v", err)
+		return result, err
+	}
+	defer updateLock.Release()
+
 	// Find current binary location
 	currentBinary, err := os.Executable()
 	if err != nil {
@@ -275,7 +282,7 @@ func PerformUpdate(info *UpdateInfo, progressChan chan float64) (*UpdateResult, 
 	defer os.Remove(archivePath)
 
 	// Extract to temp location
-	tempDir, err := os.MkdirTemp("", "automergent-update-*")
+	tempDir, err := os.MkdirTemp(filepath.Dir(currentBinary), ".automergent-update-*")
 	if err != nil {
 		result.Error = fmt.Sprintf("failed to create temp dir: %v", err)
 		return result, err
@@ -293,32 +300,10 @@ func PerformUpdate(info *UpdateInfo, progressChan chan float64) (*UpdateResult, 
 		newBinary += ".exe"
 	}
 
-	// On Windows, we need to rename the current binary first
-	if runtime.GOOS == "windows" {
-		oldPath := currentBinary + ".old"
-		os.Remove(oldPath) // Remove any existing .old file
-		if err := os.Rename(currentBinary, oldPath); err != nil {
-			result.Error = fmt.Sprintf("failed to rename current binary: %v", err)
-			return result, err
-		}
-	}
-
-	// Copy new binary
-	if err := copyFile(newBinary, currentBinary); err != nil {
-		// Try to restore on failure
-		if runtime.GOOS == "windows" {
-			os.Rename(currentBinary+".old", currentBinary)
-		}
+	// Stage and atomically replace binary where supported.
+	if err := installBinaryFromSource(newBinary, currentBinary); err != nil {
 		result.Error = fmt.Sprintf("failed to install update: %v", err)
 		return result, err
-	}
-
-	// Make executable (Unix only)
-	if runtime.GOOS != "windows" {
-		if err := os.Chmod(currentBinary, 0755); err != nil {
-			result.Error = fmt.Sprintf("failed to set permissions: %v", err)
-			return result, err
-		}
 	}
 
 	// Save rollback info
@@ -361,14 +346,29 @@ func copyFile(src, dst string) error {
 	}
 	defer sourceFile.Close()
 
-	destFile, err := os.Create(dst)
+	sourceInfo, err := sourceFile.Stat()
+	if err != nil {
+		return err
+	}
+
+	mode := sourceInfo.Mode()
+	if mode == 0 {
+		mode = 0644
+	}
+
+	destFile, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, mode)
 	if err != nil {
 		return err
 	}
 	defer destFile.Close()
 
-	_, err = io.Copy(destFile, sourceFile)
-	return err
+	if _, err := io.Copy(destFile, sourceFile); err != nil {
+		return err
+	}
+	if err := destFile.Sync(); err != nil {
+		return err
+	}
+	return nil
 }
 
 // saveRollbackInfo saves rollback information
@@ -379,6 +379,9 @@ func saveRollbackInfo(version, backupPath string) error {
 	}
 
 	rollbackFile := filepath.Join(home, ".automergent", "rollback.json")
+	if err := os.MkdirAll(filepath.Dir(rollbackFile), 0755); err != nil {
+		return err
+	}
 	info := &RollbackInfo{
 		Version:    version,
 		BackupPath: backupPath,
@@ -390,7 +393,7 @@ func saveRollbackInfo(version, backupPath string) error {
 		return err
 	}
 
-	return os.WriteFile(rollbackFile, data, 0644)
+	return atomicWriteFile(rollbackFile, data, 0644)
 }
 
 // GetRollbackInfo retrieves rollback information
@@ -416,6 +419,12 @@ func GetRollbackInfo() (*RollbackInfo, error) {
 
 // PerformRollback restores the previous version
 func PerformRollback() (*UpdateResult, error) {
+	updateLock, err := AcquireUpdateLock()
+	if err != nil {
+		return nil, fmt.Errorf("failed to acquire update lock: %w", err)
+	}
+	defer updateLock.Release()
+
 	info, err := GetRollbackInfo()
 	if err != nil {
 		return nil, fmt.Errorf("no rollback info available: %w", err)
@@ -450,26 +459,10 @@ func PerformRollback() (*UpdateResult, error) {
 		result.BackupPath = backupPath
 	}
 
-	// Restore backup
-	if runtime.GOOS == "windows" {
-		oldPath := currentBinary + ".old"
-		os.Remove(oldPath)
-		if err := os.Rename(currentBinary, oldPath); err != nil {
-			result.Error = fmt.Sprintf("failed to rename current binary: %v", err)
-			return result, err
-		}
-	}
-
-	if err := copyFile(info.BackupPath, currentBinary); err != nil {
-		if runtime.GOOS == "windows" {
-			os.Rename(currentBinary+".old", currentBinary)
-		}
+	// Restore backup with staged replace.
+	if err := installBinaryFromSource(info.BackupPath, currentBinary); err != nil {
 		result.Error = fmt.Sprintf("failed to restore backup: %v", err)
 		return result, err
-	}
-
-	if runtime.GOOS != "windows" {
-		os.Chmod(currentBinary, 0755)
 	}
 
 	result.Success = true

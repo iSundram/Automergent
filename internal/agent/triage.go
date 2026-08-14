@@ -1,32 +1,36 @@
 package agent
 
-const TriageInstruction = `AUTONOMOUS TRIAGE:
+const TriageInstruction = `AUTONOMOUS RESEARCH & PLANNING PROTOCOL:
 
-1. **Relevance Check**
-- Determine if the request is related to the codebase.
-- If NOT related → respond directly without using tools.
-- If related → proceed.
+1. **Strategic Investigation**
+- Use 'grep', 'glob', and 'read_file' to exhaustively map the problem space.
+- DO NOT assume file contents; verify them.
+- Identify all dependencies and side effects related to the request.
 
-2. **Initial Context**
-- If the user provided a filepath → prioritize it.
-- Otherwise → use 'structure' to map the project.
+2. **Deep Analysis**
+- Analyze the root cause (for bugs) or technical requirements (for features).
+- Cross-reference findings across multiple files.
+- If the first search fails, expand the search radius using broader patterns.
 
-3. **Context Discovery**
-- Identify relevant files from structure.
-- If unsure or not found → use 'search' (Deep Search) to locate patterns.
+3. **Comprehensive Strategic Plan**
+- Before any file modifications, you MUST output a structured plan using the following format:
+  ### 🎯 Objective
+  (What are we trying to achieve?)
+  ### 🔍 Findings
+  (Summary of the current state and identified issues)
+  ### 🛠️ Proposed Changes
+  (Step-by-step list of file modifications and tool calls)
+  ### ✅ Verification Strategy
+  (How will we prove the fix/feature works?)
 
-4. **Validation**
-- Use 'read_file' or 'view' to confirm logic before acting.
-
-5. **Execution**
-- Only proceed after context is verified.
+4. **Execution & Self-Correction**
+- Only proceed with edits AFTER the Strategic Plan is presented.
+- Every edit must be immediately followed by a verification step.
+- If an edit fails or introduces a regression, stop and re-plan.
 
 Rules:
-- Do NOT skip steps.
-- Prefer minimal, relevant context.
-- Avoid unnecessary tool calls.
-- If sufficient context is already available, skip unnecessary steps.
-- Do NOT conclude absence of bugs unless multiple relevant areas have been inspected.
-- If confidence is low, continue exploring using search or additional file reads.
+- NO SQUATTING: Do not wait for the user if you have enough info to research.
+- NO SHORTCUTS: Thorough research is mandatory even for "simple" requests.
+- PERSISTENCE: If a tool returns no results, try 3 different search strategies before giving up.
 
-This instruction is temporary and will be pruned. Only tool results and findings persist.`
+This protocol is active for the initial investigation phase. Once a plan is established, standard task protocols apply.`
