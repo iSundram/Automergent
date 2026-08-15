@@ -3,7 +3,6 @@ package reasoning
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/iSundram/Automergent/internal/diagnostics/recovery"
 	"github.com/iSundram/Automergent/internal/diagnostics/types"
-	"github.com/iSundram/Automergent/internal/learning"
 	planningPkg "github.com/iSundram/Automergent/internal/planning"
 	"github.com/iSundram/Automergent/internal/verification"
 )
@@ -19,14 +17,12 @@ import (
 // Engine is the core reasoning system that orchestrates task analysis,
 // planning, execution, and verification.
 type Engine struct {
-	planner         *planningPkg.Planner
-	executor        *Executor
-	verifier        *verification.Engine
-	learningSystem  *learning.PatternRecognizer
-	learningStorage learning.Storage
-	strategies      map[TaskType]Strategy
-	mu              sync.RWMutex
-	logger          Logger
+	planner    *planningPkg.Planner
+	executor   *Executor
+	verifier   *verification.Engine
+	strategies map[TaskType]Strategy
+	mu         sync.RWMutex
+	logger     Logger
 
 	// Configuration
 	maxRetries             int
@@ -75,8 +71,6 @@ func NewEngine(cfg *EngineConfig) *Engine {
 		planner:                planningPkg.NewPlanner("."),
 		executor:               NewExecutor(cfg.ParallelWorkers),
 		verifier:               verification.NewDefaultEngine(),
-		learningSystem:         learning.NewPatternRecognizer(),
-		learningStorage:        mustCreateLearningStorage(),
 		strategies:             make(map[TaskType]Strategy),
 		maxRetries:             cfg.MaxRetries,
 		parallelWorkers:        cfg.ParallelWorkers,
@@ -572,11 +566,6 @@ func (e *Engine) recover(ctx context.Context, plan *ExecutionPlan, verifyErr err
 		e.addThought(PhaseExecution, "Failure analyzed", "cause", failureAnalysis.RootCause)
 		e.addThought(PhaseExecution, "Fix suggestions generated", "count", fmt.Sprintf("%d", len(failureAnalysis.SuggestedFixes)))
 
-		// Record error pattern for learning
-		if e.learningSystem != nil {
-			e.learningSystem.RecordError(failureAnalysis.RootCause, false, "")
-		}
-
 		// Revise strategy
 		revisedPlan, err := e.reviseStrategy(ctx, plan, &failureAnalysis)
 		if err != nil {
@@ -593,11 +582,6 @@ func (e *Engine) recover(ctx context.Context, plan *ExecutionPlan, verifyErr err
 		if verificationResult, err := e.verify(ctx, plan); err == nil {
 			e.addThought(PhaseExecution, "Recovery successful", "attempt", fmt.Sprintf("%d", attempt))
 			_ = e.refineStrategy(ctx, plan, verificationResult, time.Since(recoveryStarted))
-			// Record successful resolution
-			if e.learningSystem != nil {
-				resolution := fmt.Sprintf("Applied %d fixes, retry attempt %d", len(failureAnalysis.SuggestedFixes), attempt)
-				e.learningSystem.RecordError(failureAnalysis.RootCause, true, resolution)
-			}
 			return nil
 		}
 	}
@@ -646,33 +630,6 @@ func (e *Engine) analyzeFailure(plan *ExecutionPlan, err error) FailureAnalysis 
 	} else if err != nil {
 		analysis.RootCause = e.inferRootCause(err, errorPatterns)
 		analysis.Confidence = 0.45
-	}
-
-	// Step 3: Query learning system for similar past failures.
-	if e.learningSystem != nil {
-		historicalPatterns := e.learningSystem.GetPatterns(learning.PatternTypeError)
-		matchedPattern := e.matchHistoricalPattern(analysis.RootCause, errorPatterns, historicalPatterns)
-		if matchedPattern != nil {
-			analysis.HistoricalMatch = true
-			if analysis.RootCause == "unknown" || analysis.RootCause == "" {
-				if matchedPattern.Description != "" {
-					analysis.RootCause = matchedPattern.Description
-				} else {
-					analysis.RootCause = matchedPattern.Name
-				}
-			}
-			analysis.Confidence = clampConfidence((analysis.Confidence + matchedPattern.Confidence) / 2)
-
-			if matchedPattern.Data.ResolutionPath != "" {
-				analysis.SuggestedFixes = append([]Fix{{
-					Description: "Previously successful resolution: " + matchedPattern.Data.ResolutionPath,
-					Action:      "retry_with_adjustment",
-					Priority:    10,
-					Confidence:  clampConfidence(matchedPattern.Confidence),
-					Automated:   true,
-				}}, analysis.SuggestedFixes...)
-			}
-		}
 	}
 
 	// Step 4: Identify failed tasks and determine fixable/retryable flags.
@@ -781,49 +738,6 @@ func (e *Engine) inferRootCause(err error, patterns []ErrorPattern) string {
 	}
 
 	return fmt.Sprintf("Execution failed: %v", err)
-}
-
-// matchHistoricalPattern finds similar patterns from learning history
-func (e *Engine) matchHistoricalPattern(rootCause string, currentPatterns []ErrorPattern, historicalPatterns []*learning.Pattern) *learning.Pattern {
-	var bestMatch *learning.Pattern
-	bestScore := 0.0
-
-	rootCauseLower := strings.ToLower(rootCause)
-
-	for _, hp := range historicalPatterns {
-		score := 0.0
-
-		// Match by error type
-		for _, errorType := range hp.Data.ErrorTypes {
-			if strings.Contains(rootCauseLower, strings.ToLower(errorType)) {
-				score += 0.5
-			}
-		}
-
-		// Match by pattern category
-		for _, cp := range currentPatterns {
-			for _, errorType := range hp.Data.ErrorTypes {
-				if strings.Contains(strings.ToLower(errorType), strings.ToLower(cp.Category)) {
-					score += 0.3
-				}
-			}
-		}
-
-		// Weight by confidence and frequency
-		score *= hp.Confidence * (float64(hp.Frequency) / 10.0)
-
-		if score > bestScore {
-			bestScore = score
-			bestMatch = hp
-		}
-	}
-
-	// Only return if score is significant
-	if bestScore > 0.3 {
-		return bestMatch
-	}
-
-	return nil
 }
 
 // identifyFailedTasks collects information about failed tasks
@@ -1344,15 +1258,6 @@ func (e *Engine) reviseStrategy(ctx context.Context, plan *ExecutionPlan, failur
 			e.addThought(PhasePlanning, "Adding diagnostic task", "reason", "low confidence in root cause")
 		}
 
-		if failureAnalysis.Confidence > 0.7 && e.hasLearningEngine() {
-			repairTask := e.createRepairTaskFromLearning(ctx, failedTask, failureAnalysis)
-			if repairTask != nil {
-				revisedTasks = append(revisedTasks, repairTask)
-				failedTask.Dependencies = appendUniqueString(failedTask.Dependencies, repairTask.ID)
-				e.addThought(PhasePlanning, "Applying learned fix", "task", repairTask.Description)
-			}
-		}
-
 		failedTask.Status = TaskStatusPending
 		if failedTask.Result == nil {
 			failedTask.Result = &TaskResult{}
@@ -1479,95 +1384,6 @@ func (e *Engine) createDiagnosticTask(failedTask *Task, failureAnalysis string) 
 	}
 }
 
-// createRepairTaskFromLearning creates a repair task based on learned patterns
-func (e *Engine) createRepairTaskFromLearning(ctx context.Context, failedTask *Task, failureAnalysis *FailureAnalysis) *Task {
-	_ = ctx
-	if failureAnalysis == nil || failureAnalysis.Confidence < 0.7 || e.learningSystem == nil {
-		return nil
-	}
-
-	rootCause := strings.ToLower(failureAnalysis.RootCause)
-	var resolution string
-	var matchedPattern *learning.Pattern
-	for _, pattern := range e.learningSystem.GetPatterns(learning.PatternTypeError) {
-		if pattern == nil {
-			continue
-		}
-		for _, errorType := range pattern.Data.ErrorTypes {
-			if strings.Contains(rootCause, strings.ToLower(errorType)) {
-				matchedPattern = pattern
-				resolution = pattern.Data.ResolutionPath
-				break
-			}
-		}
-		if matchedPattern != nil {
-			break
-		}
-	}
-	if matchedPattern == nil {
-		for _, pattern := range e.learningSystem.GetPatterns(learning.PatternTypeError) {
-			if pattern != nil && pattern.Data.ResolutionPath != "" && pattern.Confidence > 0.7 {
-				matchedPattern = pattern
-				resolution = pattern.Data.ResolutionPath
-				break
-			}
-		}
-	}
-	if matchedPattern == nil {
-		return nil
-	}
-
-	tools := []string{"edit", "bash"}
-	switch failedTask.Type {
-	case TaskTypeFeature:
-		tools = []string{"create", "edit", "bash"}
-	case TaskTypeBugFix, TaskTypeRefactor:
-		tools = []string{"edit", "bash"}
-	}
-
-	description := fmt.Sprintf("Apply learned fix pattern for: %s", failedTask.Description)
-	if resolution != "" {
-		description = fmt.Sprintf("Apply learned resolution: %s", resolution)
-	}
-
-	context := map[string]string{
-		"phase":          "repair",
-		"failed_task_id": failedTask.ID,
-		"learned_fix":    "true",
-		"fix_confidence": fmt.Sprintf("%.2f", failureAnalysis.Confidence),
-		"root_cause":     failureAnalysis.RootCause,
-	}
-	if matchedPattern != nil {
-		context["learning_pattern"] = matchedPattern.Name
-	}
-	if resolution != "" {
-		context["resolution_path"] = resolution
-	}
-
-	return &Task{
-		ID:           generateTaskID(),
-		Description:  description,
-		Type:         failedTask.Type,
-		Dependencies: []string{},
-		Parallel:     false,
-		Priority:     failedTask.Priority + 5,
-		Estimated:    10 * time.Minute,
-		Tools:        tools,
-		Context:      context,
-		Verification: []Checkpoint{
-			{
-				ID:          generateTaskID(),
-				Description: "Fix applied successfully",
-				Type:        CheckpointSemantic,
-				Validator:   "fix_check",
-				Required:    true,
-			},
-		},
-		Status:    TaskStatusPending,
-		CreatedAt: time.Now(),
-	}
-}
-
 func newConcreteStrategy(taskType TaskType, strategy Strategy) *ConcreteStrategy {
 	concrete := &ConcreteStrategy{
 		StrategyName:    strategy.Name(),
@@ -1578,14 +1394,6 @@ func newConcreteStrategy(taskType TaskType, strategy Strategy) *ConcreteStrategy
 		concrete.StrategyName = string(taskType)
 	}
 	return concrete
-}
-
-func mustCreateLearningStorage() learning.Storage {
-	storage, err := learning.NewFileStorage(filepath.Join(".automergent", "learning"))
-	if err != nil {
-		return nil
-	}
-	return storage
 }
 
 func (e *Engine) refineStrategy(ctx context.Context, plan *ExecutionPlan, verificationResult *verification.Result, executionDuration time.Duration) error {
@@ -1635,37 +1443,8 @@ func (e *Engine) refineStrategy(ctx context.Context, plan *ExecutionPlan, verifi
 
 	historicalSuccessRate := float64(concrete.TotalSuccesses) / float64(concrete.TimesUsed)
 	concrete.NeedsReview = concrete.TimesUsed >= 10 && historicalSuccessRate < 0.6
-	snapshot := *concrete
-
-	if e.learningStorage != nil {
-		_ = e.learningStorage.SaveStrategy(ctx, learning.Strategy{
-			ID:          string(plan.Analysis.TaskType),
-			Name:        snapshot.StrategyName,
-			Description: fmt.Sprintf("Adaptive reasoning strategy for %s", plan.Analysis.TaskType),
-			ProjectType: string(plan.Analysis.TaskType),
-			SuccessRate: historicalSuccessRate,
-			AvgDuration: snapshot.AvgExecutionTime,
-			UseCount:    snapshot.TimesUsed,
-			LastUsed:    time.Now(),
-			Configuration: map[string]interface{}{
-				"times_used":         snapshot.TimesUsed,
-				"total_successes":    snapshot.TotalSuccesses,
-				"avg_execution_time": snapshot.AvgExecutionTime.String(),
-				"needs_review":       snapshot.NeedsReview,
-				"confidence":         snapshot.ConfidenceScore,
-				"verification_rate":  successRate,
-			},
-		})
-	}
 
 	return nil
-}
-
-// hasLearningEngine checks if learning system is available
-func (e *Engine) hasLearningEngine() bool {
-	// In full implementation, check if learning engine is configured
-	// For now, return true to enable the feature
-	return true
 }
 
 // generateTaskID creates a unique task identifier

@@ -253,13 +253,12 @@ type FailureAnalysis struct {
 	ErrorPatterns   []ErrorPattern `json:"error_patterns"`
 	FailedTasks     []FailedTask   `json:"failed_tasks"`
 	SuggestedFixes  []Fix          `json:"suggested_fixes"`
-	Retryable       bool           `json:"retryable"`
-	RequiresManual  bool           `json:"requires_manual"`
-	HistoricalMatch bool           `json:"historical_match"`
-	AnalyzedAt      time.Time      `json:"analyzed_at"`
+	Retryable      bool           `json:"retryable"`
+	RequiresManual bool           `json:"requires_manual"`
+	AnalyzedAt     time.Time      `json:"analyzed_at"`
 }
 
-// ConcreteStrategy is a concrete implementation with learning metrics.
+// ConcreteStrategy is a concrete implementation with strategy metrics.
 type ConcreteStrategy struct {
 	StrategyName     string
 	ConfidenceScore  float64
