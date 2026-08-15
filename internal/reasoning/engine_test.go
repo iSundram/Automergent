@@ -93,6 +93,7 @@ func TestEngine_Analyze(t *testing.T) {
 
 func TestEngine_Process(t *testing.T) {
 	engine := NewEngine(nil)
+	engine.GetExecutor().SetRunner(&mockTaskRunner{})
 	ctx := context.Background()
 
 	tests := []struct {
@@ -359,7 +360,7 @@ func TestExtractIntent(t *testing.T) {
 		},
 		{
 			request: "This is a very long request that exceeds one hundred characters and should be truncated at exactly one hundred characters",
-			want:    "This is a very long request that exceeds one hundred characters and should be truncated at exactly...",
+			want:    "This is a very long request that exceeds one hundred characters and should be truncated at exactl...",
 		},
 		{
 			request: "Short",
@@ -409,6 +410,22 @@ func (s *mockStrategy) EstimateEffort(analysis *TaskAnalysis) time.Duration {
 
 func (s *mockStrategy) Confidence() float64 {
 	return 0.8
+}
+
+// mockTaskRunner is a TaskRunner that always succeeds for testing.
+type mockTaskRunner struct{}
+
+func (m *mockTaskRunner) Run(ctx context.Context, task *Task) (*TaskResult, error) {
+	return &TaskResult{
+		Success:      true,
+		Output:       "Task completed successfully",
+		Error:        nil,
+		Attempts:     1,
+		Duration:     10 * time.Millisecond,
+		ToolsUsed:    task.Tools,
+		FilesChanged: []string{},
+		CompletedAt:  time.Now(),
+	}, nil
 }
 
 func TestContainsAny(t *testing.T) {

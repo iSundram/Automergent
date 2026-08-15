@@ -38,6 +38,11 @@ type hideDiffPaneMsg struct{} // Message to safely hide diff pane from main loop
 type sessionsLoadedMsg struct {
 	sessions []*session.Session
 }
+type projectApprovalMsg struct{ response agent.ConfirmationResponse }
+type coordinatorEventMsg struct {
+	phase   string
+	running bool
+}
 
 type App struct {
 	cfg               *config.Config
@@ -79,6 +84,7 @@ type App struct {
 	fetchingModels     bool
 	availableProviders []string
 	streamedReply      bool
+	browsing           bool
 	lastCtrlCAt        time.Time
 	askUserReplyCh     chan string
 
@@ -88,6 +94,8 @@ type App struct {
 	// pendingCommitToolCall stores the tool call when waiting for co-author confirmation
 	pendingCommitToolCall *ai.ToolCall
 	pendingCommitReplyCh  chan agent.ConfirmationResponse
+	pendingProjectPath    string
+	projectApprovalCh     chan agent.ConfirmationResponse
 }
 
 func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string, showSessionPicker bool) *App {
@@ -131,7 +139,14 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	app.header.SetProvider(cfg.Provider)
 	app.header.SetMode(cfg.Mode)
 	app.header.SetPhase(string(agent.DetectPhase(sess.Messages)))
+	if len(sess.Messages) == 0 && initialPrompt == "" {
+		app.conversation.SetWelcomeState()
+	}
 	return app
+}
+
+func (a *App) requireProjectApproval(projectPath string) {
+	a.pendingProjectPath = projectPath
 }
 
 func (a *App) Init() tea.Cmd {
@@ -152,10 +167,56 @@ func (a *App) Init() tea.Cmd {
 			return sessionsLoadedMsg{sessions: sessions}
 		})
 	}
-	if a.initialPrompt != "" {
+	if a.pendingProjectPath != "" {
+		a.projectApprovalCh = make(chan agent.ConfirmationResponse, 1)
+		a.confirm.ShowTrust("Trust this project folder?\n" + a.pendingProjectPath + "\nAutomergent can read this folder; edits and commands still require permission.")
+		a.statusBar.SetPermission("project writes")
+		a.confirm.SetReply(a.projectApprovalCh)
+		cmds = append(cmds, func() tea.Msg {
+			return projectApprovalMsg{response: <-a.projectApprovalCh}
+		})
+	} else if a.initialPrompt != "" {
 		cmds = append(cmds, a.startAgent(a.initialPrompt))
 	}
+
+	// Start coordinator event listener if available
+	cmds = append(cmds, a.startCoordinatorListener())
+
 	return tea.Batch(cmds...)
+}
+
+func (a *App) startCoordinatorListener() tea.Cmd {
+	coord := a.ag.Coordinator()
+	if coord == nil {
+		return nil
+	}
+	
+	return a.waitForCoordinatorEvent()
+}
+
+func (a *App) waitForCoordinatorEvent() tea.Cmd {
+	coord := a.ag.Coordinator()
+	if coord == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		event := <-coord.Events()
+		switch event.Type {
+		case "phase_start":
+			phaseName := "research"
+			if p, ok := event.Payload.(string); ok {
+				phaseName = strings.ToLower(p)
+			}
+			return coordinatorEventMsg{phase: phaseName, running: true}
+		case "phase_complete":
+			phaseName := "execute"
+			if p, ok := event.Payload.(string); ok {
+				phaseName = strings.ToLower(p)
+			}
+			return coordinatorEventMsg{phase: phaseName, running: false}
+		}
+		return nil
+	}
 }
 
 func (a *App) startAgent(prompt string) tea.Cmd {
@@ -225,7 +286,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	)
 	switch m := msg.(type) {
 	case tea.MouseMsg:
-		// Enforce keyboard-only navigation/scrolling.
+		if a.palette.Visible() {
+			palette, cmd := a.palette.Update(msg)
+			a.palette = palette
+			return a, cmd
+		}
+		if a.browsing {
+			conversation, cmd := a.conversation.Update(msg)
+			a.conversation = conversation
+			return a, cmd
+		}
 		return a, nil
 	case tea.WindowSizeMsg:
 		a.width, a.height = m.Width, m.Height
@@ -265,6 +335,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case coordinatorEventMsg:
+		a.header.SetPhase(m.phase)
+		if m.running {
+			a.statusBar.SetStatus(fmt.Sprintf("Coordinator: %s phase", m.phase))
+		}
+		cmds = append(cmds, a.waitForCoordinatorEvent())
 	case spinner.TickMsg:
 		sp, cmd := a.spin.Update(msg)
 		a.spin = sp
@@ -304,6 +380,30 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.sessionBrowser.Show()
 		a.layout()
 		return a, nil
+	case projectApprovalMsg:
+		projectPath := a.pendingProjectPath
+		a.pendingProjectPath = ""
+		a.projectApprovalCh = nil
+		if m.response.Allow {
+			a.cfg.Security.AllowedWritePaths = appendUniquePath(a.cfg.Security.AllowedWritePaths, projectPath)
+			if m.response.Always {
+				if err := a.cfg.Save(); err != nil {
+					a.statusBar.SetStatus("Folder trusted (config save failed)")
+				} else {
+					a.statusBar.SetStatus("Folder trusted and remembered")
+				}
+			} else {
+				a.statusBar.SetStatus("Folder trusted for this session")
+			}
+		} else {
+			a.statusBar.SetStatus("Read-only project")
+		}
+		a.statusBar.ClearPermission()
+		a.layout()
+		if a.initialPrompt != "" {
+			return a, a.startAgent(a.initialPrompt)
+		}
+		return a, a.input.Focus()
 	case clearCtrlCStatusMsg:
 		// Only clear if still showing the Ctrl+C message
 		if a.statusBar.View() != "" && !a.thinking {
@@ -329,6 +429,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.confirm = c
 		cmds = append(cmds, cmd)
 		if !a.confirm.Visible() {
+			a.statusBar.ClearPermission()
 			// Check if we need to hide diff pane after confirmation
 			if a.pendingDiffHide && a.diffPane.Visible() {
 				a.diffPane.Toggle()
@@ -364,14 +465,14 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		switch key {
 		case "enter":
 			if sel := a.palette.Selected(); sel != nil {
+				if sel.Disabled {
+					a.statusBar.SetStatus(sel.DisabledReason)
+					return nil
+				}
 				trigger := a.input.TriggerType()
 				if trigger == "command" || trigger == "help" {
-					execNoArg := map[string]bool{
-						"help": true, "clear": true, "reset": true, "stats": true,
-						"tree": true, "diff": true, "lsp": true, "sessions": true,
-						"quit": true, "exit": true,
-					}
-					if execNoArg[sel.Value] {
+					definition, known := lookupSlashCommand(sel.Value)
+					if known && definition.Immediate {
 						a.palette.Hide()
 						a.layout()
 						return a.handleSlashCommand("/" + sel.Value)
@@ -396,7 +497,7 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 				a.layout()
 				return nil
 			}
-		case "up", "down", "ctrl+p", "ctrl+n", "tab":
+		case "up", "down", "ctrl+p", "ctrl+n", "tab", "shift+tab", "ctrl+tab", "pgup", "pgdown":
 			pal, cmd := a.palette.Update(m)
 			a.palette = pal
 			return cmd
@@ -491,6 +592,10 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 			case "tree":
 				a.focus = "input"
 			}
+			a.browsing = a.focus == "conversation"
+			a.conversation.SetBrowsing(a.browsing)
+			a.statusBar.SetBrowsing(a.browsing)
+			a.layout()
 			if a.focus == "input" {
 				return a.input.Focus()
 			}
@@ -556,26 +661,28 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 func (a *App) updatePalette() {
 	trigger := a.input.TriggerType()
 	filter := a.input.TriggerValue()
+	a.palette.SetQuery(filter)
 
 	var items []components.PaletteItem
 	switch trigger {
 	case "help", "command":
-		allCmds := []components.PaletteItem{
-			{Label: "model", Description: "Switch AI model", Value: "model", Icon: "🤖"},
-			{Label: "provider", Description: "Switch provider", Value: "provider", Icon: "🔌"},
-			{Label: "mode", Description: "Change approval mode", Value: "mode", Icon: "⚙️"},
-			{Label: "api-key", Description: "Set API key for active provider", Value: "api-key", Icon: "🔑"},
-			{Label: "base-url", Description: "Set base URL for active provider", Value: "base-url", Icon: "🌐"},
-			{Label: "provider-api-key", Description: "Set API key for a provider", Value: "provider-api-key", Icon: "🔐"},
-			{Label: "provider-base-url", Description: "Set base URL for a provider", Value: "provider-base-url", Icon: "🔗"},
-			{Label: "clear", Description: "Clear screen", Value: "clear", Icon: "🧹"},
-			{Label: "reset", Description: "Reset history", Value: "reset", Icon: "🔄"},
-			{Label: "sessions", Description: "Browse sessions", Value: "sessions", Icon: "📁"},
-			{Label: "diff", Description: "Toggle diff pane", Value: "diff", Icon: "🔍"},
-			{Label: "tree", Description: "Toggle file tree", Value: "tree", Icon: "🌳"},
-			{Label: "lsp", Description: "Toggle LSP pane", Value: "lsp", Icon: "📐"},
-			{Label: "stats", Description: "Show statistics", Value: "stats", Icon: "📈"},
-			{Label: "quit", Description: "Exit Automergent", Value: "quit", Icon: "🚪"},
+		allCmds := commandPaletteItems()
+		for i := range allCmds {
+			switch allCmds[i].Value {
+			case "cancel":
+				allCmds[i].Disabled = !a.thinking
+				if allCmds[i].Disabled {
+					allCmds[i].DisabledReason = "No active request"
+				}
+			case "review":
+				allCmds[i].Current = a.conversation.ReviewMode()
+			case "tree":
+				allCmds[i].Current = a.showFileTree
+			case "diff":
+				allCmds[i].Current = a.diffPane.Visible()
+			case "lsp":
+				allCmds[i].Current = a.lspPanel.Visible()
+			}
 		}
 		items = a.fuzzyFilter(allCmds, filter)
 
@@ -586,11 +693,13 @@ func (a *App) updatePalette() {
 				Label:       m.ID,
 				Description: fmt.Sprintf("Model (Limit: %d)", m.ContextLimit),
 				Value:       m.ID,
-				Icon:        "🤖",
+				Icon:        "󰊕",
+				Category:    "Models",
+				Current:     m.ID == a.cfg.Model,
 			})
 		}
 		if len(modelItems) == 0 && a.fetchingModels {
-			items = []components.PaletteItem{{Label: "Loading...", Description: "Fetching models from provider", Value: "", Icon: "⏳"}}
+			items = []components.PaletteItem{{Label: "Loading…", Description: "Fetching models from provider", Value: "", Icon: "󰔟", Category: "Models"}}
 		} else {
 			items = a.fuzzyFilter(modelItems, filter)
 		}
@@ -612,10 +721,17 @@ func (a *App) updatePalette() {
 				icon = "🔌"
 			}
 			providerItems = append(providerItems, components.PaletteItem{
-				Label: p, Description: desc, Value: p, Icon: icon,
+				Label: p, Description: desc, Value: p, Icon: icon, Category: "Providers", Current: p == a.cfg.Provider,
 			})
 		}
 		items = a.fuzzyFilter(providerItems, filter)
+
+	case "mode":
+		modeItems := []components.PaletteItem{
+			{Label: "edit", Description: "Allow edits with permission", Value: "edit", Icon: "󰏫", Category: "Modes", Current: a.cfg.Mode == "edit"},
+			{Label: "plan", Description: "Plan and inspect without edits", Value: "plan", Icon: "󰈙", Category: "Modes", Current: a.cfg.Mode == "plan"},
+		}
+		items = a.fuzzyFilter(modeItems, filter)
 
 	case "file":
 		var fileItems []components.PaletteItem
@@ -625,7 +741,8 @@ func (a *App) updatePalette() {
 					Label:       item.Name,
 					Description: item.Path,
 					Value:       item.Path,
-					Icon:        "📄",
+					Icon:        "󰈔",
+					Category:    "Files",
 				})
 			}
 		}
@@ -641,7 +758,7 @@ func (a *App) fuzzyFilter(items []components.PaletteItem, filter string) []compo
 	}
 	var targets []string
 	for _, item := range items {
-		targets = append(targets, item.Label)
+		targets = append(targets, item.Label+" "+item.SearchTerms)
 	}
 	matches := fuzzy.Find(filter, targets)
 	var filtered []components.PaletteItem
@@ -704,6 +821,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 				a.conversation.AddMessage("tool_result", truncateUIContent(r.Content, a.conversation.ReviewMode()), false)
 			}
 		}
+		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
 		a.statusBar.SetStatus("Thinking…")
 		return a.waitForAgentEvent()
 	case agent.EventStatus:
@@ -740,14 +858,19 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventDone:
 		a.thinking = false
 		a.spin.Stop()
-		a.conversation.FinalizeStreaming() // Re-render with markdown
-		a.layout()                         // Reclaim space from spinner
+		text, _ := ev.Payload.(string)
+		if a.streamedReply {
+			a.conversation.FinalizeStreamingWithContent(text)
+		} else {
+			a.conversation.FinalizeStreaming()
+		}
+		a.layout() // Reclaim space from spinner
 		a.statusBar.SetStatus("Ready")
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
 		a.header.SetTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
 		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
-		if text, ok := ev.Payload.(string); ok && strings.TrimSpace(text) != "" && !a.streamedReply {
+		if strings.TrimSpace(text) != "" && !a.streamedReply {
 			a.conversation.AddMessage("assistant", text, false)
 		}
 		return nil
@@ -855,11 +978,6 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 					name = "Git commit"
 				}
 
-				prompt := fmt.Sprintf("Allow %s?", name)
-				if ctx := extractToolContext(tc.Name, tc.Args); ctx != "" {
-					prompt = fmt.Sprintf("Allow %s: %s?", name, ctx)
-				}
-
 				// Special handling for file edits: show diff
 				// Special handling for file edits: show diff with inline confirmation
 				if tc.Name == "write_file" || tc.Name == "edit_file" || tc.Name == "create_file" {
@@ -894,7 +1012,9 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 					a.layout()
 				} else {
 					// Non-file tools use confirm component
-					a.confirm.Show(prompt)
+					permission := permissionInfoForTool(tc, name)
+					a.confirm.ShowPermission(permission)
+					a.statusBar.SetPermission(permission.Tool)
 					a.layout()
 					if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
 						wrapped := make(chan agent.ConfirmationResponse, 1)
@@ -937,6 +1057,12 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 	}
 	cmd := parts[0]
 	args := parts[1:]
+	if definition, ok := lookupSlashCommand(strings.TrimPrefix(cmd, "/")); ok {
+		cmd = "/" + definition.Name
+	}
+	if handled, command := a.handleWorkflowConfigCommand(cmd, args); handled {
+		return command
+	}
 	switch cmd {
 	case "/help":
 		a.showHelp = true
@@ -947,6 +1073,19 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		a.conversation.Clear()
 		a.sess.Messages = nil
 		a.statusBar.SetStatus("History reset")
+	case "/new":
+		if a.storage != nil && a.sess != nil && len(a.sess.Messages) > 0 {
+			_ = a.storage.Save(a.sess)
+		}
+		a.conversation.Clear()
+		a.sess = session.New()
+		a.sess.Provider, a.sess.Model = a.cfg.Provider, a.cfg.Model
+		a.ag.SetSession(a.sess)
+		a.statusBar.SetStatus("New session started")
+	case "/context":
+		a.stats.InputTokens = a.sess.TotalInputTokens
+		a.stats.OutputTokens = a.sess.TotalOutputTokens
+		a.conversation.AddMessage("system", fmt.Sprintf("Provider: %s\nModel: %s\nInput tokens: %d\nOutput tokens: %d", a.cfg.Provider, a.cfg.Model, a.sess.TotalInputTokens, a.sess.TotalOutputTokens), false)
 	case "/provider":
 		if len(args) == 0 {
 			a.conversation.AddMessage("system", fmt.Sprintf("Current provider: %s (model: %s)", a.cfg.Provider, a.cfg.Model), false)
@@ -1061,17 +1200,15 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		a.conversation.AddMessage("system", fmt.Sprintf("Base URL updated for %s", provider), false)
 		_ = a.persistProjectConfig()
 	case "/sessions":
-		if a.storage != nil {
-			sessions, err := a.storage.List()
-			if err != nil {
-				a.statusBar.SetStatus(fmt.Sprintf("Error listing sessions: %v", err))
-				return nil
+		a.showSessions()
+	case "/resume":
+		if len(args) > 0 {
+			if err := a.resumeSession(args[0]); err != nil {
+				a.statusBar.SetStatus("Unable to resume session: " + err.Error())
 			}
-			a.sessionBrowser.SetSessions(sessions)
 		} else {
-			a.sessionBrowser.SetSessions([]*session.Session{a.sess})
+			a.showSessions()
 		}
-		a.sessionBrowser.Show()
 	case "/diff":
 		a.diffPane.Toggle()
 		a.layout()
@@ -1081,6 +1218,49 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 	case "/lsp":
 		a.lspPanel.Toggle()
 		a.layout()
+	case "/review":
+		a.conversation.SetReviewMode(!a.conversation.ReviewMode())
+		a.statusBar.SetStatus(fmt.Sprintf("Review mode %s", map[bool]string{true: "enabled", false: "disabled"}[a.conversation.ReviewMode()]))
+	case "/cancel":
+		if a.thinking {
+			a.cancelActiveRun("Cancelled by user")
+		} else {
+			a.statusBar.SetStatus("No active request")
+		}
+	case "/search":
+		if len(args) == 0 {
+			a.conversation.AddMessage("assistant", "Usage: /search <query>", true)
+			return nil
+		}
+		a.conversation.AddMessage("system", a.searchWorkspace(strings.Join(args, " ")), false)
+	case "/run":
+		if len(args) == 0 {
+			a.conversation.AddMessage("assistant", "Usage: /run <command>", true)
+			return nil
+		}
+		return a.startAgent("Run this project command: " + strings.Join(args, " "))
+	case "/test":
+		request := "Run the project tests"
+		if len(args) > 0 {
+			request += " for " + strings.Join(args, " ")
+		}
+		return a.startAgent(request)
+	case "/build":
+		request := "Build the project"
+		if len(args) > 0 {
+			request += " with target " + strings.Join(args, " ")
+		}
+		return a.startAgent(request)
+	case "/export":
+		path := "conversation.md"
+		if len(args) > 0 {
+			path = args[0]
+		}
+		if err := a.exportConversation(path); err != nil {
+			a.conversation.AddMessage("assistant", fmt.Sprintf("Export failed: %v", err), true)
+			return nil
+		}
+		a.statusBar.SetStatus("Conversation exported to " + path)
 	case "/stats":
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
@@ -1107,16 +1287,19 @@ func (a *App) layout() {
 
 	headerH := lipgloss.Height(a.header.View())
 	statusH := lipgloss.Height(a.statusBar.View())
-	footerH := lipgloss.Height(a.input.View())
+	footerH := 0
+	if !a.browsing {
+		footerH = lipgloss.Height(a.input.View())
+	}
+	if a.confirm.Visible() {
+		footerH = lipgloss.Height(a.confirm.View())
+	}
 	if a.thinking {
 		footerH++
 	}
-	// Palette and confirmations render inline below the input.
-	if a.palette.Visible() {
+	// Palette and secondary confirmations render inline below the input.
+	if a.palette.Visible() && !a.confirm.Visible() && !a.browsing {
 		footerH += a.palette.Height()
-	}
-	if a.confirm.Visible() {
-		footerH += lipgloss.Height(a.confirm.View())
 	}
 	if a.coAuthorConfirm.Visible() {
 		footerH += lipgloss.Height(a.coAuthorConfirm.View())
@@ -1201,12 +1384,13 @@ func (a *App) View() tea.View {
 	if a.thinking {
 		footer = append(footer, "  "+a.spin.View())
 	}
-	footer = append(footer, a.input.View())
-	if a.palette.Visible() {
-		footer = append(footer, a.palette.View())
-	}
 	if a.confirm.Visible() {
 		footer = append(footer, a.confirm.View())
+	} else if !a.browsing {
+		footer = append(footer, a.input.View())
+	}
+	if a.palette.Visible() && !a.confirm.Visible() && !a.browsing {
+		footer = append(footer, a.palette.View())
 	}
 	if a.coAuthorConfirm.Visible() {
 		footer = append(footer, a.coAuthorConfirm.View())
@@ -1397,7 +1581,7 @@ func isTransientStatus(s string) bool {
 	return strings.HasPrefix(n, "running ")
 }
 
-func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string, showSessionPicker bool) error {
+func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string, showSessionPicker bool, projectApprovalPath string) error {
 	// Enter alternate screen immediately before TUI starts to prevent
 	// any flash of existing terminal content
 	fmt.Print("\x1b[?1049h") // Enter alt screen
@@ -1405,6 +1589,7 @@ func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *se
 	fmt.Print("\x1b[2J")     // Clear entire screen
 
 	app := NewApp(cfg, ag, sess, storage, initialPrompt, showSessionPicker)
+	app.requireProjectApproval(projectApprovalPath)
 	p := tea.NewProgram(app)
 	_, err := p.Run()
 
@@ -1447,6 +1632,59 @@ func (a *App) persistProjectConfig() error {
 	return a.cfg.Save()
 }
 
+func appendUniquePath(paths []string, path string) []string {
+	for _, existing := range paths {
+		if existing == path {
+			return paths
+		}
+	}
+	return append(paths, path)
+}
+
+func permissionInfoForTool(tc ai.ToolCall, name string) components.PermissionInfo {
+	info := components.PermissionInfo{
+		Icon:   "󰌑",
+		Tool:   name,
+		Action: "Requesting permission to use this tool",
+		Risk:   "May change workspace or execute external operations",
+	}
+	add := func(label, value string) {
+		if value == "" {
+			return
+		}
+		info.Fields = append(info.Fields, components.PermissionField{Label: label, Value: value})
+	}
+	str := func(key string) string {
+		value, _ := tc.Args[key].(string)
+		return value
+	}
+
+	switch tc.Name {
+	case "read_file", "view":
+		info.Icon, info.Action, info.Risk = "󰈔", "Read file contents", "Reads workspace data"
+		add("Path", str("path"))
+	case "list_directory":
+		info.Icon, info.Action, info.Risk = "󰉋", "Inspect directory structure", "Reads workspace metadata"
+		add("Path", str("path"))
+	case "run_shell_command", "run_command", "bash":
+		info.Icon, info.Action, info.Risk = "󰆍", "Execute shell command", "Runs a local process"
+		add("Command", str("command"))
+		add("Directory", str("working_directory"))
+	case "web_fetch", "web_search":
+		info.Icon, info.Action, info.Risk = "󰖟", "Access web resource", "Sends a network request"
+		add("URL", str("url"))
+		add("Query", str("query"))
+	case "git_commit":
+		info.Icon, info.Action, info.Risk = "󰊢", "Create git commit", "Changes repository history"
+		add("Message", str("message"))
+	default:
+		if ctx := extractToolContext(tc.Name, tc.Args); ctx != "" {
+			add("Context", ctx)
+		}
+	}
+	return info
+}
+
 func extractToolContext(name string, args map[string]any) string {
 	if args == nil {
 		return ""
@@ -1480,12 +1718,6 @@ func extractToolContext(name string, args map[string]any) string {
 		if path, ok := args["path"].(string); ok {
 			return "listing " + filepath.Base(path)
 		}
-	case "structure":
-		path, _ := args["path"].(string)
-		if path == "" {
-			path = "."
-		}
-		return "mapping " + path
 	case "run_shell_command", "run_command":
 		if cmd, ok := args["command"].(string); ok {
 			if len(cmd) > 40 {

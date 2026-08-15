@@ -12,10 +12,12 @@ import (
 
 // StatusBar renders the bottom status bar with a HUD look matching the header.
 type StatusBar struct {
-	styles    *themes.Styles
-	width     int
-	status    string
-	startTime time.Time
+	styles         *themes.Styles
+	width          int
+	status         string
+	startTime      time.Time
+	permissionTool string
+	browsing       bool
 }
 
 // NewStatusBar creates a new StatusBar.
@@ -32,6 +34,15 @@ func (s *StatusBar) SetWidth(w int) { s.width = w }
 
 // SetStatus updates the status message.
 func (s *StatusBar) SetStatus(msg string) { s.status = msg }
+
+func (s *StatusBar) SetPermission(tool string) {
+	s.permissionTool = tool
+	s.status = "Awaiting permission"
+}
+
+func (s *StatusBar) ClearPermission() { s.permissionTool = "" }
+
+func (s *StatusBar) SetBrowsing(enabled bool) { s.browsing = enabled }
 
 func (s *StatusBar) getStatusStyle() lipgloss.Style {
 	base := lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(s.styles.T.Background)
@@ -54,6 +65,32 @@ func (s *StatusBar) getStatusStyle() lipgloss.Style {
 func (s StatusBar) View() string {
 	if s.width <= 0 {
 		return ""
+	}
+	if s.permissionTool != "" {
+		left := lipgloss.NewStyle().Foreground(s.styles.T.Yellow).Bold(true).Render("AWAITING PERMISSION")
+		right := lipgloss.NewStyle().Foreground(s.styles.T.Subtext).Render(s.permissionTool + "  ·  y/n confirm")
+		gap := s.width - lipgloss.Width(left) - lipgloss.Width(right) - 4
+		if gap < 1 {
+			gap = 1
+		}
+		return lipgloss.NewStyle().
+			Background(s.styles.T.Background).
+			Padding(0, 2).
+			Width(s.width).
+			Border(lipgloss.NormalBorder(), true, false, false, false).
+			BorderForeground(s.styles.T.BorderNormal).
+			Render(left + strings.Repeat(" ", gap) + right)
+	}
+	if s.browsing {
+		left := lipgloss.NewStyle().Foreground(s.styles.T.Accent).Bold(true).Render("BROWSING CONVERSATION")
+		right := lipgloss.NewStyle().Foreground(s.styles.T.Subtext).Render("↑↓ scroll  ·  PgUp/PgDn  ·  Tab input")
+		gap := s.width - lipgloss.Width(left) - lipgloss.Width(right) - 4
+		if gap < 1 {
+			gap = 1
+		}
+		return lipgloss.NewStyle().Background(s.styles.T.Background).Padding(0, 2).Width(s.width).
+			Border(lipgloss.NormalBorder(), true, false, false, false).
+			BorderForeground(s.styles.T.BorderNormal).Render(left + strings.Repeat(" ", gap) + right)
 	}
 
 	// 1. Left Section: Status Badge

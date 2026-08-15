@@ -34,14 +34,16 @@ func NewInput(styles *themes.Styles) Input {
 
 	// Inline look: accent prompt, muted placeholder, no boxes or highlights.
 	st := ta.Styles()
+	st.Focused.Base = lipgloss.NewStyle().Foreground(styles.T.Text)
+	st.Blurred.Base = lipgloss.NewStyle().Foreground(styles.T.Text)
 	st.Focused.Prompt = lipgloss.NewStyle().Foreground(styles.T.Accent).Bold(true)
-	st.Blurred.Prompt = lipgloss.NewStyle().Foreground(styles.T.Muted)
+	st.Blurred.Prompt = lipgloss.NewStyle().Foreground(styles.T.Subtext)
 	st.Focused.Placeholder = lipgloss.NewStyle().Foreground(styles.T.Muted)
-	st.Blurred.Placeholder = lipgloss.NewStyle().Foreground(styles.T.Muted)
+	st.Blurred.Placeholder = lipgloss.NewStyle().Foreground(styles.T.Subtext)
 	st.Focused.Text = lipgloss.NewStyle().Foreground(styles.T.Text)
 	st.Blurred.Text = lipgloss.NewStyle().Foreground(styles.T.Text)
-	st.Focused.CursorLine = lipgloss.NewStyle()
-	st.Blurred.CursorLine = lipgloss.NewStyle()
+	st.Focused.CursorLine = lipgloss.NewStyle().Foreground(styles.T.Text)
+	st.Blurred.CursorLine = lipgloss.NewStyle().Foreground(styles.T.Text)
 	ta.SetStyles(st)
 
 	ta.Focus()
@@ -119,6 +121,9 @@ func (i Input) TriggerType() string {
 		if strings.HasPrefix(val, "/provider") {
 			return "provider"
 		}
+		if strings.HasPrefix(val, "/mode") {
+			return "mode"
+		}
 		return "command"
 	}
 	if strings.Contains(val, "@") {
@@ -148,6 +153,9 @@ func (i Input) TriggerValue() string {
 	case "provider":
 		v := strings.TrimPrefix(val, "/provider")
 		return strings.TrimSpace(v)
+	case "mode":
+		v := strings.TrimPrefix(val, "/mode")
+		return strings.TrimSpace(v)
 	case "file":
 		idx := strings.LastIndex(val, "@")
 		if idx != -1 {
@@ -168,6 +176,8 @@ func (i *Input) InsertValue(v string) {
 		i.ta.SetValue("/model " + v + " ")
 	case "provider":
 		i.ta.SetValue("/provider " + v + " ")
+	case "mode":
+		i.ta.SetValue("/mode " + v + " ")
 	case "file":
 		idx := strings.LastIndex(val, "@")
 		if idx != -1 {

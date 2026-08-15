@@ -303,6 +303,9 @@ func (e *Engine) execute(ctx context.Context, plan *ExecutionPlan) error {
 		for _, task := range plan.Tasks {
 			if task.Status != TaskStatusComplete {
 				task.Status = TaskStatusFailed
+				if task.Result == nil {
+					task.Result = &TaskResult{}
+				}
 				task.Result.Success = false
 				task.Result.Error = err
 			}
@@ -369,6 +372,12 @@ func (e *Engine) GetState() *ExecutionState {
 	return e.currentState
 }
 
+// GetExecutor returns the internal executor for testing/advanced use.
+// Executor is immutable after construction, so no lock needed.
+func (e *Engine) GetExecutor() *Executor {
+	return e.executor
+}
+
 // RegisterStrategy adds a custom strategy for a task type.
 func (e *Engine) RegisterStrategy(taskType TaskType, strategy Strategy) {
 	e.mu.Lock()
@@ -423,8 +432,12 @@ func (e *Engine) determineScope(request string) Scope {
 		return ScopeProjectWide
 	}
 
-	// Multi-file indicators
-	if containsAny(req, []string{"multiple files", "across files", "several", "files"}) {
+	// Multi-file indicators - use word boundary aware matching
+	if containsAny(req, []string{"multiple files", "across files", "several files"}) {
+		return ScopeMultiFile
+	}
+	// Check for "files" as a whole word
+	if strings.Contains(req, " files ") || strings.HasPrefix(req, "files ") || strings.HasSuffix(req, " files") {
 		return ScopeMultiFile
 	}
 
@@ -1971,7 +1984,7 @@ func extractIntent(request string) string {
 	if len(request) <= 100 {
 		return request
 	}
-	return strings.TrimSpace(request[:100])
+	return strings.TrimSpace(request[:97]) + "..."
 }
 
 func convertPlan(plan *planningPkg.Plan, analysis *TaskAnalysis) *ExecutionPlan {

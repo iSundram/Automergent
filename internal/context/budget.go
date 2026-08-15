@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // ModelTokenLimits defines context limits for different model tiers.
@@ -141,7 +142,7 @@ func (tb *TokenBudget) AvailableForContext() int {
 	tb.mu.RLock()
 	defer tb.mu.RUnlock()
 
-	used := tb.SystemPromptUsed + tb.ToolDefinitionUsed + tb.ConversationUsed
+	used := tb.SystemPromptUsed + tb.ToolDefinitionUsed + tb.ConversationUsed + tb.ContextFilesUsed
 	available := tb.TotalBudget - used - tb.OutputReserve - tb.SafetyMargin
 
 	return max(0, available)
@@ -194,7 +195,7 @@ func (tb *TokenBudget) UseContextFiles(tokens int) {
 	}
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
-	tb.ContextFilesUsed = tokens
+	tb.ContextFilesUsed = max(0, tokens)
 }
 
 // Summary returns a summary of current budget usage.
@@ -250,6 +251,52 @@ type ContextItem struct {
 	Freshness  float64 `json:"freshness,omitempty"`
 	Dependency float64 `json:"dependency,omitempty"`
 	Staleness  string  `json:"staleness,omitempty"`
+
+	// Context state tracking
+	State        ContextState    `json:"state"`
+	Summary      string          `json:"summary,omitempty"`
+	IgnoredAt    *time.Time      `json:"ignored_at,omitempty"`
+	ResumedAt    *time.Time      `json:"resumed_at,omitempty"`
+	IgnoreReason string          `json:"ignore_reason,omitempty"`
+	PriorityLevel ContextPriority `json:"priority_level"`
+}
+
+// ContextState tracks whether context is active, ignored, or resumed.
+type ContextState int
+
+const (
+	ContextActive   ContextState = iota
+	ContextIgnored
+	ContextResumed
+)
+
+// ContextPriority defines lazy-loading priority tiers.
+type ContextPriority int
+
+const (
+	PriorityCritical ContextPriority = iota
+	PriorityHigh
+	PriorityMedium
+	PriorityLow
+	PriorityLazy
+)
+
+// String returns the human-readable name of a context priority.
+func (cp ContextPriority) String() string {
+	switch cp {
+	case PriorityCritical:
+		return "critical"
+	case PriorityHigh:
+		return "high"
+	case PriorityMedium:
+		return "medium"
+	case PriorityLow:
+		return "low"
+	case PriorityLazy:
+		return "lazy"
+	default:
+		return "unknown"
+	}
 }
 
 // TruncationStrategy defines how to handle context overflow.

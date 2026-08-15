@@ -11,6 +11,7 @@ import (
 type Executor struct {
 	maxWorkers int
 	mu         sync.RWMutex
+	runner     TaskRunner
 
 	// Hooks for integration with external systems
 	onTaskStart func(task *Task)
@@ -36,6 +37,14 @@ func NewExecutor(maxWorkers int) *Executor {
 	return &Executor{
 		maxWorkers: maxWorkers,
 	}
+}
+
+// SetRunner configures the task runner. If not set, execution will fail with
+// "no task runner configured" error.
+func (e *Executor) SetRunner(runner TaskRunner) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.runner = runner
 }
 
 // Execute runs the execution plan with parallelization where possible.
@@ -234,34 +243,27 @@ func (e *Executor) executeTask(ctx context.Context, task *Task, state *Execution
 	return fmt.Errorf("task %s failed after %d attempts: %w", task.ID, maxAttempts, lastErr)
 }
 
-// performTask executes the actual task logic.
+// performTask executes the actual task logic using the configured runner.
 func (e *Executor) performTask(ctx context.Context, task *Task) (*TaskResult, error) {
 	startTime := time.Now()
 
-	// Simulate task execution
-	// In real implementation, this would:
-	// 1. Call appropriate tools based on task.Tools
-	// 2. Execute task-specific logic based on task.Type
-	// 3. Verify results using task.Verification checkpoints
+	e.mu.RLock()
+	runner := e.runner
+	e.mu.RUnlock()
 
-	result := &TaskResult{
-		Success:      true,
-		Output:       fmt.Sprintf("Task %s executed successfully", task.Description),
-		Error:        nil,
-		Attempts:     1,
-		Duration:     time.Since(startTime),
-		ToolsUsed:    task.Tools,
-		FilesChanged: []string{},
-		CompletedAt:  time.Now(),
+	if runner == nil {
+		return nil, fmt.Errorf("no task runner configured")
 	}
 
-	// Run verification checkpoints
-	for _, checkpoint := range task.Verification {
-		if checkpoint.Required {
-			// Simulate checkpoint validation
-			passed := true
-			checkpoint.Passed = &passed
-		}
+	result, err := runner.Run(ctx, task)
+	if err != nil {
+		return nil, err
+	}
+
+	// Ensure result has timing info
+	if result != nil {
+		result.Duration = time.Since(startTime)
+		result.CompletedAt = time.Now()
 	}
 
 	return result, nil

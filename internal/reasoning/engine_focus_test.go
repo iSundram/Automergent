@@ -14,6 +14,7 @@ func TestExtractIntent_TruncatesCleanly(t *testing.T) {
 
 func TestEngineProcessProducesPlan(t *testing.T) {
 	e := NewEngine(nil)
+	e.GetExecutor().SetRunner(&mockTaskRunner{})
 	plan, err := e.Process(context.Background(), "Refactor entire project structure")
 	if err != nil {
 		t.Fatalf("Process() error = %v", err)

@@ -88,8 +88,8 @@ func (t *GlobTool) Execute(_ context.Context, args map[string]any) (tools.Result
 			return err
 		}
 
-		// Skip hidden files/dirs unless requested
-		if !includeHidden && strings.HasPrefix(d.Name(), ".") {
+		// Skip hidden files/dirs unless requested (never skip the root itself)
+		if !includeHidden && path != root && strings.HasPrefix(d.Name(), ".") {
 			if d.IsDir() {
 				return filepath.SkipDir
 			}
@@ -114,7 +114,7 @@ func (t *GlobTool) Execute(_ context.Context, args map[string]any) (tools.Result
 
 		// Match pattern
 		var matched bool
-		if hasDoublestar {
+		if hasDoublestar || strings.Contains(pattern, "/") {
 			matched = matchDoublestar(pattern, relPath)
 		} else {
 			matched, _ = filepath.Match(pattern, filepath.Base(relPath))
@@ -170,8 +170,11 @@ func doMatch(pattern, path string) bool {
 }
 
 func doMatchDepth(pattern, path string, depth int) bool {
+	return doMatchDepthEx(pattern, path, depth, false)
+}
+
+func doMatchDepthEx(pattern, path string, depth int, starCrossesSlash bool) bool {
 	if depth > maxGlobDepth {
-		// prevent pathological recursion/loops
 		return false
 	}
 	for len(pattern) > 0 {
@@ -182,12 +185,12 @@ func doMatchDepth(pattern, path string, depth int) bool {
 			pattern = strings.TrimPrefix(pattern, "/")
 
 			if pattern == "" {
-				return true // ** at end matches everything
+				return true
 			}
 
 			// Try matching rest of pattern at every position
 			for i := 0; i <= len(path); i++ {
-				if doMatchDepth(pattern, path[i:], depth+1) {
+				if doMatchDepthEx(pattern, path[i:], depth+1, true) {
 					return true
 				}
 				// Skip to next segment
@@ -200,18 +203,21 @@ func doMatchDepth(pattern, path string, depth int) bool {
 			return false
 
 		case strings.HasPrefix(pattern, "*"):
-			// * matches any chars except /
+			// * matches any chars, optionally across / if starCrossesSlash
 			pattern = pattern[1:]
 			if pattern == "" {
+				if starCrossesSlash {
+					return true
+				}
 				return !strings.Contains(path, "/")
 			}
 
 			// Find next literal char in pattern
 			for i := 0; i <= len(path); i++ {
-				if i > 0 && path[i-1] == '/' {
-					return false // * can't cross /
+				if !starCrossesSlash && i > 0 && path[i-1] == '/' {
+					break // * can't cross /
 				}
-				if doMatchDepth(pattern, path[i:], depth+1) {
+				if doMatchDepthEx(pattern, path[i:], depth+1, starCrossesSlash) {
 					return true
 				}
 			}
@@ -235,7 +241,7 @@ func doMatchDepth(pattern, path string, depth int) bool {
 			rest := pattern[end+1:]
 
 			for _, alt := range alts {
-				if doMatchDepth(alt+rest, path, depth+1) {
+				if doMatchDepthEx(alt+rest, path, depth+1, starCrossesSlash) {
 					return true
 				}
 			}

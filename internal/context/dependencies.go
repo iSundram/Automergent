@@ -525,10 +525,11 @@ func extractQuotedString(s string) string {
 
 // ContextSelector selects relevant context files.
 type ContextSelector struct {
-	graph    *DependencyGraph
-	ranker   *Ranker
-	budget   *TokenBudget
-	detector *StalenessDetector
+	graph          *DependencyGraph
+	ranker         *Ranker
+	budget         *TokenBudget
+	detector       *StalenessDetector
+	fileProvider   func(context.Context, string) (string, bool)
 }
 
 // ContextSignal captures the signals used to select and rank a file.
@@ -552,6 +553,11 @@ func NewContextSelector(graph *DependencyGraph, ranker *Ranker, budget *TokenBud
 	}
 }
 
+// SetFileProvider sets a function to fetch file content (e.g., from Manager cache).
+func (cs *ContextSelector) SetFileProvider(fn func(context.Context, string) (string, bool)) {
+	cs.fileProvider = fn
+}
+
 // SelectContext selects the most relevant context files.
 func (cs *ContextSelector) SelectContext(ctx context.Context, intent string, activeFiles []string, tokenBudget int, includeDeps bool) ([]ContextItem, []ContextSignal, error) {
 	// 1. Start with active files and optionally traverse dependencies.
@@ -565,16 +571,27 @@ func (cs *ContextSelector) SelectContext(ctx context.Context, intent string, act
 	var fileContexts []FileContext
 	signals := make(map[string]ContextSignal, len(targetFiles))
 	for _, path := range targetFiles {
-		content, err := os.ReadFile(path)
-		if err != nil {
-			continue
+		var content string
+		if cs.fileProvider != nil {
+			var ok bool
+			content, ok = cs.fileProvider(ctx, path)
+			if !ok {
+				continue
+			}
+		} else {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				continue
+			}
+			content = string(data)
 		}
 
 		fc := FileContext{
 			Path:         path,
-			Content:      string(content),
+			Content:      content,
 			Dependencies: cs.graph.GetDependencies(path),
 			Dependents:   cs.graph.GetDependents(path),
+			Symbols:      extractSymbols(content, filepath.Ext(path)),
 		}
 		required := containsString(activeFiles, path)
 		fc.FreshnessState = "fresh"
@@ -660,6 +677,45 @@ func (cs *ContextSelector) SelectContext(ctx context.Context, intent string, act
 		return nil, nil, err
 	}
 	return items, valuesSignals(signals), nil
+}
+
+// SelectContextWithPriority selects context files with lazy-loading support.
+func (cs *ContextSelector) SelectContextWithPriority(
+	ctx context.Context,
+	intent string,
+	activeFiles []string,
+	tokenBudget int,
+	includeDeps bool,
+	maxLazyLevel ContextPriority,
+) ([]ContextItem, []ContextSignal, error) {
+	items, signals, err := cs.SelectContext(ctx, intent, activeFiles, tokenBudget, includeDeps)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	for i := range items {
+		item := &items[i]
+		if item.Required {
+			item.PriorityLevel = PriorityCritical
+		} else if item.Priority > 0.7 {
+			item.PriorityLevel = PriorityHigh
+		} else if item.Priority > 0.4 {
+			item.PriorityLevel = PriorityMedium
+		} else if item.Priority > 0.2 {
+			item.PriorityLevel = PriorityLow
+		} else {
+			item.PriorityLevel = PriorityLazy
+		}
+	}
+
+	var filtered []ContextItem
+	for _, item := range items {
+		if item.PriorityLevel <= maxLazyLevel {
+			filtered = append(filtered, item)
+		}
+	}
+
+	return filtered, signals, nil
 }
 
 // SelectMinimalContext selects the minimal sufficient context.

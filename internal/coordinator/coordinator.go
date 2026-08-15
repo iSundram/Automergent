@@ -11,15 +11,73 @@ import (
 	"github.com/google/uuid"
 )
 
+// rateLimiter implements a simple token-bucket rate limiter.
+type rateLimiter struct {
+	tokens chan struct{}
+	stop   chan struct{}
+}
+
+func newRateLimiter(ratePerMinute int) *rateLimiter {
+	if ratePerMinute <= 0 {
+		return nil
+	}
+	rl := &rateLimiter{
+		tokens: make(chan struct{}, ratePerMinute),
+		stop:   make(chan struct{}),
+	}
+	// Fill the bucket initially.
+	for i := 0; i < ratePerMinute; i++ {
+		rl.tokens <- struct{}{}
+	}
+	// Replenish one token per (60/ratePerMinute) seconds.
+	interval := 60 * time.Second / time.Duration(ratePerMinute)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-rl.stop:
+				return
+			case <-ticker.C:
+				select {
+				case rl.tokens <- struct{}{}:
+				default:
+					// Bucket full, discard token.
+				}
+			}
+		}
+	}()
+	return rl
+}
+
+func (rl *rateLimiter) wait(ctx context.Context) error {
+	if rl == nil {
+		return nil
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-rl.tokens:
+		return nil
+	}
+}
+
+func (rl *rateLimiter) stop_() {
+	if rl != nil {
+		close(rl.stop)
+	}
+}
+
 // Engine is the main coordinator implementation.
 type Engine struct {
 	config    *CoordinatorConfig
 	executor  AgentExecutor
 	workers   map[string]*Worker
 	tasks     map[string]*Task
-	taskQueue *taskQueue
+	queues    *roleQueues
 	events    chan CoordinatorEvent
 	metrics   *CoordinatorMetrics
+	rateLimit *rateLimiter
 
 	workerWG sync.WaitGroup
 	taskWG   sync.WaitGroup
@@ -41,9 +99,10 @@ func NewEngine(config *CoordinatorConfig, executor AgentExecutor) *Engine {
 		executor:  executor,
 		workers:   make(map[string]*Worker),
 		tasks:     make(map[string]*Task),
-		taskQueue: newTaskQueue(),
+		queues:    newRoleQueues(),
 		events:    make(chan CoordinatorEvent, 1024),
 		metrics:   &CoordinatorMetrics{},
+		rateLimit: newRateLimiter(config.ResourceLimits.RateLimitPerMinute),
 	}
 }
 
@@ -76,6 +135,11 @@ func (e *Engine) Start(ctx context.Context) error {
 		go e.workStealingLoop()
 	}
 
+	// Start auto-scaling if max workers is configured
+	if e.config.MaxWorkers > 0 {
+		go e.autoScaleLoop()
+	}
+
 	return nil
 }
 
@@ -87,6 +151,9 @@ func (e *Engine) Stop(ctx context.Context) error {
 
 	e.running.Store(false)
 	e.cancel()
+
+	// Stop rate limiter
+	e.rateLimit.stop_()
 
 	// Signal all workers to stop
 	e.mu.Lock()
@@ -137,6 +204,12 @@ func (e *Engine) Submit(task *Task) error {
 	if task.Metadata == nil {
 		task.Metadata = make(map[string]any)
 	}
+	if task.completionCh == nil {
+		task.completionCh = make(chan struct{})
+	}
+	if task.ctx == nil {
+		task.ctx, task.cancel = context.WithCancel(e.ctx)
+	}
 
 	e.mu.Lock()
 	e.tasks[task.ID] = task
@@ -151,7 +224,7 @@ func (e *Engine) Submit(task *Task) error {
 	}
 
 	task.Status = TaskStatusQueued
-	e.taskQueue.Push(task)
+	e.queues.Push(task)
 	e.emit(EventTaskQueued, task.ID, "", task)
 
 	return nil
@@ -167,7 +240,7 @@ func (e *Engine) SubmitBatch(tasks []*Task) error {
 	return nil
 }
 
-// Cancel cancels a task.
+// Cancel cancels a task and signals its context.
 func (e *Engine) Cancel(taskID string) error {
 	e.mu.RLock()
 	task, ok := e.tasks[taskID]
@@ -178,9 +251,24 @@ func (e *Engine) Cancel(taskID string) error {
 	}
 
 	task.mu.Lock()
+	defer task.mu.Unlock()
+
+	if task.Status == TaskStatusCompleted || task.Status == TaskStatusFailed || task.Status == TaskStatusCancelled {
+		return nil // Already finalized.
+	}
+
 	task.Status = TaskStatusCancelled
 	task.CompletedAt = time.Now()
-	task.mu.Unlock()
+
+	// Cancel the task's context to preempt any in-progress executor call.
+	if task.cancel != nil {
+		task.cancel()
+	}
+
+	// Signal waiters.
+	if task.completionCh != nil {
+		close(task.completionCh)
+	}
 
 	return nil
 }
@@ -218,9 +306,8 @@ func (e *Engine) ListTasks(filter TaskFilter) []*Task {
 
 // ScaleWorkers adjusts the number of workers for a role.
 func (e *Engine) ScaleWorkers(role AgentRole, count int) error {
+	// Phase 1: under lock, count workers and spawn new ones.
 	e.mu.Lock()
-	defer e.mu.Unlock()
-
 	currentCount := 0
 	var roleWorkers []*Worker
 	for _, w := range e.workers {
@@ -231,14 +318,18 @@ func (e *Engine) ScaleWorkers(role AgentRole, count int) error {
 	}
 
 	if count > currentCount {
-		// Scale up
 		for i := 0; i < count-currentCount; i++ {
 			if err := e.spawnWorkerLocked(role); err != nil {
+				e.mu.Unlock()
 				return err
 			}
 		}
-	} else if count < currentCount {
-		// Scale down
+	}
+	e.config.WorkersPerRole[role] = count
+	e.mu.Unlock()
+
+	// Phase 2: without holding e.mu, signal excess workers to stop.
+	if count < currentCount {
 		toRemove := currentCount - count
 		for i := 0; i < toRemove && i < len(roleWorkers); i++ {
 			w := roleWorkers[i]
@@ -248,7 +339,6 @@ func (e *Engine) ScaleWorkers(role AgentRole, count int) error {
 		}
 	}
 
-	e.config.WorkersPerRole[role] = count
 	return nil
 }
 
@@ -280,14 +370,27 @@ func (e *Engine) ListWorkers() []*Worker {
 func (e *Engine) Execute(ctx context.Context, plan *ExecutionPlan) (*SynthesisResult, error) {
 	var allResults []*TaskResult
 
+	// Submit all tasks from the plan to the coordinator
+	e.emit(EventTaskQueued, "", "", fmt.Sprintf("Submitting %d tasks", len(plan.Tasks)))
+	for _, task := range plan.Tasks {
+		if err := e.Submit(task); err != nil {
+			return nil, fmt.Errorf("failed to submit task %s: %w", task.ID, err)
+		}
+	}
+
 	// Execute phases in order
+	e.emit(EventTaskQueued, "", "", fmt.Sprintf("Executing %d phases", len(plan.Phases)))
 	for _, phase := range plan.Phases {
+		e.emit(EventPhaseStart, "", "", phase.Name)
+
 		var phaseTasks []*Task
 		for _, taskID := range phase.TaskIDs {
 			if task, err := e.GetTask(taskID); err == nil {
 				phaseTasks = append(phaseTasks, task)
 			}
 		}
+
+		e.emit(EventTaskQueued, "", "", fmt.Sprintf("Phase %s: %d tasks (parallel=%v)", phase.Name, len(phaseTasks), phase.Parallel))
 
 		if phase.Parallel {
 			results, err := e.ExecuteParallel(ctx, phaseTasks)
@@ -310,6 +413,8 @@ func (e *Engine) Execute(ctx context.Context, plan *ExecutionPlan) (*SynthesisRe
 				}
 			}
 		}
+
+		e.emit(EventPhaseComplete, "", "", phase.Name)
 	}
 
 	return e.Synthesize(ctx, allResults)
@@ -342,11 +447,15 @@ func (e *Engine) ExecuteParallel(ctx context.Context, tasks []*Task) ([]*TaskRes
 
 	wg.Wait()
 
-	// Check for errors
+	// Collect all errors, not just the first.
+	var allErrors []error
 	for _, err := range errors {
 		if err != nil {
-			return nil, err
+			allErrors = append(allErrors, err)
 		}
+	}
+	if len(allErrors) > 0 {
+		return nil, fmt.Errorf("parallel execution failed (%d/%d tasks): %v", len(allErrors), len(tasks), allErrors)
 	}
 
 	// Filter nil results
@@ -414,24 +523,8 @@ func (e *Engine) ResolveConflicts(ctx context.Context, conflicts []*Conflict) ([
 	for _, conflict := range conflicts {
 		e.emit(EventConflict, "", "", conflict)
 
-		resolution := &ConflictResolution{
-			Strategy:   ResolutionByQuality,
-			ResolvedAt: time.Now(),
-		}
-
-		// Find best option by quality
-		var bestOption *ConflictOption
-		for i := range conflict.Options {
-			opt := &conflict.Options[i]
-			if bestOption == nil || opt.Quality > bestOption.Quality {
-				bestOption = opt
-			}
-		}
-
-		if bestOption != nil {
-			resolution.ChosenOption = bestOption
-			resolution.Reasoning = fmt.Sprintf("Selected based on quality score %.2f", bestOption.Quality)
-		}
+		resolution := e.resolveConflict(conflict)
+		resolution.ResolvedAt = time.Now()
 
 		conflict.Resolution = resolution
 		resolutions = append(resolutions, resolution)
@@ -445,6 +538,127 @@ func (e *Engine) ResolveConflicts(ctx context.Context, conflicts []*Conflict) ([
 	return resolutions, nil
 }
 
+func (e *Engine) resolveConflict(conflict *Conflict) *ConflictResolution {
+	if len(conflict.Options) == 0 {
+		return &ConflictResolution{Strategy: ResolutionByQuality}
+	}
+
+	// Determine strategy from conflict type or default to quality.
+	strategy := e.strategyForConflict(conflict)
+
+	switch strategy {
+	case ResolutionByConsensus:
+		return e.resolveByConsensus(conflict)
+	case ResolutionByRecency:
+		return e.resolveByRecency(conflict)
+	case ResolutionByPriority:
+		return e.resolveByPriority(conflict)
+	default:
+		return e.resolveByQuality(conflict)
+	}
+}
+
+func (e *Engine) strategyForConflict(conflict *Conflict) ResolutionStrategy {
+	switch conflict.Type {
+	case ConflictTypeCodeStyle:
+		return ResolutionByConsensus
+	case ConflictTypeArchitecture:
+		return ResolutionByPriority
+	case ConflictTypeImplementation:
+		return ResolutionByQuality
+	case ConflictTypeNaming:
+		return ResolutionByConsensus
+	case ConflictTypeTest:
+		return ResolutionByQuality
+	default:
+		return ResolutionByQuality
+	}
+}
+
+func (e *Engine) resolveByQuality(conflict *Conflict) *ConflictResolution {
+	var best *ConflictOption
+	for i := range conflict.Options {
+		opt := &conflict.Options[i]
+		if best == nil || opt.Quality > best.Quality {
+			best = opt
+		}
+	}
+	return &ConflictResolution{
+		Strategy:     ResolutionByQuality,
+		ChosenOption: best,
+		Reasoning:    fmt.Sprintf("Selected highest quality option (%.2f)", best.Quality),
+	}
+}
+
+func (e *Engine) resolveByConsensus(conflict *Conflict) *ConflictResolution {
+	// Count how many tasks produced each unique content.
+	contentCounts := make(map[string][]*ConflictOption)
+	for i := range conflict.Options {
+		opt := &conflict.Options[i]
+		contentCounts[opt.Content] = append(contentCounts[opt.Content], opt)
+	}
+
+	// Pick the content with the most votes, then highest quality within that group.
+	var bestContent string
+	var bestCount int
+	for content, opts := range contentCounts {
+		if len(opts) > bestCount || (len(opts) == bestCount && bestContent == "") {
+			bestCount = len(opts)
+			bestContent = content
+		}
+	}
+
+	// Pick highest quality option among consensus group.
+	var best *ConflictOption
+	for _, opt := range contentCounts[bestContent] {
+		if best == nil || opt.Quality > best.Quality {
+			best = opt
+		}
+	}
+
+	return &ConflictResolution{
+		Strategy:     ResolutionByConsensus,
+		ChosenOption: best,
+		Reasoning:    fmt.Sprintf("Consensus: %d/%d tasks agree", bestCount, len(conflict.Options)),
+	}
+}
+
+func (e *Engine) resolveByRecency(conflict *Conflict) *ConflictResolution {
+	// Pick the most recently completed task's result.
+	// Since we don't track per-option timestamps, fall back to quality.
+	return e.resolveByQuality(conflict)
+}
+
+func (e *Engine) resolveByPriority(conflict *Conflict) *ConflictResolution {
+	// Pick the option from the highest-priority task.
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	var best *ConflictOption
+	var bestPriority TaskPriority
+	for i := range conflict.Options {
+		opt := &conflict.Options[i]
+		task, ok := e.tasks[opt.TaskID]
+		if !ok {
+			continue
+		}
+		if best == nil || task.Priority > bestPriority {
+			best = opt
+			bestPriority = task.Priority
+		}
+	}
+
+	if best == nil {
+		return e.resolveByQuality(conflict)
+	}
+
+	return &ConflictResolution{
+		Strategy:     ResolutionByPriority,
+		ChosenOption: best,
+		Reasoning:    fmt.Sprintf("Selected from highest priority task (priority=%d)", bestPriority),
+	}
+}
+
 // Events returns the event channel.
 func (e *Engine) Events() <-chan CoordinatorEvent {
 	return e.events
@@ -452,18 +666,16 @@ func (e *Engine) Events() <-chan CoordinatorEvent {
 
 // Metrics returns current coordinator metrics.
 func (e *Engine) Metrics() *CoordinatorMetrics {
-	e.metrics.mu.RLock()
-	defer e.metrics.mu.RUnlock()
-
-	// Count workers and tasks
 	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	// Count workers and tasks. Per-task/per-worker locks are redundant here
+	// because e.mu.RLock prevents the maps from being modified.
 	activeWorkers := 0
 	for _, w := range e.workers {
-		w.mu.RLock()
 		if w.Status == WorkerStatusBusy {
 			activeWorkers++
 		}
-		w.mu.RUnlock()
 	}
 
 	pendingTasks := 0
@@ -471,7 +683,6 @@ func (e *Engine) Metrics() *CoordinatorMetrics {
 	completedTasks := 0
 	failedTasks := 0
 	for _, t := range e.tasks {
-		t.mu.RLock()
 		switch t.Status {
 		case TaskStatusPending, TaskStatusQueued:
 			pendingTasks++
@@ -482,9 +693,10 @@ func (e *Engine) Metrics() *CoordinatorMetrics {
 		case TaskStatusFailed:
 			failedTasks++
 		}
-		t.mu.RUnlock()
 	}
-	e.mu.RUnlock()
+
+	e.metrics.mu.RLock()
+	defer e.metrics.mu.RUnlock()
 
 	return &CoordinatorMetrics{
 		ActiveWorkers:   activeWorkers,
@@ -509,6 +721,8 @@ func (e *Engine) spawnWorker(role AgentRole) error {
 	return e.spawnWorkerLocked(role)
 }
 
+// spawnWorkerLocked creates a new worker for the given role.
+// Caller must hold e.mu write lock.
 func (e *Engine) spawnWorkerLocked(role AgentRole) error {
 	workerID := fmt.Sprintf("%s-%s", role, uuid.New().String()[:8])
 
@@ -561,6 +775,8 @@ func (e *Engine) workerLoop(worker *Worker) {
 			continue
 		}
 
+		e.emit(EventTaskQueued, task.ID, worker.ID, fmt.Sprintf("Worker %s picked up task %s", worker.Role, task.ID))
+
 		// Execute the task
 		worker.mu.Lock()
 		worker.Status = WorkerStatusBusy
@@ -575,8 +791,8 @@ func (e *Engine) workerLoop(worker *Worker) {
 
 		e.emit(EventTaskStarted, task.ID, worker.ID, task)
 
-		// Execute with timeout
-		ctx, cancel := context.WithTimeout(e.ctx, task.Timeout)
+		// Execute with task-scoped context (supports preemption via Cancel).
+		ctx, cancel := context.WithTimeout(task.ctx, task.Timeout)
 		result := e.executeTask(ctx, worker, task)
 		cancel()
 
@@ -584,21 +800,28 @@ func (e *Engine) workerLoop(worker *Worker) {
 		task.mu.Lock()
 		task.Result = result
 		task.CompletedAt = time.Now()
+		taskFinalized := false
 
 		if result.Success {
 			task.Status = TaskStatusCompleted
+			taskFinalized = true
 			e.emit(EventTaskCompleted, task.ID, worker.ID, result)
 		} else {
 			if task.Retries < task.MaxRetries {
 				task.Retries++
 				task.Status = TaskStatusRetrying
 				e.emit(EventTaskRetrying, task.ID, worker.ID, task.Retries)
-				// Re-queue the task
-				e.taskQueue.Push(task)
+				// Re-queue the task into the appropriate role queue.
+				e.queues.Push(task)
 			} else {
 				task.Status = TaskStatusFailed
+				taskFinalized = true
 				e.emit(EventTaskFailed, task.ID, worker.ID, result.Errors)
 			}
+		}
+		// Signal waiters that the task is done (completed or permanently failed).
+		if taskFinalized && task.completionCh != nil {
+			close(task.completionCh)
 		}
 		task.mu.Unlock()
 
@@ -626,6 +849,17 @@ func (e *Engine) workerLoop(worker *Worker) {
 
 func (e *Engine) executeTask(ctx context.Context, worker *Worker, task *Task) *TaskResult {
 	startTime := time.Now()
+
+	// Respect rate limit before making executor API calls.
+	if err := e.rateLimit.wait(ctx); err != nil {
+		return &TaskResult{
+			TaskID:   task.ID,
+			WorkerID: worker.ID,
+			Success:  false,
+			Errors:   []string{fmt.Sprintf("rate limited: %v", err)},
+			Duration: time.Since(startTime),
+		}
+	}
 
 	if e.executor == nil {
 		return &TaskResult{
@@ -661,27 +895,36 @@ func (e *Engine) executeTask(ctx context.Context, worker *Worker, task *Task) *T
 
 func (e *Engine) getNextTask(role AgentRole) *Task {
 	for {
-		task := e.taskQueue.Pop()
+		// Peek at the highest-priority task for this role without removing it.
+		task := e.queues.Peek(role)
 		if task == nil {
 			return nil
 		}
 
 		task.mu.RLock()
 		if task.Status == TaskStatusCancelled {
+			// Remove cancelled task and try next.
 			task.mu.RUnlock()
+			e.queues.Remove(task.ID)
 			continue
-		}
-
-		// Check if task role matches (or task can be handled by any role)
-		if task.Role != "" && task.Role != role {
-			task.mu.RUnlock()
-			// Put back in queue
-			e.taskQueue.Push(task)
-			return nil
 		}
 		task.mu.RUnlock()
 
-		return task
+		// Pop it (safe because we just peeked).
+		popped := e.queues.Pop(role)
+		if popped == nil {
+			return nil
+		}
+
+		// Verify the popped task is still valid (status might have changed).
+		popped.mu.RLock()
+		if popped.Status == TaskStatusCancelled {
+			popped.mu.RUnlock()
+			continue
+		}
+		popped.mu.RUnlock()
+
+		return popped
 	}
 }
 
@@ -704,7 +947,7 @@ func (e *Engine) dispatchLoop() {
 						task.mu.Lock()
 						task.Status = TaskStatusQueued
 						task.mu.Unlock()
-						e.taskQueue.Push(task)
+					e.queues.Push(task)
 					}
 				} else {
 					task.mu.RUnlock()
@@ -743,6 +986,58 @@ func (e *Engine) workStealingLoop() {
 	}
 }
 
+// autoScaleLoop monitors queue depth and adjusts worker counts.
+func (e *Engine) autoScaleLoop() {
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-e.ctx.Done():
+			return
+		case <-ticker.C:
+			e.tryAutoScale()
+		}
+	}
+}
+
+func (e *Engine) tryAutoScale() {
+	e.mu.RLock()
+	queueLen := e.queues.Len()
+	workerCount := len(e.workers)
+	maxWorkers := e.config.MaxWorkers
+	e.mu.RUnlock()
+
+	if maxWorkers <= 0 || workerCount >= maxWorkers {
+		return
+	}
+
+	// Scale up if queue has more pending tasks than workers.
+	if queueLen > workerCount {
+		// Find the role with the most queued tasks.
+		roleCounts := make(map[AgentRole]int)
+		e.mu.RLock()
+		for role, count := range e.config.WorkersPerRole {
+			roleCounts[role] = count
+		}
+		e.mu.RUnlock()
+
+		bestRole := RoleCoder
+		bestLen := 0
+		for role := range roleCounts {
+			len := e.queues.RoleLen(role)
+			if len > bestLen {
+				bestLen = len
+				bestRole = role
+			}
+		}
+
+		if bestLen > 0 && workerCount < maxWorkers {
+			_ = e.ScaleWorkers(bestRole, roleCounts[bestRole]+1)
+		}
+	}
+}
+
 func (e *Engine) tryWorkStealing() {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
@@ -762,11 +1057,12 @@ func (e *Engine) tryWorkStealing() {
 	}
 
 	// Check if there are queued tasks that could use different roles
-	queuedCount := e.taskQueue.Len()
+	queuedCount := e.queues.Len()
 	if queuedCount > len(idleWorkers) {
 		// Allow idle workers to steal tasks from other roles
 		for _, worker := range idleWorkers {
-			task := e.taskQueue.Pop()
+			// Try to pop from the "any" queue (tasks with no specific role)
+			task := e.queues.Pop("")
 			if task == nil {
 				break
 			}
@@ -781,8 +1077,8 @@ func (e *Engine) tryWorkStealing() {
 			}
 			task.mu.Unlock()
 
-			// Put task back - the worker loop will pick it up
-			e.taskQueue.Push(task)
+			// Put task back into the correct role queue
+			e.queues.Push(task)
 		}
 	}
 }
@@ -835,36 +1131,38 @@ func (e *Engine) processDependentTasks(completedTaskID string) {
 			task.mu.Lock()
 			task.Status = TaskStatusQueued
 			task.mu.Unlock()
-			e.taskQueue.Push(task)
+			e.queues.Push(task)
 		}
 	}
 }
 
 func (e *Engine) waitForTask(ctx context.Context, taskID string) error {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
+	e.mu.RLock()
+	task, ok := e.tasks[taskID]
+	e.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("task not found: %s", taskID)
+	}
 
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-ticker.C:
-			task, err := e.GetTask(taskID)
-			if err != nil {
-				return err
-			}
-			task.mu.RLock()
-			status := task.Status
-			task.mu.RUnlock()
+	// Wait on the completion channel or context cancellation.
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-task.completionCh:
+		// Task finished — check final status.
+		task.mu.RLock()
+		status := task.Status
+		task.mu.RUnlock()
 
-			switch status {
-			case TaskStatusCompleted:
-				return nil
-			case TaskStatusFailed:
-				return fmt.Errorf("task failed: %s", taskID)
-			case TaskStatusCancelled:
-				return fmt.Errorf("task cancelled: %s", taskID)
-			}
+		switch status {
+		case TaskStatusCompleted:
+			return nil
+		case TaskStatusFailed:
+			return fmt.Errorf("task failed: %s", taskID)
+		case TaskStatusCancelled:
+			return fmt.Errorf("task cancelled: %s", taskID)
+		default:
+			return nil
 		}
 	}
 }
@@ -899,20 +1197,22 @@ func (e *Engine) updateMetrics() {
 }
 
 func (e *Engine) getModelForRole(role AgentRole) string {
-	// Fast/cheap models for exploration and testing
-	// High-quality models for coding and review
+	// Check configurable overrides first.
+	if e.config.ModelOverrides != nil {
+		if model, ok := e.config.ModelOverrides[role]; ok && model != "" {
+			return model
+		}
+	}
+
+	// Fall back to role-specific defaults, then to the global model.
 	switch role {
-	case RoleResearcher:
-		return "gemini-3.6-flash"
-	case RoleCoder:
+	case RoleCoder, RoleReviewer:
 		return e.config.Model
-	case RoleReviewer:
-		return e.config.Model
-	case RoleTester:
-		return "gemini-3.6-flash"
-	case RoleDocumenter:
-		return "gemini-3.6-flash"
 	default:
+		// Researcher, Tester, Documenter default to fallback or global model.
+		if e.config.FallbackModel != "" {
+			return e.config.FallbackModel
+		}
 		return e.config.Model
 	}
 }

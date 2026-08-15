@@ -117,6 +117,20 @@ func Default() *Config {
 			Bell:           true,
 			ContextWarning: true,
 		},
+		Coordinator: CoordinatorConfig{
+			Enabled:          false, // Opt-in: set to true to enable multi-agent coordination
+			WorkersPerRole:   map[string]int{"researcher": 2, "coder": 2, "reviewer": 1, "tester": 1, "documenter": 1},
+			DefaultTimeout:   "5m",
+			MaxRetries:       3,
+			QualityThreshold: 0.7,
+			ConsensusThreshold: 2,
+			ResourceLimits: CoordinatorResourceLimits{
+				MaxTokensPerTask:   100000,
+				MaxConcurrentTasks: 5,
+				MaxMemoryMB:        512,
+				RateLimitPerMinute: 60,
+			},
+		},
 		Diagnostics: DiagnosticsConfig{
 			Enabled:          true,
 			ShowInRead:       true,

@@ -8,9 +8,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/spf13/viper"
 
 	"github.com/iSundram/Automergent/internal/agent"
 	aiPkg "github.com/iSundram/Automergent/internal/ai"
@@ -19,6 +22,37 @@ import (
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
 )
+
+func TestRememberedProjectDoesNotRequireApproval(t *testing.T) {
+	projectDir := t.TempDir()
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	content := fmt.Sprintf("security:\n  allowedWritePaths:\n    - %s\n", projectDir)
+	if err := os.WriteFile(configPath, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	viper.Reset()
+	defer viper.Reset()
+	viper.SetConfigFile(configPath)
+	if err := viper.ReadInConfig(); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	if err := decodeConfigFromViper(cfg); err != nil {
+		t.Fatal(err)
+	}
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = os.Chdir(oldDir) }()
+	if err := os.Chdir(projectDir); err != nil {
+		t.Fatal(err)
+	}
+	if path, required := projectApprovalRequired(cfg); required {
+		t.Fatalf("remembered project unexpectedly requires approval: %s; loaded paths: %v", path, cfg.Security.AllowedWritePaths)
+	}
+}
 
 func TestParseOutputFormat(t *testing.T) {
 	tests := []struct {

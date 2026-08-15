@@ -269,3 +269,15 @@ type ConcreteStrategy struct {
 	NeedsReview      bool
 	Handler          Strategy
 }
+
+// TaskRunner executes tasks. Implementations provide real execution logic.
+type TaskRunner interface {
+	Run(ctx context.Context, task *Task) (*TaskResult, error)
+}
+
+// TaskRunnerFunc is an adapter to use ordinary functions as TaskRunner.
+type TaskRunnerFunc func(ctx context.Context, task *Task) (*TaskResult, error)
+
+func (f TaskRunnerFunc) Run(ctx context.Context, task *Task) (*TaskResult, error) {
+	return f(ctx, task)
+}

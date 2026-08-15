@@ -16,21 +16,32 @@ type Manager struct {
 	mu sync.RWMutex
 
 	// Core components
-	ranker   *Ranker
-	budget   *TokenBudget
-	detector *StalenessDetector
-	graph    *DependencyGraph
-	analyzer *DependencyAnalyzer
-	selector *ContextSelector
+	ranker     *Ranker
+	budget     *TokenBudget
+	detector   *StalenessDetector
+	graph      *DependencyGraph
+	analyzer   *DependencyAnalyzer
+	selector   *ContextSelector
+	summarizer *ContextSummarizer
 
 	// Caches
 	fileCache   map[string]*cachedFile
 	accessLog   []accessEntry
 	accessLimit int
 
+	// Analysis memoization
+	analysisCache map[string]analysisCacheEntry
+	analysisMu    sync.Mutex
+	inFlight      map[string]chan error
+
 	// Configuration
 	rootDir string
 	config  ManagerConfig
+}
+
+type analysisCacheEntry struct {
+	modTime time.Time
+	err     error
 }
 
 type cachedFile struct {
@@ -84,37 +95,52 @@ func NewManager(rootDir string, cfg ManagerConfig) *Manager {
 
 	selector := NewContextSelector(graph, ranker, budget, detector)
 
-	return &Manager{
-		ranker:      ranker,
-		budget:      budget,
-		detector:    detector,
-		graph:       graph,
-		analyzer:    analyzer,
-		selector:    selector,
-		fileCache:   make(map[string]*cachedFile),
-		accessLog:   make([]accessEntry, 0, cfg.AccessLogLimit),
-		accessLimit: cfg.AccessLogLimit,
-		rootDir:     rootDir,
-		config:      cfg,
+	m := &Manager{
+		ranker:        ranker,
+		budget:        budget,
+		detector:      detector,
+		graph:         graph,
+		analyzer:      analyzer,
+		selector:      selector,
+		summarizer:    NewContextSummarizer(nil),
+		fileCache:     make(map[string]*cachedFile),
+		accessLog:     make([]accessEntry, 0, cfg.AccessLogLimit),
+		accessLimit:   cfg.AccessLogLimit,
+		rootDir:       rootDir,
+		config:        cfg,
+		analysisCache: make(map[string]analysisCacheEntry),
+		inFlight:      make(map[string]chan error),
 	}
+
+	// Set file provider for selector to get symbols/access info
+	m.selector.SetFileProvider(func(ctx context.Context, path string) (string, bool) {
+		fc, err := m.GetFileContext(ctx, path)
+		if err != nil {
+			return "", false
+		}
+		return fc.Content, true
+	})
+
+	return m
 }
 
 // GetContext retrieves context for a request.
 func (m *Manager) GetContext(ctx context.Context, req ContextRequest) (*ContextResponse, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	startTime := time.Now()
 
-	// Record access
+	// Record access and snapshot active files under lock
+	m.mu.RLock()
 	for _, f := range req.ActiveFiles {
-		m.recordAccess(f)
+		m.recordAccessUnlocked(f)
 	}
+	activeFiles := make([]string, len(req.ActiveFiles))
+	copy(activeFiles, req.ActiveFiles)
+	m.mu.RUnlock()
 
-	// Analyze dependencies if needed (collect errors)
+	// Analyze dependencies with memoization and in-flight dedup (no global lock held)
 	var analysisErrs []string
-	for _, f := range req.ActiveFiles {
-		if err := m.analyzer.AnalyzeFile(ctx, f); err != nil {
+	for _, f := range activeFiles {
+		if err := m.analyzeFileWithMemo(ctx, f); err != nil {
 			analysisErrs = append(analysisErrs, fmt.Sprintf("%s: %v", f, err))
 		}
 	}
@@ -125,7 +151,7 @@ func (m *Manager) GetContext(ctx context.Context, req ContextRequest) (*ContextR
 		available = req.TokenBudget
 	}
 
-	items, signals, err := m.selector.SelectContext(ctx, req.Intent, req.ActiveFiles, available, req.IncludeDeps)
+	items, signals, err := m.selector.SelectContext(ctx, req.Intent, activeFiles, available, req.IncludeDeps)
 	if err != nil {
 		return nil, err
 	}
@@ -138,16 +164,19 @@ func (m *Manager) GetContext(ctx context.Context, req ContextRequest) (*ContextR
 		TotalTokens: sumTokens(items),
 		BudgetUsed:  sumTokens(items),
 		BudgetTotal: available,
+		Warns:       analysisErrs,
 	}
 
 	// Update budget usage
 	m.budget.UseContextFiles(resp.TotalTokens)
 
-	// If any analysis errors occurred, return response with aggregated error
+	// Return nil error when items exist (only error for hard failures with nil resp)
+	if len(items) > 0 {
+		return resp, nil
+	}
 	if len(analysisErrs) > 0 {
 		return resp, fmt.Errorf("analysis errors: %s", strings.Join(analysisErrs, "; "))
 	}
-
 	return resp, nil
 }
 
@@ -167,6 +196,8 @@ type ContextResponse struct {
 	TotalTokens int
 	BudgetUsed  int
 	BudgetTotal int
+	Warns       []string
+	Errors      []string
 }
 
 // GetFileContext retrieves or caches a file's context.
@@ -425,6 +456,13 @@ func (m *Manager) Clear() {
 
 // recordAccess records a file access.
 func (m *Manager) recordAccess(path string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.recordAccessUnlocked(path)
+}
+
+// recordAccessUnlocked records a file access (caller must hold lock).
+func (m *Manager) recordAccessUnlocked(path string) {
 	m.accessLog = append(m.accessLog, accessEntry{
 		path:      path,
 		timestamp: time.Now(),
@@ -438,6 +476,53 @@ func (m *Manager) recordAccess(path string) {
 		copy(newLog, m.accessLog[start:])
 		m.accessLog = newLog
 	}
+}
+
+// analyzeFileWithMemo analyzes a file with memoization and in-flight deduplication.
+func (m *Manager) analyzeFileWithMemo(ctx context.Context, path string) error {
+	// Check cache first (with modtime validation)
+	info, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	modTime := info.ModTime()
+
+	m.analysisMu.Lock()
+	if entry, ok := m.analysisCache[path]; ok && entry.modTime.Equal(modTime) {
+		err := entry.err
+		m.analysisMu.Unlock()
+		return err
+	}
+
+	// Check if analysis is already in flight
+	if ch, ok := m.inFlight[path]; ok {
+		m.analysisMu.Unlock()
+		select {
+		case err := <-ch:
+			return err
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	// Start new analysis
+	ch := make(chan error, 1)
+	m.inFlight[path] = ch
+	m.analysisMu.Unlock()
+
+	// Perform analysis
+	err = m.analyzer.AnalyzeFile(ctx, path)
+
+	// Update cache and notify waiters
+	m.analysisMu.Lock()
+	m.analysisCache[path] = analysisCacheEntry{modTime: modTime, err: err}
+	delete(m.inFlight, path)
+	m.analysisMu.Unlock()
+
+	ch <- err
+	close(ch)
+
+	return err
 }
 
 // getAccessCount returns the access count for a file.
@@ -461,26 +546,42 @@ func (m *Manager) getLastAccess(path string) time.Time {
 	return time.Time{}
 }
 
-// evictCache evicts old cache entries if over limit.
+// evictCache evicts old cache entries if over limit using LRU based on access log.
 func (m *Manager) evictCache() {
 	if len(m.fileCache) <= m.config.MaxCachedFiles {
 		return
 	}
 
-	// Sort by access recency
+	// Build last access time map from access log (most recent first)
+	lastAccess := make(map[string]time.Time)
+	for i := len(m.accessLog) - 1; i >= 0; i-- {
+		entry := m.accessLog[i]
+		if _, exists := lastAccess[entry.path]; !exists {
+			lastAccess[entry.path] = entry.timestamp
+		}
+	}
+
+	// Sort by last access time (oldest first for eviction)
 	type cacheEntry struct {
-		path      string
-		fetchedAt time.Time
+		path       string
+		lastAccess time.Time
 	}
 	var entries []cacheEntry
-	for path, cached := range m.fileCache {
-		entries = append(entries, cacheEntry{path, cached.fetchedAt})
+	for path := range m.fileCache {
+		la := lastAccess[path]
+		if la.IsZero() {
+			// Never accessed, use fetchedAt as fallback
+			if cached, ok := m.fileCache[path]; ok {
+				la = cached.fetchedAt
+			}
+		}
+		entries = append(entries, cacheEntry{path, la})
 	}
 	sort.Slice(entries, func(i, j int) bool {
-		return entries[i].fetchedAt.Before(entries[j].fetchedAt)
+		return entries[i].lastAccess.Before(entries[j].lastAccess)
 	})
 
-	// Evict oldest entries
+	// Evict oldest entries (least recently used)
 	toEvict := len(m.fileCache) - m.config.MaxCachedFiles
 	for i := 0; i < toEvict; i++ {
 		delete(m.fileCache, entries[i].path)
@@ -638,4 +739,262 @@ func sumTokens(items []ContextItem) int {
 		return int(^uint(0) >> 1)
 	}
 	return int(total64)
+}
+
+// --- Context State Management ---
+
+// IgnoreContext moves a context item to ignored state with a summary.
+func (m *Manager) IgnoreContext(path, reason string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cached, exists := m.fileCache[path]
+	if !exists {
+		return
+	}
+
+	item := ContextItem{
+		Path:    cached.path,
+		Content: cached.content,
+		Tokens:  cached.tokens,
+	}
+
+	now := time.Now()
+	item.State = ContextIgnored
+	item.IgnoreReason = reason
+	item.IgnoredAt = &now
+	item.Summary = m.summarizer.SummarizeIgnored(item)
+}
+
+// ResumeContext re-activates an ignored context item.
+func (m *Manager) ResumeContext(path string) *ContextItem {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cached, exists := m.fileCache[path]
+	if !exists {
+		return nil
+	}
+
+	now := time.Now()
+	return &ContextItem{
+		Path:       cached.path,
+		Content:    cached.content,
+		Tokens:     cached.tokens,
+		State:      ContextResumed,
+		ResumedAt:  &now,
+	}
+}
+
+// GetIgnoredSummaries returns summaries of all ignored context items.
+func (m *Manager) GetIgnoredSummaries() []ContextItem {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	var result []ContextItem
+	for _, cached := range m.fileCache {
+		item := ContextItem{
+			Path:         cached.path,
+			Content:      cached.content,
+			Tokens:       cached.tokens,
+			State:        ContextIgnored,
+			Summary:      m.summarizer.SummarizeIgnored(ContextItem{Content: cached.content}),
+			PriorityLevel: PriorityLow,
+		}
+		result = append(result, item)
+	}
+	return result
+}
+
+// SetSummarizer sets a custom summarizer for context summarization.
+func (m *Manager) SetSummarizer(s *ContextSummarizer) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.summarizer = s
+}
+
+// --- Memory Integration ---
+
+// GetContextWithMemory retrieves context enriched with relevant memory entries.
+func (m *Manager) GetContextWithMemory(ctx context.Context, req ContextRequest, memory *Memory) (*ContextResponse, error) {
+	resp, err := m.GetContext(ctx, req)
+	if err != nil {
+		return resp, err
+	}
+
+	if memory == nil {
+		return resp, nil
+	}
+
+	entries := memory.RelevantTo(req.Intent)
+
+	var memItems []ContextItem
+	for _, entry := range entries {
+		tokens := EstimateTokens(entry.Value)
+		memItems = append(memItems, ContextItem{
+			Path:         "memory:" + entry.Key,
+			Content:      entry.Value,
+			Tokens:       tokens,
+			Priority:     1.0,
+			Required:     true,
+			PriorityLevel: PriorityCritical,
+		})
+	}
+
+	allItems := make([]ContextItem, 0, len(memItems)+len(resp.Items))
+	allItems = append(allItems, memItems...)
+	allItems = append(allItems, resp.Items...)
+	resp.Items = allItems
+	resp.TotalTokens = sumTokens(allItems)
+
+	return resp, nil
+}
+
+// --- Personalized Context ---
+
+// PersonalizedContext is a tailored context bundle for a specific agent role.
+type PersonalizedContext struct {
+	Role        string        `json:"role"`
+	Intent      string        `json:"intent"`
+	Items       []ContextItem `json:"items"`
+	TotalTokens int           `json:"total_tokens"`
+	ToolFilter  []string      `json:"tool_filter"`
+}
+
+// BuildPersonalizedContext creates a tailored context bundle for a specific agent role.
+func (m *Manager) BuildPersonalizedContext(
+	role string,
+	intent string,
+	activeFiles []string,
+	toolFilter []string,
+	tokenBudget int,
+) (*PersonalizedContext, error) {
+	req := ContextRequest{
+		Intent:      intent,
+		ActiveFiles: activeFiles,
+		TokenBudget: tokenBudget,
+		IncludeDeps: true,
+	}
+	resp, err := m.GetContext(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+
+	filtered := m.filterContextByRole(resp.Items, role, toolFilter)
+
+	return &PersonalizedContext{
+		Role:        role,
+		Intent:      intent,
+		Items:       filtered,
+		TotalTokens: sumTokens(filtered),
+		ToolFilter:  toolFilter,
+	}, nil
+}
+
+// filterContextByRole filters context items based on role and tool requirements.
+func (m *Manager) filterContextByRole(items []ContextItem, role string, toolFilter []string) []ContextItem {
+	if len(toolFilter) == 0 {
+		return items
+	}
+
+	neededPatterns := make(map[string]bool)
+	for _, tool := range toolFilter {
+		for _, pattern := range toolContextPatterns(tool) {
+			neededPatterns[pattern] = true
+		}
+	}
+
+	var filtered []ContextItem
+	for _, item := range items {
+		if item.PriorityLevel == PriorityCritical || item.Required {
+			filtered = append(filtered, item)
+			continue
+		}
+		if matchesAnyPattern(item.Path, neededPatterns) {
+			filtered = append(filtered, item)
+		}
+	}
+
+	return filtered
+}
+
+// --- Tool-Specific Context Injection ---
+
+// SelectContextForTools selects only context relevant to the given tools.
+func (m *Manager) SelectContextForTools(
+	tools []string,
+	intent string,
+	activeFiles []string,
+	tokenBudget int,
+) ([]ContextItem, error) {
+	req := ContextRequest{
+		Intent:      intent,
+		ActiveFiles: activeFiles,
+		TokenBudget: tokenBudget,
+		IncludeDeps: true,
+	}
+	resp, err := m.GetContext(context.Background(), req)
+	if err != nil {
+		return nil, err
+	}
+
+	neededPatterns := make(map[string]bool)
+	for _, tool := range tools {
+		for _, pattern := range toolContextPatterns(tool) {
+			neededPatterns[pattern] = true
+		}
+	}
+
+	var filtered []ContextItem
+	for _, item := range resp.Items {
+		if item.Required || item.PriorityLevel == PriorityCritical {
+			filtered = append(filtered, item)
+			continue
+		}
+		if matchesAnyPattern(item.Path, neededPatterns) {
+			filtered = append(filtered, item)
+		}
+	}
+
+	return filtered, nil
+}
+
+// toolContextPatterns returns the context patterns needed by a tool.
+func toolContextPatterns(tool string) []string {
+	switch strings.ToLower(tool) {
+	case "glob":
+		return []string{".go", ".ts", ".js", ".py", ".tsx", ".jsx", ".md", ".yaml", ".yml", ".json"}
+	case "grep", "search":
+		return []string{".go", ".ts", ".js", ".py", ".tsx", ".jsx"}
+	case "view", "read":
+		return []string{".go", ".ts", ".js", ".py", ".tsx", ".jsx", ".md"}
+	case "edit", "write":
+		return []string{".go", ".ts", ".js", ".py", ".tsx", ".jsx"}
+	case "list_directory":
+		return []string{"internal", "cmd", "pkg", "src"}
+	default:
+		return []string{".go", ".ts", ".js", ".py"}
+	}
+}
+
+// matchesAnyPattern checks if a file path matches any of the needed patterns.
+func matchesAnyPattern(path string, patterns map[string]bool) bool {
+	pathLower := strings.ToLower(path)
+	for pattern := range patterns {
+		// Check if pattern is a file extension
+		if strings.HasPrefix(pattern, ".") {
+			if strings.HasSuffix(pathLower, pattern) {
+				return true
+			}
+		}
+		// Check if pattern is a directory name
+		if strings.Contains(pathLower, "/"+pattern+"/") || strings.Contains(pathLower, pattern+"/") {
+			return true
+		}
+		// Check if pattern appears anywhere in path
+		if strings.Contains(pathLower, pattern) {
+			return true
+		}
+	}
+	return len(patterns) == 0
 }

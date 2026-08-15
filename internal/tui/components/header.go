@@ -91,7 +91,9 @@ func (h Header) View() string {
 	}
 
 	// 1. Left Section: Brand & Phase
-	brandText := "⟡ AUTOMERGENT"
+	// Keep one trailing cell as part of the brand so adjacent header content
+	// never appears stuck to the final letter.
+	brandText := "⟡ AUTOMERGENT "
 	if h.width < 70 {
 		brandText = "⟡"
 	}

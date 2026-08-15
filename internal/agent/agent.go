@@ -11,8 +11,10 @@ import (
 
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
-	automergentErrors "github.com/iSundram/Automergent/internal/errors"
+	"github.com/iSundram/Automergent/internal/coordinator"
+	"github.com/iSundram/Automergent/internal/errors"
 	"github.com/iSundram/Automergent/internal/reasoning"
+	contextmgr "github.com/iSundram/Automergent/internal/context"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
 	subagent "github.com/iSundram/Automergent/internal/tools/agent"
@@ -37,6 +39,14 @@ type Agent struct {
 	currentComplexity        reasoning.Complexity
 	currentTaskType          reasoning.TaskType
 	consecutiveVerifications int
+
+	// Persistent components
+	contextManager *contextmgr.Manager
+	reasoningEngine *reasoning.Engine
+	coordinator    *coordinator.Engine
+	coordinatorOnce sync.Once
+	coordinatorCtx context.Context
+	coordinatorCancel context.CancelFunc
 }
 
 // Execute implements the AgentExecutor interface for sub-agents.
@@ -46,6 +56,8 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 	if model != "" {
 		childCfg.Model = model
 	}
+	// Child agents must not trigger the coordinator (prevents infinite recursion).
+	childCfg.Coordinator.Enabled = false
 
 	// 2. Create a clean child session.
 	childSess := session.New()
@@ -271,6 +283,13 @@ func (a *Agent) Provider() ai.Provider {
 	return a.provider
 }
 
+// GetModel returns the current model name.
+func (a *Agent) GetModel() string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.cfg.Model
+}
+
 // SetProvider swaps the runtime provider used for subsequent completions.
 func (a *Agent) SetProvider(p ai.Provider) {
 	a.mu.Lock()
@@ -299,6 +318,37 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		a.Emit(EventStatus, "initiating project triage")
 		// Use externalized instruction from triage.go
 		prompt = TriageInstruction + "\n\nUser Request: " + prompt
+	}
+
+	// 2. Coordinator: run in background with a short timeout.
+	//    If it doesn't produce a result quickly, fall through to the standard loop.
+	coordCh := make(chan string, 1)
+	coordErrCh := make(chan error, 1)
+	go func() {
+		result, err := a.runCoordinatorIfNeeded(ctx, originalUserPrompt)
+		if err != nil {
+			coordErrCh <- err
+		} else {
+			coordCh <- result
+		}
+	}()
+
+	// Wait briefly for coordinator — if it's fast (simple analysis), use it.
+	// Otherwise fall through to standard agent loop immediately.
+	select {
+	case result := <-coordCh:
+		if result != "" {
+			a.sess.AddMessage(ai.NewTextMessage(ai.RoleAssistant, result))
+			a.Emit(EventStatus, "Coordinator: task completed")
+			return nil
+		}
+	case err := <-coordErrCh:
+		a.Emit(EventStatus, fmt.Sprintf("Coordinator: %v, using standard loop", err))
+	case <-time.After(30 * time.Second):
+		// Coordinator too slow — proceed with standard loop.
+		a.Emit(EventStatus, "Coordinator: taking too long, using standard loop")
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
 	if a.cfg != nil && a.cfg.ReasoningPreAnalysis {
@@ -376,7 +426,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		a.Emit(EventStatus, "thinking")
 		resp, err := provider.Complete(ctx, req)
 		if err != nil {
-			if automergentErrors.Is(err, automergentErrors.CodeQuotaExceeded) {
+			if errors.Is(err, errors.CodeQuotaExceeded) {
 				if a.handleQuotaExceeded(ctx, err) {
 					continue
 				}
@@ -869,6 +919,13 @@ func (a *Agent) Shutdown() error {
 func (a *Agent) Close() error {
 	var err error
 	a.closeOnce.Do(func() {
+		// Stop coordinator if running
+		if a.coordinatorCancel != nil {
+			a.coordinatorCancel()
+		}
+		if a.coordinator != nil {
+			_ = a.coordinator.Stop(context.Background())
+		}
 		// Mark closed under lock then close the channel
 		a.mu.Lock()
 		if !a.eventsClosed {
@@ -878,6 +935,182 @@ func (a *Agent) Close() error {
 		a.mu.Unlock()
 	})
 	return err
+}
+
+// Coordinator returns the coordinator engine, initializing it on first use if enabled.
+func (a *Agent) Coordinator() *coordinator.Engine {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.coordinator != nil {
+		return a.coordinator
+	}
+
+	if !a.cfg.Coordinator.Enabled {
+		return nil
+	}
+
+	// Initialize coordinator
+	cfg := coordinator.DefaultConfig()
+	cfg.WorkersPerRole = make(map[coordinator.AgentRole]int)
+	for roleStr, count := range a.cfg.Coordinator.WorkersPerRole {
+		cfg.WorkersPerRole[coordinator.AgentRole(roleStr)] = count
+	}
+	if a.cfg.Coordinator.DefaultTimeout != "" {
+		if d, err := time.ParseDuration(a.cfg.Coordinator.DefaultTimeout); err == nil {
+			cfg.DefaultTimeout = d
+		}
+	}
+	cfg.MaxRetries = a.cfg.Coordinator.MaxRetries
+	cfg.QualityThreshold = a.cfg.Coordinator.QualityThreshold
+	cfg.ConsensusThreshold = a.cfg.Coordinator.ConsensusThreshold
+	cfg.ResourceLimits.MaxTokensPerTask = a.cfg.Coordinator.ResourceLimits.MaxTokensPerTask
+	cfg.ResourceLimits.MaxConcurrentTasks = a.cfg.Coordinator.ResourceLimits.MaxConcurrentTasks
+	cfg.ResourceLimits.MaxMemoryMB = a.cfg.Coordinator.ResourceLimits.MaxMemoryMB
+	cfg.ResourceLimits.RateLimitPerMinute = a.cfg.Coordinator.ResourceLimits.RateLimitPerMinute
+	cfg.Model = a.cfg.Model
+	cfg.FallbackModel = a.cfg.Model
+
+	// Map model overrides from string keys to AgentRole keys.
+	if len(a.cfg.Coordinator.ModelOverrides) > 0 {
+		cfg.ModelOverrides = make(map[coordinator.AgentRole]string)
+		for roleStr, model := range a.cfg.Coordinator.ModelOverrides {
+			cfg.ModelOverrides[coordinator.AgentRole(roleStr)] = model
+		}
+	}
+
+	// Create executor that uses the agent's sub-agent mechanism with context manager.
+	// Use NewAgentExecutorAdapterWithModel to avoid deadlock: Coordinator() holds a.mu.Lock()
+	// and GetModel() tries a.mu.RLock() which deadlocks on sync.RWMutex.
+	exec := coordinator.NewAgentExecutorAdapterWithModel(a, a.cfg.Model)
+
+	a.coordinatorCtx, a.coordinatorCancel = context.WithCancel(context.Background())
+	a.coordinator = coordinator.NewEngine(cfg, exec)
+
+	// Start coordinator
+	if err := a.coordinator.Start(a.coordinatorCtx); err != nil {
+		a.Emit(EventError, fmt.Errorf("coordinator start: %w", err))
+		a.coordinator = nil
+		return nil
+	}
+
+	return a.coordinator
+}
+
+// runCoordinatorIfNeeded runs the coordinator for complex tasks that benefit from multi-agent execution.
+// Returns (result string, error). If result is non-nil and error is nil, the task is complete.
+func (a *Agent) runCoordinatorIfNeeded(ctx context.Context, prompt string) (string, error) {
+	// Only use coordinator for complex tasks when enabled
+	if !a.cfg.Coordinator.Enabled {
+		return "", nil
+	}
+
+	// Use reasoning engine to analyze and plan
+	re := a.ReasoningEngine()
+	if re == nil {
+		return "", fmt.Errorf("reasoning engine not available")
+	}
+
+	// Analyze the request with a timeout.
+	analyzeCtx, analyzeCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer analyzeCancel()
+
+	analysis, err := re.Analyze(analyzeCtx, prompt)
+	if err != nil {
+		return "", fmt.Errorf("analysis failed: %w", err)
+	}
+
+	// Only use coordinator for moderate+ complexity tasks
+	complexityOrder := map[reasoning.Complexity]int{
+		reasoning.ComplexityTrivial:  0,
+		reasoning.ComplexitySimple:   1,
+		reasoning.ComplexityModerate: 2,
+		reasoning.ComplexityComplex:  3,
+		reasoning.ComplexityMajor:    4,
+	}
+	if complexityOrder[analysis.Complexity] < complexityOrder[reasoning.ComplexityModerate] {
+		return "", nil // Let standard loop handle simple tasks
+	}
+
+	a.Emit(EventStatus, fmt.Sprintf("Coordinator: analyzing task (complexity: %s)", analysis.Complexity))
+
+	// Create execution plan with a timeout (directory walks can be slow on large repos).
+	planCtx, planCancel := context.WithTimeout(ctx, 30*time.Second)
+	defer planCancel()
+
+	execPlan, err := re.Plan(planCtx, analysis)
+	if err != nil {
+		return "", fmt.Errorf("planning failed: %w", err)
+	}
+
+	a.Emit(EventStatus, fmt.Sprintf("Coordinator: plan created with %d tasks, %d phases", len(execPlan.Tasks), len(execPlan.ExecutionOrder)))
+
+	// Convert to coordinator plan
+	coordPlan, err := coordinator.FromReasoningPlan(ctx, execPlan)
+	if err != nil {
+		return "", fmt.Errorf("plan conversion failed: %w", err)
+	}
+
+	a.Emit(EventStatus, fmt.Sprintf("Coordinator: converted plan with %d tasks, %d phases", len(coordPlan.Tasks), len(coordPlan.Phases)))
+
+	// Get coordinator engine
+	coord := a.Coordinator()
+	if coord == nil {
+		return "", fmt.Errorf("coordinator not available")
+	}
+
+	a.Emit(EventStatus, fmt.Sprintf("Coordinator: executing plan with %d phases", len(coordPlan.Phases)))
+
+	// Execute the plan with a timeout to prevent blocking forever.
+	coordCtx, coordCancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer coordCancel()
+
+	result, err := coord.Execute(coordCtx, coordPlan)
+	if err != nil {
+		return "", fmt.Errorf("coordinator execution failed: %w", err)
+	}
+
+	// Format result
+	if result != nil && result.FinalOutput != "" {
+		return fmt.Sprintf("## Coordinator Result\n\n%s", result.FinalOutput), nil
+	}
+
+	return "Coordinator completed task", nil
+}
+
+// ContextManager returns the persistent context manager, initializing it on first use.
+func (a *Agent) ContextManager() *contextmgr.Manager {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.contextManager != nil {
+		// Check if working directory changed
+		// The manager doesn't expose cwd, so we recreate if needed
+		// For now, just return existing manager
+		return a.contextManager
+	}
+
+	cwd, _ := os.Getwd()
+	managerCfg := contextmgr.DefaultManagerConfig()
+	managerCfg.ModelLimits = contextmgr.GetModelLimits(a.cfg.Model)
+	managerCfg.BudgetConfig = contextmgr.DefaultBudgetConfig()
+	a.contextManager = contextmgr.NewManager(cwd, managerCfg)
+	return a.contextManager
+}
+
+// ReasoningEngine returns the persistent reasoning engine, initializing it on first use.
+func (a *Agent) ReasoningEngine() *reasoning.Engine {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+
+	if a.reasoningEngine != nil {
+		return a.reasoningEngine
+	}
+
+	cfg := reasoning.DefaultEngineConfig()
+	cfg.DefaultTimeout = 5 * time.Minute
+	a.reasoningEngine = reasoning.NewEngine(cfg)
+	return a.reasoningEngine
 }
 
 // shouldVerify determines if the current session state warrants a verification gate.

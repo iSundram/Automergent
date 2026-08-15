@@ -45,10 +45,6 @@ func (t *GrepTool) IsConcurrencySafe(args map[string]any) bool { return true }
 func (t *GrepTool) IsReadOnly(args map[string]any) bool        { return true }
 func (t *GrepTool) IsDestructive(args map[string]any) bool     { return false }
 
-func (t *StructureTool) IsConcurrencySafe(args map[string]any) bool { return true }
-func (t *StructureTool) IsReadOnly(args map[string]any) bool        { return true }
-func (t *StructureTool) IsDestructive(args map[string]any) bool     { return false }
-
 func (t *RefinedSearchTool) IsConcurrencySafe(args map[string]any) bool { return true }
 func (t *RefinedSearchTool) IsReadOnly(args map[string]any) bool        { return true }
 func (t *RefinedSearchTool) IsDestructive(args map[string]any) bool     { return false }

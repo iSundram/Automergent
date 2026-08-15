@@ -175,7 +175,7 @@ func (r *Ranker) calculateScore(f FileContext, intentKeywords []string) Relevanc
 		r.config.SymbolWeight*score.SymbolRelevance +
 		r.config.FrequencyWeight*score.FrequencyWeight +
 		r.config.RecencyWeight*score.RecencyWeight +
-		r.config.DependencyWeight*score.DependencyWeight -
+		r.config.DependencyWeight*score.DependencyWeight +
 		r.config.FreshnessWeight*score.FreshnessWeight -
 		r.config.StalenessWeight*score.StalenessDiscount
 
@@ -185,38 +185,48 @@ func (r *Ranker) calculateScore(f FileContext, intentKeywords []string) Relevanc
 	return score
 }
 
-// calculateIntentAlignment scores how well file matches the intent.
+// calculateIntentAlignment scores how well file matches the intent using frequency and phrase alignment.
 func (r *Ranker) calculateIntentAlignment(f FileContext, keywords []string) float64 {
 	if len(keywords) == 0 {
 		return 0.5 // neutral score
 	}
 
-	matches := 0
 	content := strings.ToLower(f.Content)
 	path := strings.ToLower(f.Path)
 
+	scoreSum := 0.0
 	for _, kw := range keywords {
 		kwLower := strings.ToLower(kw)
-		// Check file path (higher weight)
+		kwScore := 0.0
+
+		// Check file path (high weight)
 		if strings.Contains(path, kwLower) {
-			matches += 2
+			kwScore += 2.5
 		}
+
 		// Check symbols (medium weight)
 		for _, sym := range f.Symbols {
 			if strings.Contains(strings.ToLower(sym), kwLower) {
-				matches++
+				kwScore += 1.5
 				break
 			}
 		}
-		// Check content (lower weight)
-		if strings.Contains(content, kwLower) {
-			matches++
+
+		// Check content term frequency (weighted by occurrences)
+		count := strings.Count(content, kwLower)
+		if count > 0 {
+			// logarithmic frequency weighting (TF-like)
+			kwScore += 1.0 + math.Min(2.0, math.Log1p(float64(count)))
 		}
+
+		scoreSum += math.Min(5.0, kwScore)
 	}
 
-	// Normalize: max score is 4 * len(keywords)
-	maxScore := 4.0 * float64(len(keywords))
-	return float64(matches) / maxScore
+	maxPossible := 5.0 * float64(len(keywords))
+	if maxPossible == 0 {
+		return 0.0
+	}
+	return math.Min(1.0, scoreSum/maxPossible)
 }
 
 // calculateEditDistanceScore computes normalized edit distance score.

@@ -1,0 +1,95 @@
+package tui
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/iSundram/Automergent/internal/ai"
+	"github.com/iSundram/Automergent/internal/session"
+)
+
+func TestExportConversationMarkdownAndRejectsAbsolutePath(t *testing.T) {
+	app := newTestApp(t)
+	app.sess.AddMessage(ai.NewTextMessage(ai.RoleUser, "hello"))
+	dir := t.TempDir()
+	old, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	_ = os.Chdir(dir)
+	if err := app.exportConversation("chat.md"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, "chat.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(data); !strings.Contains(got, "# Automergent Conversation") || !strings.Contains(got, "## User\n\nhello") {
+		t.Fatalf("unexpected export:\n%s", got)
+	}
+	if err := app.exportConversation(filepath.Join(dir, "unsafe.md")); err == nil {
+		t.Fatal("expected absolute path rejection")
+	}
+	if err := app.exportConversation("../outside.md"); err == nil {
+		t.Fatal("expected workspace traversal rejection")
+	}
+}
+
+func TestSearchWorkspaceFindsTextAndSkipsGit(t *testing.T) {
+	app := newTestApp(t)
+	dir := t.TempDir()
+	old, _ := os.Getwd()
+	t.Cleanup(func() { _ = os.Chdir(old) })
+	_ = os.Chdir(dir)
+	if err := os.WriteFile("main.go", []byte("package main\n// unique needle\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(".git", 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(".git/hidden", []byte("needle"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	result := app.searchWorkspace("needle")
+	if !strings.Contains(result, "main.go:2") || strings.Contains(result, ".git/hidden") {
+		t.Fatalf("unexpected search result: %s", result)
+	}
+}
+
+func TestResumeSessionByID(t *testing.T) {
+	app := newTestApp(t)
+	storage, err := session.NewStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := session.New()
+	saved.Provider, saved.Model = app.cfg.Provider, app.cfg.Model
+	saved.AddMessage(ai.NewTextMessage(ai.RoleUser, "saved message"))
+	if err := storage.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	app.storage = storage
+	app.handleSlashCommand("/resume " + saved.ID)
+	if app.sess.ID != saved.ID || app.conversation.MessageCount() != 1 {
+		t.Fatalf("session was not resumed: id=%s messages=%d", app.sess.ID, app.conversation.MessageCount())
+	}
+}
+
+func TestNewSessionSavesCurrentHistory(t *testing.T) {
+	app := newTestApp(t)
+	storage, err := session.NewStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.storage = storage
+	oldID := app.sess.ID
+	app.sess.AddMessage(ai.NewTextMessage(ai.RoleUser, "keep me"))
+	app.handleSlashCommand("/new")
+	if app.sess.ID == oldID {
+		t.Fatal("expected a fresh session")
+	}
+	loaded, err := storage.Load(oldID)
+	if err != nil || len(loaded.Messages) != 1 {
+		t.Fatalf("old session not saved: %v", err)
+	}
+}

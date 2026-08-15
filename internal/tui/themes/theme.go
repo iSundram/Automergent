@@ -133,10 +133,9 @@ func NewStyles(t *Theme) *Styles {
 		Foreground(t.Subtext).
 		MarginBottom(1)
 	s.UserBubble = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.Accent).
+		Background(t.Surface).
 		Foreground(t.Text).
-		Padding(0, 1)
+		Padding(0, 2)
 	s.UserMsg = lipgloss.NewStyle().
 		Foreground(t.Text)
 
@@ -145,10 +144,7 @@ func NewStyles(t *Theme) *Styles {
 		Foreground(t.Accent).
 		Bold(true)
 	s.AssistantBubble = lipgloss.NewStyle().
-		Foreground(t.Text).
-		Padding(0, 1).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(t.BorderNormal)
+		Foreground(t.Text)
 	s.AssistantMsg = lipgloss.NewStyle().
 		Foreground(t.Text)
 
@@ -165,7 +161,6 @@ func NewStyles(t *Theme) *Styles {
 		Foreground(t.Muted)
 
 	s.ToolBox = lipgloss.NewStyle().
-		Background(t.Overlay).
 		Padding(0, 1).
 		MarginBottom(1)
 

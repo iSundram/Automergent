@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/ai"
 	googleProvider "github.com/iSundram/Automergent/internal/ai/google"
@@ -105,6 +106,60 @@ func TestHandleAgentEventDoneAddsMessageWhenNoStreaming(t *testing.T) {
 	}
 	if last.Role != "assistant" || last.Content == "" {
 		t.Fatalf("expected assistant completion message, got role=%s content=%q", last.Role, last.Content)
+	}
+}
+
+func TestConfirmationReplacesInputFooter(t *testing.T) {
+	app := newTestApp(t)
+	app.width = 100
+	app.height = 30
+	app.confirm.ShowSimple("Allow writes in this project?")
+	app.layout()
+	content := ansi.Strip(app.View().Content)
+	if !strings.Contains(content, "Allow writes in this project?") {
+		t.Fatal("confirmation footer is not visible")
+	}
+	if strings.Contains(content, "Message Automergent") {
+		t.Fatal("input must be hidden while confirmation is visible")
+	}
+}
+
+func TestProjectApprovalUpdatesAllowedPaths(t *testing.T) {
+	app := newTestApp(t)
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	app.cfg.ConfigFile = configPath
+	projectPath := filepath.Join(t.TempDir(), "project")
+	app.pendingProjectPath = projectPath
+	_, _ = app.Update(projectApprovalMsg{response: agent.ConfirmationResponse{Allow: true}})
+	if len(app.cfg.Security.AllowedWritePaths) == 0 || app.cfg.Security.AllowedWritePaths[len(app.cfg.Security.AllowedWritePaths)-1] != projectPath {
+		t.Fatalf("project path was not allowed: %v", app.cfg.Security.AllowedWritePaths)
+	}
+	if _, err := os.Stat(configPath); !os.IsNotExist(err) {
+		t.Fatalf("session-only trust must not persist config, stat error: %v", err)
+	}
+}
+
+func TestRememberedProjectApprovalPersistsConfig(t *testing.T) {
+	app := newTestApp(t)
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	app.cfg.ConfigFile = configPath
+	app.pendingProjectPath = filepath.Join(t.TempDir(), "project")
+	_, _ = app.Update(projectApprovalMsg{response: agent.ConfirmationResponse{Allow: true, Always: true}})
+	if _, err := os.Stat(configPath); err != nil {
+		t.Fatalf("remembered trust did not persist config: %v", err)
+	}
+}
+
+func TestShellPermissionIncludesCommandAndRisk(t *testing.T) {
+	info := permissionInfoForTool(ai.ToolCall{
+		Name: "run_shell_command",
+		Args: map[string]any{"command": "go test ./...", "working_directory": "/workspace"},
+	}, "Run")
+	if info.Action != "Execute shell command" || info.Risk == "" {
+		t.Fatalf("unexpected shell permission metadata: %+v", info)
+	}
+	if len(info.Fields) < 2 {
+		t.Fatalf("shell permission is missing command context: %+v", info.Fields)
 	}
 }
 

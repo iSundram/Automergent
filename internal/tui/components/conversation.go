@@ -10,6 +10,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/iSundram/Automergent/internal/tools"
 	"github.com/iSundram/Automergent/internal/tui/render"
@@ -39,6 +40,9 @@ type Conversation struct {
 	height     int
 	streaming  bool
 	reviewMode bool
+	emptyState string
+	welcome    bool
+	browsing   bool
 	// Builders used during streaming to avoid quadratic concatenation
 	currentBuilder        *strings.Builder
 	currentThoughtBuilder *strings.Builder
@@ -53,7 +57,7 @@ func (c *Conversation) refreshWithFollow(shouldFollow bool) {
 
 func NewConversation(styles *themes.Styles) Conversation {
 	vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
-	vp.MouseWheelEnabled = false // Enforce keyboard-only scrolling
+	vp.MouseWheelEnabled = true
 	vp.KeyMap.Up.SetKeys("up")
 	vp.KeyMap.Down.SetKeys("down")
 	return Conversation{viewport: vp, styles: styles}
@@ -62,7 +66,7 @@ func NewConversation(styles *themes.Styles) Conversation {
 func (c *Conversation) ensureViewport() {
 	if c.viewport.Width() == 0 && c.viewport.Height() == 0 {
 		vp := viewport.New(viewport.WithWidth(80), viewport.WithHeight(20))
-		vp.MouseWheelEnabled = false
+		vp.MouseWheelEnabled = true
 		vp.KeyMap.Up.SetKeys("up")
 		vp.KeyMap.Down.SetKeys("down")
 		c.viewport = vp
@@ -80,9 +84,47 @@ func (c *Conversation) SetSize(w, h int) {
 	}
 	c.width = w
 	c.height = h
-	c.viewport.SetWidth(w)
+	viewportWidth := w
+	if c.browsing {
+		viewportWidth--
+	}
+	if viewportWidth < 1 {
+		viewportWidth = 1
+	}
+	c.viewport.SetWidth(viewportWidth)
 	c.viewport.SetHeight(h)
 	c.refreshWithFollow(shouldFollow)
+}
+
+// SetEmptyState sets content shown only while the conversation has no messages.
+func (c *Conversation) SetEmptyState(content string) {
+	c.emptyState = content
+	c.welcome = false
+	c.refresh()
+}
+
+// SetWelcomeState shows the structured new-session welcome until the first
+// conversation message arrives.
+func (c *Conversation) SetWelcomeState() {
+	c.emptyState = "Automergent is ready"
+	c.welcome = true
+	c.refresh()
+}
+
+func (c *Conversation) SetBrowsing(enabled bool) {
+	c.browsing = enabled
+	c.viewport.MouseWheelEnabled = enabled
+	if c.width > 0 {
+		width := c.width
+		if enabled {
+			width--
+		}
+		if width < 1 {
+			width = 1
+		}
+		c.viewport.SetWidth(width)
+	}
+	c.refresh()
 }
 
 func (c *Conversation) AddMessage(role, content string, isError bool) {
@@ -261,9 +303,19 @@ func (c *Conversation) Clear() {
 
 // FinalizeStreaming ends streaming mode and re-renders to apply markdown.
 func (c *Conversation) FinalizeStreaming() {
+	c.FinalizeStreamingWithContent("")
+}
+
+// FinalizeStreamingWithContent ends streaming and uses the provider's final
+// response, when supplied, as the authoritative complete text.
+func (c *Conversation) FinalizeStreamingWithContent(final string) {
 	if c.streaming {
 		// Flush builders to last message
-		if c.currentBuilder != nil && len(c.messages) > 0 {
+		if len(c.messages) > 0 && strings.TrimSpace(final) != "" {
+			last := &c.messages[len(c.messages)-1]
+			last.Content = final
+			c.currentBuilder = nil
+		} else if c.currentBuilder != nil && len(c.messages) > 0 {
 			last := &c.messages[len(c.messages)-1]
 			last.Content = c.currentBuilder.String()
 			c.currentBuilder = nil
@@ -310,6 +362,20 @@ func (c *Conversation) refresh() {
 	if msgW < 20 {
 		msgW = 20
 	}
+	if len(c.messages) == 0 && c.emptyState != "" {
+		if c.welcome {
+			c.viewport.SetContent(c.renderWelcome(w))
+			return
+		}
+		empty := lipgloss.NewStyle().
+			Width(w).
+			Align(lipgloss.Center).
+			Foreground(c.styles.T.Subtext).
+			PaddingTop(2).
+			Render(c.emptyState)
+		c.viewport.SetContent(empty)
+		return
+	}
 
 	lastIdx := len(c.messages) - 1
 	for i, m := range c.messages {
@@ -346,6 +412,11 @@ func (c *Conversation) refresh() {
 			sb.WriteString("\n")
 
 		case "assistant":
+			responseW := w - 2
+			if responseW < 1 {
+				responseW = 1
+			}
+
 			// Render thinking separately (if present) without the Automergent label
 			if m.Thought != "" {
 				thinkingBox := c.renderThoughtBox(m.Thought, msgW)
@@ -354,12 +425,13 @@ func (c *Conversation) refresh() {
 
 			// Render the main response bubble if there's actual content
 			if m.Content != "" || m.IsError {
+				if i > 0 && c.messages[i-1].Role == "tool_call" {
+					sb.WriteString("\n")
+				}
 				labelStr := " ⟡ Automergent "
-				bubbleStyle := c.styles.AssistantBubble
 
 				if m.IsError {
 					labelStr = " ⟡ Automergent (Error) "
-					bubbleStyle = bubbleStyle.Copy().BorderForeground(c.styles.T.Red)
 				}
 
 				label := c.styles.AssistantLabel.Render(labelStr)
@@ -368,17 +440,22 @@ func (c *Conversation) refresh() {
 				var content string
 				if c.streaming && isLast {
 					// During streaming, just show raw text
-					content = strings.TrimSpace(m.Content)
+					content = ansi.Hardwrap(
+						ansi.Wordwrap(strings.TrimSpace(m.Content), responseW, ""),
+						responseW,
+						true,
+					)
 				} else {
 					// Render markdown for completed messages
-					content = render.Markdown(strings.TrimSpace(m.Content))
+					content = render.MarkdownWithWidth(strings.TrimSpace(m.Content), responseW)
 				}
 				if m.IsError {
-					content = c.styles.Error.Render(strings.TrimSpace(m.Content))
+					content = c.styles.Error.MaxWidth(responseW).Render(strings.TrimSpace(m.Content))
 				}
+				content = ansi.Hardwrap(content, responseW, true)
 
-				bubble := bubbleStyle.Width(msgW).Render(content)
-				sb.WriteString(label + "\n" + bubble + "\n")
+				response := c.styles.AssistantBubble.MaxWidth(responseW).Render(indentLines(content, 1))
+				sb.WriteString(label + "\n" + response + "\n\n")
 			} else if m.Thought != "" {
 				// If we only have thinking (no response yet), add spacing
 				sb.WriteString("\n")
@@ -392,6 +469,64 @@ func (c *Conversation) refresh() {
 		}
 	}
 	c.viewport.SetContent(sb.String())
+}
+
+func (c *Conversation) renderWelcome(width int) string {
+	contentW := min(64, width-8)
+	if contentW < 28 {
+		contentW = max(1, width-2)
+	}
+
+	brand := lipgloss.NewStyle().
+		Foreground(c.styles.T.Accent).
+		Bold(true).
+		Render("⟡  AUTOMERGENT")
+	title := lipgloss.NewStyle().
+		Foreground(c.styles.T.Text).
+		Bold(true).
+		Render("Your workspace is ready")
+	description := lipgloss.NewStyle().
+		Foreground(c.styles.T.Subtext).
+		Render("Describe what you want to build, fix, or explore.")
+
+	shortcutKey := lipgloss.NewStyle().Foreground(c.styles.T.Accent).Bold(true)
+	shortcutText := lipgloss.NewStyle().Foreground(c.styles.T.Muted)
+	shortcuts := shortcutKey.Render("/ ") + shortcutText.Render("commands") +
+		shortcutText.Render("   ·   ") + shortcutKey.Render("@ ") + shortcutText.Render("files") +
+		shortcutText.Render("   ·   ") + shortcutKey.Render("? ") + shortcutText.Render("help")
+	if contentW < 43 {
+		shortcuts = shortcutKey.Render("/ ") + shortcutText.Render("commands") + "   " +
+			shortcutKey.Render("@ ") + shortcutText.Render("files") + "   " +
+			shortcutKey.Render("? ") + shortcutText.Render("help")
+	}
+
+	block := lipgloss.JoinVertical(lipgloss.Center,
+		brand,
+		"",
+		title,
+		description,
+		"",
+		shortcuts,
+	)
+	return lipgloss.NewStyle().
+		Width(width).
+		Align(lipgloss.Center).
+		PaddingTop(2).
+		Render(lipgloss.NewStyle().Width(contentW).Align(lipgloss.Center).Render(block))
+}
+
+func indentLines(content string, spaces int) string {
+	if content == "" || spaces <= 0 {
+		return content
+	}
+	prefix := strings.Repeat(" ", spaces)
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		if line != "" {
+			lines[i] = prefix + line
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (c *Conversation) renderThoughtBox(thought string, width int) string {
@@ -453,13 +588,13 @@ func (c *Conversation) renderThought(thought string, width int) string {
 func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 	// 1. Status & Color Logic
 	statusColor := c.styles.T.Yellow
-	statusText := "󱓞 RUNNING"
+	statusText := "󱓞 Running"
 	if m.Status == "done" {
 		statusColor = c.styles.T.Green
-		statusText = "󰄬 COMPLETED"
+		statusText = "󰄬 Completed"
 	} else if m.Status == "error" {
 		statusColor = c.styles.T.Red
-		statusText = "󰅙 FAILED"
+		statusText = "󰅙 Failed"
 	}
 
 	// 2. Tool-Specific Branding & Pretty Naming
@@ -495,10 +630,6 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 	case "list_directory":
 		prettyName = "List directory"
 		icon = "󰉋"
-		accentColor = c.styles.T.Blue
-	case "structure":
-		prettyName = "Structure"
-		icon = "󰙅"
 		accentColor = c.styles.T.Blue
 	case "search":
 		prettyName = "Deep Search"
@@ -599,12 +730,11 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 	}
 
 	// 3. Styles
-	iconStyle := lipgloss.NewStyle().Foreground(c.styles.T.Background).Background(accentColor).Padding(0, 1).Bold(true)
+	iconStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 	statusStyle := lipgloss.NewStyle().Foreground(statusColor).Bold(true).Padding(0, 1)
-	dimLabel := c.styles.Dim.Copy().Bold(true).SetString(" ")
 
 	// 4. Header Construction
-	nameStyled := c.styles.ToolName.Copy().Foreground(c.styles.T.Text).Render(" " + prettyName)
+	nameStyled := c.styles.ToolName.Copy().Foreground(c.styles.T.Text).Render("  " + prettyName)
 	headerLeft := lipgloss.JoinHorizontal(lipgloss.Center, iconStyle.Render(icon), nameStyled, statusStyle.Render(statusText))
 
 	// Extract and Truncate Path for the right side
@@ -637,33 +767,48 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 	// 5. Detailed Body Construction
 	var body strings.Builder
 	hasBody := false
+	appendField := func(label, value string, valueStyle lipgloss.Style) {
+		if strings.TrimSpace(value) == "" {
+			return
+		}
+		if !hasBody {
+			body.WriteString("\n\n")
+		} else {
+			body.WriteString("\n")
+		}
+		hasBody = true
+		labelWidth := 10
+		labelText := c.styles.Dim.Render(fmt.Sprintf("%-*s", labelWidth, label))
+		lines := strings.Split(strings.TrimSpace(value), "\n")
+		body.WriteString("  " + labelText + valueStyle.Render(lines[0]))
+		continuation := "  " + strings.Repeat(" ", labelWidth)
+		for _, line := range lines[1:] {
+			body.WriteString("\n" + continuation + valueStyle.Render(line))
+		}
+	}
 
 	isLightweight := m.ToolName == "read_file" || m.ToolName == "view" || m.ToolName == "list_directory"
 	showDetails := c.reviewMode || !isLightweight
 
 	// Section: Parameters
 	if showDetails && m.ToolArgs != "" && m.ToolArgs != "{}" {
-		hasBody = true
-		body.WriteString("\n" + dimLabel.Render("󰧑 PARAMETERS"))
 		var args map[string]any
 		if err := json.Unmarshal([]byte(m.ToolArgs), &args); err == nil {
-			for k, v := range args {
-				if k == "path" || k == "command" || k == "pattern" || k == "url" || k == "query" {
-					body.WriteString(fmt.Sprintf("\n  %s: %v", c.styles.Dim.Render(strings.ToUpper(k)), v))
+			for _, key := range []string{"path", "command", "pattern", "url", "query"} {
+				if value, ok := args[key]; ok {
+					appendField(strings.ToUpper(key[:1])+key[1:], fmt.Sprint(value), lipgloss.NewStyle().Foreground(c.styles.T.Text))
 				}
 			}
 		}
 		if c.reviewMode {
-			body.WriteString("\n" + render.Code(m.ToolArgs, "json"))
+			appendField("Details", render.Code(m.ToolArgs, "json"), lipgloss.NewStyle())
 		}
 	}
 
 	// Section: Output / Summary
 	if showDetails && (m.Status == "done" || m.Status == "error") {
-		hasBody = true
-		body.WriteString("\n\n" + dimLabel.Render("󰗡 EXECUTION RESULT"))
 		if m.ToolSummary != "" {
-			body.WriteString("\n  " + c.styles.Dim.Italic(true).Render(m.ToolSummary))
+			appendField("Result", m.ToolSummary, c.styles.Dim.Copy().Italic(true))
 		}
 
 		if m.Content != "" {
@@ -674,11 +819,10 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 					resultText = strings.Join(lines[:3], "\n") + "\n  " + c.styles.Dim.Render("... (truncated, use Ctrl+R for full)")
 				}
 			}
-			body.WriteString("\n" + lipgloss.NewStyle().PaddingLeft(2).Faint(true).Render(resultText))
+			appendField("Output", resultText, lipgloss.NewStyle().Foreground(c.styles.T.Subtext).Faint(true))
 		}
 	} else if m.Status == "running" && (m.ToolName == "write_file" || m.ToolName == "edit_file") && m.Content != "" {
-		hasBody = true
-		body.WriteString("\n\n" + dimLabel.Render("󰗡 PROPOSED CHANGES"))
+		appendField("Changes", "Proposed changes", c.styles.Dim.Copy())
 		lines := strings.Split(strings.TrimSpace(m.Content), "\n")
 
 		// Smart Fitting Logic:
@@ -709,14 +853,9 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 	}
 
 	// 6. Assembly
-	cardContent := header
-	if hasBody {
-		sep := lipgloss.NewStyle().Foreground(c.styles.T.BorderNormal).Faint(true).Render(strings.Repeat("─", availableWidth))
-		cardContent += "\n" + sep + body.String()
-	}
+	cardContent := header + body.String()
 
 	return lipgloss.NewStyle().
-		Background(c.styles.T.Surface).
 		Border(lipgloss.ThickBorder(), false, false, false, true).
 		BorderForeground(accentColor).
 		Padding(0, 1).
@@ -736,7 +875,40 @@ func (c Conversation) Update(msg tea.Msg) (Conversation, tea.Cmd) {
 }
 
 func (c Conversation) View() string {
-	return c.viewport.View()
+	content := c.viewport.View()
+	if !c.browsing || c.viewport.TotalLineCount() <= c.viewport.VisibleLineCount() {
+		return content
+	}
+	trackHeight := c.viewport.Height()
+	total := c.viewport.TotalLineCount()
+	visible := c.viewport.VisibleLineCount()
+	thumbHeight := visible * trackHeight / total
+	if thumbHeight < 1 {
+		thumbHeight = 1
+	}
+	maxOffset := total - visible
+	maxTop := trackHeight - thumbHeight
+	thumbTop := 0
+	if maxOffset > 0 {
+		thumbTop = c.viewport.YOffset() * maxTop / maxOffset
+	}
+	bar := make([]string, trackHeight)
+	for i := range bar {
+		bar[i] = "░"
+		if i >= thumbTop && i < thumbTop+thumbHeight {
+			bar[i] = "█"
+		}
+	}
+	trackStyle := lipgloss.NewStyle().Foreground(c.styles.T.Muted)
+	thumbStyle := lipgloss.NewStyle().Foreground(c.styles.T.Accent)
+	for i := range bar {
+		if bar[i] == "█" {
+			bar[i] = thumbStyle.Render(bar[i])
+		} else {
+			bar[i] = trackStyle.Render(bar[i])
+		}
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, content, strings.Join(bar, "\n"))
 }
 
 // MessageCount returns the number of conversation entries.

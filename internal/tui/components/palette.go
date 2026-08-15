@@ -12,14 +12,19 @@ import (
 
 // PaletteItem represents an entry in the command palette.
 type PaletteItem struct {
-	Label       string
-	Value       string
-	Description string
-	Icon        string
-	Category    string
+	Label          string
+	Value          string
+	Description    string
+	Icon           string
+	Category       string
+	Hint           string
+	Current        bool
+	Disabled       bool
+	DisabledReason string
+	SearchTerms    string
 }
 
-// CommandPalette renders the "/" and "?" overlay.
+// CommandPalette renders the inline command, model, provider and file browser.
 type CommandPalette struct {
 	styles       *themes.Styles
 	width        int
@@ -31,27 +36,15 @@ type CommandPalette struct {
 	query        string
 }
 
-// NewCommandPalette creates a new CommandPalette.
-func NewCommandPalette(styles *themes.Styles) CommandPalette {
-	return CommandPalette{styles: styles}
-}
+func NewCommandPalette(styles *themes.Styles) CommandPalette { return CommandPalette{styles: styles} }
 
-// SetSize updates the palette dimensions.
-func (p *CommandPalette) SetSize(w, h int) {
-	p.width = w
-	p.height = h
-}
+func (p *CommandPalette) SetSize(w, h int) { p.width, p.height = w, h }
 
-// Show makes the palette visible with a set of items.
 func (p *CommandPalette) Show(items []PaletteItem, query string) {
-	p.items = items
-	p.query = query
-	p.cursor = 0
-	p.scrollOffset = 0
-	p.visible = true
+	p.items, p.query = items, query
+	p.cursor, p.scrollOffset, p.visible = 0, 0, true
 }
 
-// SetItems updates the items in the palette.
 func (p *CommandPalette) SetItems(items []PaletteItem) {
 	p.items = items
 	if p.cursor >= len(p.items) && len(p.items) > 0 {
@@ -60,33 +53,23 @@ func (p *CommandPalette) SetItems(items []PaletteItem) {
 	p.updateScroll()
 }
 
+func (p *CommandPalette) SetQuery(query string) { p.query = query }
+
 func (p *CommandPalette) updateScroll() {
 	maxItems := p.MaxVisibleItems()
-
 	if p.cursor < p.scrollOffset {
 		p.scrollOffset = p.cursor
-	} else if p.cursor >= p.scrollOffset+maxItems {
+	}
+	if p.cursor >= p.scrollOffset+maxItems {
 		p.scrollOffset = p.cursor - maxItems + 1
 	}
 }
 
-// SetWidth updates the palette width.
-func (p *CommandPalette) SetWidth(w int) {
-	p.width = w
-}
-
-// Items returns the current items in the palette.
+func (p *CommandPalette) SetWidth(w int)      { p.width = w }
 func (p CommandPalette) Items() []PaletteItem { return p.items }
+func (p *CommandPalette) Hide()               { p.visible = false }
+func (p CommandPalette) Visible() bool        { return p.visible }
 
-// Hide hides the palette.
-func (p *CommandPalette) Hide() {
-	p.visible = false
-}
-
-// Visible returns whether the palette is visible.
-func (p CommandPalette) Visible() bool { return p.visible }
-
-// Selected returns the currently highlighted item.
 func (p CommandPalette) Selected() *PaletteItem {
 	if len(p.items) == 0 {
 		return nil
@@ -94,14 +77,35 @@ func (p CommandPalette) Selected() *PaletteItem {
 	return &p.items[p.cursor]
 }
 
-// Update handles key events.
+func (p CommandPalette) previousCategory() int {
+	current := p.items[p.cursor].Category
+	for i := p.cursor - 1; i >= 0; i-- {
+		if p.items[i].Category != current {
+			category := p.items[i].Category
+			for i > 0 && p.items[i-1].Category == category {
+				i--
+			}
+			return i
+		}
+	}
+	return p.cursor
+}
+
+func (p CommandPalette) nextCategory() int {
+	current := p.items[p.cursor].Category
+	for i := p.cursor + 1; i < len(p.items); i++ {
+		if p.items[i].Category != current {
+			return i
+		}
+	}
+	return p.cursor
+}
+
 func (p CommandPalette) Update(msg tea.Msg) (CommandPalette, tea.Cmd) {
 	if !p.visible || len(p.items) == 0 {
 		return p, nil
 	}
-
-	switch m := msg.(type) {
-	case tea.KeyMsg:
+	if m, ok := msg.(tea.KeyMsg); ok {
 		switch m.String() {
 		case "up", "ctrl+p":
 			if p.cursor > 0 {
@@ -109,136 +113,209 @@ func (p CommandPalette) Update(msg tea.Msg) (CommandPalette, tea.Cmd) {
 			} else {
 				p.cursor = len(p.items) - 1
 			}
-			p.updateScroll()
 		case "down", "ctrl+n", "tab":
 			if p.cursor < len(p.items)-1 {
 				p.cursor++
 			} else {
 				p.cursor = 0
 			}
-			p.updateScroll()
+		case "pgup":
+			p.cursor = max(0, p.cursor-p.MaxVisibleItems())
+		case "pgdown":
+			p.cursor = min(len(p.items)-1, p.cursor+p.MaxVisibleItems())
+		case "shift+tab":
+			p.cursor = p.previousCategory()
+		case "ctrl+tab":
+			p.cursor = p.nextCategory()
 		}
+		p.updateScroll()
 	}
-
+	if m, ok := msg.(tea.MouseMsg); ok {
+		switch m.Mouse().Button {
+		case tea.MouseWheelUp:
+			p.cursor = max(0, p.cursor-1)
+		case tea.MouseWheelDown:
+			p.cursor = min(len(p.items)-1, p.cursor+1)
+		}
+		p.updateScroll()
+	}
 	return p, nil
 }
 
-// View renders the palette as a full-width inline list (shown below the input).
 func (p CommandPalette) View() string {
 	if !p.visible || p.width <= 0 || p.height <= 0 {
 		return ""
 	}
+	w := max(12, p.width)
+	rule := lipgloss.NewStyle().Foreground(p.styles.T.BorderNormal).Render(strings.Repeat("─", w))
+	title, symbol := "Commands", "/"
+	if len(p.items) > 0 {
+		switch p.items[0].Category {
+		case "Models":
+			title, symbol = "Models", "󰊕"
+		case "Providers":
+			title, symbol = "Providers", "󰒋"
+		case "Files":
+			title, symbol = "Files", "@"
+		case "Modes":
+			title, symbol = "Modes", "󰒓"
+		}
+	}
+	count := fmt.Sprintf("%d of %d", min(p.cursor+1, len(p.items)), len(p.items))
+	headerLeft := lipgloss.NewStyle().Foreground(p.styles.T.Accent).Bold(true).Render("  "+symbol+"  ") +
+		lipgloss.NewStyle().Foreground(p.styles.T.Text).Bold(true).Render(strings.ToUpper(title))
+	header := joinEnds(headerLeft, lipgloss.NewStyle().Foreground(p.styles.T.Muted).Render(count)+"  ", w)
 
-	innerW := p.width
-
-	// Items list with scrolling
-	var rows []string
 	maxItems := p.MaxVisibleItems()
-
-	end := p.scrollOffset + maxItems
-	if end > len(p.items) {
-		end = len(p.items)
-	}
-
+	end := min(p.scrollOffset+maxItems, len(p.items))
+	rows := make([]string, 0, maxItems)
 	for i := p.scrollOffset; i < end; i++ {
-		rows = append(rows, p.renderItem(p.items[i], i == p.cursor, innerW))
+		if p.items[i].Category != "" && (i == p.scrollOffset || p.items[i-1].Category != p.items[i].Category) {
+			rows = append(rows, p.renderCategory(p.items[i].Category, w-2))
+		}
+		rows = append(rows, p.renderItem(p.items[i], i == p.cursor, w-2))
 	}
-
 	if len(rows) == 0 {
-		rows = append(rows, lipgloss.NewStyle().
-			Foreground(p.styles.T.Muted).
-			Italic(true).
-			PaddingLeft(3).
-			Render("No matches"))
+		rows = append(rows, lipgloss.NewStyle().Foreground(p.styles.T.Muted).Italic(true).PaddingLeft(4).Width(w-2).Render("No matching results"))
 	}
+	rows = p.addScrollbar(rows, maxItems)
 
-	list := lipgloss.JoinVertical(lipgloss.Left, rows...)
-
-	// Footer hint line: position + navigation help
-	pos := fmt.Sprintf("%d/%d", p.cursor+1, len(p.items))
-	hint := lipgloss.NewStyle().
-		Foreground(p.styles.T.Muted).
-		PaddingLeft(3).
-		Render(fmt.Sprintf("%s  ↑↓ navigate · ⏎ select · esc dismiss", pos))
-
-	return lipgloss.JoinVertical(lipgloss.Left, list, hint)
+	footerText := "↑↓ navigate · enter select · esc close"
+	if w >= 70 {
+		footerText = "↑↓ navigate · pgup/pgdn page · ctrl+tab section · enter select · esc close"
+	}
+	footer := lipgloss.NewStyle().Foreground(p.styles.T.Muted).PaddingLeft(2).
+		MaxWidth(max(1, w-2)).Render(footerText)
+	return lipgloss.JoinVertical(lipgloss.Left, rule, header, "", lipgloss.JoinVertical(lipgloss.Left, rows...), "", rule, footer)
 }
 
-// MaxVisibleItems returns how many rows the palette shows at once.
+func (p CommandPalette) addScrollbar(rows []string, viewport int) []string {
+	if len(p.items) <= viewport {
+		return rows
+	}
+	trackHeight := len(rows)
+	thumbSize := max(1, trackHeight*viewport/len(p.items))
+	thumbTop := 0
+	if len(p.items) > viewport {
+		thumbTop = p.scrollOffset * (trackHeight - thumbSize) / (len(p.items) - viewport)
+	}
+	for i, row := range rows {
+		bar := "│"
+		if i >= thumbTop && i < thumbTop+thumbSize {
+			bar = "┃"
+		}
+		rows[i] = lipgloss.NewStyle().Width(p.width-2).MaxWidth(p.width-2).Render(row) +
+			lipgloss.NewStyle().Foreground(p.styles.T.BorderNormal).Render(bar) + " "
+	}
+	return rows
+}
+
 func (p CommandPalette) MaxVisibleItems() int {
 	maxItems := 8
-	if p.height > 0 && p.height < 15 {
-		maxItems = p.height - 6
+	if p.height > 0 && p.height < 18 {
+		maxItems = p.height - 9
 	}
-	if maxItems < 1 {
-		maxItems = 1
-	}
-	return maxItems
+	return max(1, maxItems)
 }
 
-// Height returns the total rendered height of the palette (list + hint line).
 func (p CommandPalette) Height() int {
 	if !p.visible {
 		return 0
 	}
-	visible := len(p.items) - p.scrollOffset
-	if max := p.MaxVisibleItems(); visible > max {
-		visible = max
-	}
+	visible := min(len(p.items), p.MaxVisibleItems())
 	if visible < 1 {
-		visible = 1 // "No matches" row
+		visible = 1
 	}
-	return visible + 1 // + hint line
+	headings := 0
+	end := min(p.scrollOffset+visible, len(p.items))
+	for i := p.scrollOffset; i < end; i++ {
+		if p.items[i].Category != "" && (i == p.scrollOffset || p.items[i-1].Category != p.items[i].Category) {
+			headings++
+		}
+	}
+	return visible + headings + 6 // rules, header, two breathing rows and footer
+}
+
+func (p CommandPalette) renderCategory(category string, width int) string {
+	label := lipgloss.NewStyle().Foreground(p.styles.T.Muted).Bold(true).Render(strings.ToUpper(category))
+	return lipgloss.NewStyle().Width(width).MaxWidth(width).PaddingLeft(4).Render(label)
 }
 
 func (p CommandPalette) renderItem(item PaletteItem, selected bool, width int) string {
-	// 1. Base style for the entire row
-	rowStyle := lipgloss.NewStyle().Width(width).MaxWidth(width)
+	indicator := "  "
 	if selected {
-		rowStyle = rowStyle.Background(p.styles.T.Surface)
+		indicator = lipgloss.NewStyle().Foreground(p.styles.T.Accent).Render("▍ ")
 	}
-
-	// 2. Indicator (▍ or space), aligned with the input prompt
-	indicator := "   "
+	icon := item.Icon
+	if icon == "" {
+		icon = "·"
+	}
+	textColor := p.styles.T.Text
 	if selected {
-		indicator = " " + lipgloss.NewStyle().Foreground(p.styles.T.Accent).Render("▍") + " "
+		textColor = p.styles.T.Subtext
 	}
-
-	// 3. Label (Left part)
-	labelStyle := lipgloss.NewStyle().Foreground(p.styles.T.Text)
+	if item.Disabled {
+		textColor = p.styles.T.Muted
+	}
+	iconStyle := lipgloss.NewStyle().Foreground(p.styles.T.Muted)
+	labelStyle := lipgloss.NewStyle().Foreground(textColor)
 	if selected {
-		labelStyle = labelStyle.Foreground(p.styles.T.Accent).Bold(true)
+		iconStyle = iconStyle.Foreground(p.styles.T.Accent)
+		labelStyle = labelStyle.Bold(true)
 	}
-	labelPart := labelStyle.Render(item.Label)
-
-	left := lipgloss.JoinHorizontal(lipgloss.Top, indicator, labelPart)
-	leftW := lipgloss.Width(left)
-
-	// 4. Description follows the label on the same line
-	descStyle := lipgloss.NewStyle().Foreground(p.styles.T.Muted)
-
-	// Calculate available space for description
-	maxDescW := width - leftW - 4
-	desc := item.Description
-	if maxDescW < 5 {
-		desc = ""
-	} else if lipgloss.Width(desc) > maxDescW {
-		desc = lipgloss.NewStyle().MaxWidth(maxDescW).Render(desc + "...")
+	prefix := "  " + indicator + iconStyle.Render(icon) + "  "
+	label := p.renderMatch(item.Label, labelStyle)
+	if item.Hint != "" {
+		label += lipgloss.NewStyle().Foreground(p.styles.T.Muted).Render(" " + item.Hint)
 	}
-	descPart := descStyle.Render(desc)
-
-	// Pad label column so descriptions align
-	labelColW := 22
-	gapW := labelColW - leftW
-	if gapW < 2 {
-		gapW = 2
+	left := prefix + label
+	if item.Current {
+		left += lipgloss.NewStyle().Foreground(p.styles.T.Green).Render("  󰄬 Current")
+	}
+	if item.Disabled && item.DisabledReason != "" {
+		item.Description = item.DisabledReason
 	}
 
-	content := lipgloss.JoinHorizontal(lipgloss.Top,
-		left,
-		strings.Repeat(" ", gapW),
-		descPart,
-	)
+	available := width - lipgloss.Width(left) - 3
+	desc := ""
+	if available >= 18 && item.Description != "" {
+		descText := truncateCells(item.Description, available)
+		desc = strings.Repeat(" ", max(2, available-lipgloss.Width(descText))) +
+			lipgloss.NewStyle().Foreground(p.styles.T.Muted).Render(descText) + " "
+	}
+	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(left + desc)
+}
 
-	return rowStyle.Render(content)
+func (p CommandPalette) renderMatch(label string, base lipgloss.Style) string {
+	query := strings.TrimSpace(strings.TrimLeft(p.query, "/@?"))
+	if query == "" {
+		return base.Render(label)
+	}
+	start := strings.Index(strings.ToLower(label), strings.ToLower(query))
+	if start < 0 {
+		return base.Render(label)
+	}
+	end := start + len(query)
+	return base.Render(label[:start]) +
+		base.Foreground(p.styles.T.Accent).Underline(true).Render(label[start:end]) +
+		base.Render(label[end:])
+}
+
+func joinEnds(left, right string, width int) string {
+	gap := max(1, width-lipgloss.Width(left)-lipgloss.Width(right))
+	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(left + strings.Repeat(" ", gap) + right)
+}
+
+func truncateCells(s string, width int) string {
+	if lipgloss.Width(s) <= width {
+		return s
+	}
+	if width <= 1 {
+		return ""
+	}
+	r := []rune(s)
+	for len(r) > 0 && lipgloss.Width(string(r))+1 > width {
+		r = r[:len(r)-1]
+	}
+	return string(r) + "…"
 }

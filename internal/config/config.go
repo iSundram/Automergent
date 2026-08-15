@@ -1,9 +1,11 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -36,7 +38,7 @@ type Config struct {
 
 	NoAnimation bool   `mapstructure:"noAnimation" yaml:"noAnimation"`
 	NoColor     bool   `mapstructure:"noColor" yaml:"noColor"`
-	NoTUI       bool   `mapstructure:"noTui" yaml:"noTui"`
+	NoTUI       bool   `mapstructure:"noTui" yaml:"-"` // CLI-only flag, never persisted
 	Output      string `mapstructure:"output" yaml:"output"`
 	Quiet       bool   `mapstructure:"quiet" yaml:"quiet"`
 	Verbose     bool   `mapstructure:"verbose" yaml:"verbose"`
@@ -65,6 +67,8 @@ type Config struct {
 	ProviderFallback []FallbackProvider `mapstructure:"providerFallback" yaml:"providerFallback,omitempty"`
 
 	Notifications NotificationConfig `mapstructure:"notifications" yaml:"notifications"`
+	// Coordinator holds multi-agent coordination settings.
+	Coordinator CoordinatorConfig `mapstructure:"coordinator" yaml:"coordinator"`
 	// ConfirmationTimeout controls the default timeout for user confirmation dialogs (e.g., tool execution).
 	// Accepts any time.Duration string (e.g., "5m", "10m"). If empty, defaults to 10m.
 	ConfirmationTimeout string `mapstructure:"confirmationTimeout" yaml:"confirmationTimeout,omitempty"`
@@ -85,6 +89,8 @@ type PromptCacheConfig struct {
 }
 
 // Save writes the current configuration back to disk.
+// If ConfigFile is set, it writes back to that file (preserving format).
+// Otherwise, it defaults to ~/.automergent/config.yaml.
 func (c *Config) Save() error {
 	path := c.ConfigFile
 	if path == "" {
@@ -100,9 +106,19 @@ func (c *Config) Save() error {
 		return fmt.Errorf("config save: mkdir: %w", err)
 	}
 
-	data, err := yaml.Marshal(c)
-	if err != nil {
-		return fmt.Errorf("config save: marshal: %w", err)
+	// Marshal in the format matching the file extension.
+	var data []byte
+	var marshalErr error
+	ext := strings.ToLower(filepath.Ext(path))
+	switch ext {
+	case ".json":
+		data, marshalErr = json.MarshalIndent(c, "", "  ")
+	default:
+		// Default to YAML for .yaml, .yml, or unknown extensions.
+		data, marshalErr = yaml.Marshal(c)
+	}
+	if marshalErr != nil {
+		return fmt.Errorf("config save: marshal: %w", marshalErr)
 	}
 
 	// Use atomic write to avoid corrupting the config file if the process is killed.
@@ -243,6 +259,26 @@ type NotificationConfig struct {
 	Desktop        bool `mapstructure:"desktop" yaml:"desktop"`
 	Bell           bool `mapstructure:"bell" yaml:"bell"`
 	ContextWarning bool `mapstructure:"contextWarning" yaml:"contextWarning"`
+}
+
+// CoordinatorConfig holds multi-agent coordination settings.
+type CoordinatorConfig struct {
+	Enabled         bool              `mapstructure:"enabled" yaml:"enabled"`
+	WorkersPerRole  map[string]int    `mapstructure:"workersPerRole" yaml:"workersPerRole,omitempty"`
+	ModelOverrides  map[string]string `mapstructure:"modelOverrides" yaml:"modelOverrides,omitempty"` // role → model
+	DefaultTimeout  string            `mapstructure:"defaultTimeout" yaml:"defaultTimeout,omitempty"`
+	MaxRetries      int               `mapstructure:"maxRetries" yaml:"maxRetries,omitempty"`
+	QualityThreshold float64          `mapstructure:"qualityThreshold" yaml:"qualityThreshold,omitempty"`
+	ConsensusThreshold int            `mapstructure:"consensusThreshold" yaml:"consensusThreshold,omitempty"`
+	ResourceLimits  CoordinatorResourceLimits `mapstructure:"resourceLimits" yaml:"resourceLimits,omitempty"`
+}
+
+// CoordinatorResourceLimits defines resource constraints for the coordinator.
+type CoordinatorResourceLimits struct {
+	MaxTokensPerTask   int `mapstructure:"maxTokensPerTask" yaml:"maxTokensPerTask,omitempty"`
+	MaxConcurrentTasks int `mapstructure:"maxConcurrentTasks" yaml:"maxConcurrentTasks,omitempty"`
+	MaxMemoryMB        int `mapstructure:"maxMemoryMB" yaml:"maxMemoryMB,omitempty"`
+	RateLimitPerMinute int `mapstructure:"rateLimitPerMinute" yaml:"rateLimitPerMinute,omitempty"`
 }
 
 // DiagnosticsConfig holds error detection configuration.

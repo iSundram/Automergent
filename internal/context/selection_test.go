@@ -20,7 +20,7 @@ func TestContextSelectorIncludesSignals(t *testing.T) {
 	graph.SetDependencies(dependent, []string{active})
 	ranker := NewRanker(DefaultRankingConfig())
 	budget := NewTokenBudget(ModelLimitsDefault, DefaultBudgetConfig())
-	detector := NewStalenessDetector(dir, StalenessConfig{StaleAfter: time.Hour, GitAware: false})
+	detector := NewStalenessDetector(dir, StalenessConfig{StaleAfter: time.Hour})
 	sel := NewContextSelector(graph, ranker, budget, detector)
 
 	items, signals, err := sel.SelectContext(context.Background(), "inspect active", []string{active}, 1000, true)
@@ -56,7 +56,7 @@ func TestContextSelectorDependencyToggle(t *testing.T) {
 	graph.SetDependencies(dependent, []string{active})
 	ranker := NewRanker(DefaultRankingConfig())
 	budget := NewTokenBudget(ModelLimitsDefault, DefaultBudgetConfig())
-	sel := NewContextSelector(graph, ranker, budget, NewStalenessDetector(dir, StalenessConfig{GitAware: false}))
+	sel := NewContextSelector(graph, ranker, budget, NewStalenessDetector(dir, StalenessConfig{}))
 
 	items, _, err := sel.SelectContext(context.Background(), "inspect active", []string{active}, 1000, false)
 	if err != nil {

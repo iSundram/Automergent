@@ -11,6 +11,7 @@ import (
 )
 
 // AgentRole defines the specialized role of a worker agent.
+// Role "" means any worker may take the task.
 type AgentRole string
 
 const (
@@ -77,8 +78,15 @@ type Task struct {
 	Status       TaskStatus
 	Result       *TaskResult
 	Retries      int
+	inQueue      bool
+	completionCh chan struct{}
+	ctx          context.Context    // task-scoped cancellable context
+	cancel       context.CancelFunc // cancels ctx on preemption
 	mu           sync.RWMutex
 }
+
+// AgentRole defines the specialized role of a worker agent.
+// Role "" means any worker may take the task.
 
 // TaskType categorizes the kind of work to be done.
 type TaskType string
@@ -171,6 +179,7 @@ type WorkerMetrics struct {
 type CoordinatorConfig struct {
 	MaxWorkers         int
 	WorkersPerRole     map[AgentRole]int
+	ModelOverrides     map[AgentRole]string // role → model override
 	DefaultTimeout     time.Duration
 	MaxRetries         int
 	EnableWorkStealing bool
@@ -179,6 +188,7 @@ type CoordinatorConfig struct {
 	ResourceLimits     ResourceLimits
 	Model              string
 	FallbackModel      string
+	EventsBufferSize   int
 }
 
 // ResourceLimits defines resource constraints per agent.
@@ -211,6 +221,7 @@ func DefaultConfig() *CoordinatorConfig {
 			MaxMemoryMB:        512,
 			RateLimitPerMinute: 60,
 		},
+		EventsBufferSize: 1024,
 	}
 }
 
@@ -239,6 +250,8 @@ const (
 	EventSynthesisDone  EventType = "synthesis_done"
 	EventConflict       EventType = "conflict_detected"
 	EventConsensus      EventType = "consensus_reached"
+	EventPhaseStart     EventType = "phase_start"
+	EventPhaseComplete  EventType = "phase_complete"
 )
 
 // SynthesisResult holds the output of result aggregation.

@@ -2,12 +2,7 @@ package context
 
 import (
 	"context"
-	"fmt"
-	"io"
 	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 )
@@ -44,56 +39,36 @@ type FileStatus struct {
 	State        StalenessState `json:"state"`
 	ModTime      time.Time      `json:"mod_time"`
 	CachedTime   time.Time      `json:"cached_time"`
-	GitStatus    GitFileStatus  `json:"git_status,omitempty"`
 	Hash         string         `json:"hash,omitempty"`
 	NeedsRefresh bool           `json:"needs_refresh"`
 }
 
-// GitFileStatus represents git status for a file.
-type GitFileStatus struct {
-	IsTracked   bool   `json:"is_tracked"`
-	HasChanges  bool   `json:"has_changes"`
-	IsStaged    bool   `json:"is_staged"`
-	IsNew       bool   `json:"is_new"`
-	IsDeleted   bool   `json:"is_deleted"`
-	DiffSummary string `json:"diff_summary,omitempty"`
-}
-
 // StalenessDetector tracks file freshness and cache validity.
 type StalenessDetector struct {
-	mu               sync.RWMutex
-	cache            map[string]*FileStatus
-	repoRoot         string
-	staleAfter       time.Duration
-	gitAware         bool
-	lastGitCheck     time.Time
-	gitCheckInterval time.Duration
+	mu         sync.RWMutex
+	cache      map[string]*FileStatus
+	repoRoot   string
+	staleAfter time.Duration
 }
 
 // StalenessConfig configures the staleness detector.
 type StalenessConfig struct {
-	StaleAfter       time.Duration
-	GitAware         bool
-	GitCheckInterval time.Duration
+	StaleAfter time.Duration
 }
 
 // DefaultStalenessConfig returns default configuration.
 func DefaultStalenessConfig() StalenessConfig {
 	return StalenessConfig{
-		StaleAfter:       5 * time.Minute,
-		GitAware:         true,
-		GitCheckInterval: 30 * time.Second,
+		StaleAfter: 5 * time.Minute,
 	}
 }
 
 // NewStalenessDetector creates a new staleness detector.
 func NewStalenessDetector(repoRoot string, cfg StalenessConfig) *StalenessDetector {
 	return &StalenessDetector{
-		cache:            make(map[string]*FileStatus),
-		repoRoot:         repoRoot,
-		staleAfter:       cfg.StaleAfter,
-		gitAware:         cfg.GitAware,
-		gitCheckInterval: cfg.GitCheckInterval,
+		cache:      make(map[string]*FileStatus),
+		repoRoot:   repoRoot,
+		staleAfter: cfg.StaleAfter,
 	}
 }
 
@@ -104,9 +79,9 @@ func (sd *StalenessDetector) Check(ctx context.Context, path string) (*FileStatu
 	sd.mu.RUnlock()
 
 	// Get current file info
-	info, err := os.Stat(path)
+	info, err := osStat(path)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if isNotExist(err) {
 			status := &FileStatus{
 				Path:         path,
 				State:        StateInvalid,
@@ -142,18 +117,6 @@ func (sd *StalenessDetector) Check(ctx context.Context, path string) (*FileStatu
 		status.State = StateFresh
 	}
 
-	// Add git awareness
-	if sd.gitAware {
-		gitStatus, err := sd.getGitStatus(ctx, path)
-		if err == nil {
-			status.GitStatus = gitStatus
-			if gitStatus.HasChanges {
-				status.State = StateModified
-				status.NeedsRefresh = true
-			}
-		}
-	}
-
 	sd.updateCache(path, status)
 	return status, nil
 }
@@ -164,18 +127,6 @@ func (sd *StalenessDetector) CheckBatch(ctx context.Context, paths []string) (ma
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	errCh := make(chan error, 1)
-
-	// Refresh git status for all files in batch (protected read of lastGitCheck)
-	if sd.gitAware {
-		sd.mu.RLock()
-		last := sd.lastGitCheck
-		sd.mu.RUnlock()
-		if time.Since(last) > sd.gitCheckInterval {
-			if err := sd.refreshGitStatus(ctx); err != nil {
-				// Non-fatal, continue without git info
-			}
-		}
-	}
 
 	for _, path := range paths {
 		wg.Add(1)
@@ -250,7 +201,6 @@ func (sd *StalenessDetector) Invalidate(path string) {
 
 	if status, exists := sd.cache[path]; exists {
 		status.NeedsRefresh = true
-		status.State = StateStale
 	}
 }
 
@@ -261,7 +211,6 @@ func (sd *StalenessDetector) InvalidateAll() {
 
 	for _, status := range sd.cache {
 		status.NeedsRefresh = true
-		status.State = StateStale
 	}
 }
 
@@ -279,157 +228,9 @@ func (sd *StalenessDetector) Clear() {
 	sd.cache = make(map[string]*FileStatus)
 }
 
-// updateCache safely updates the cache.
-func (sd *StalenessDetector) updateCache(path string, status *FileStatus) {
-	sd.mu.Lock()
-	defer sd.mu.Unlock()
-	sd.cache[path] = status
-}
-
-// getGitStatus gets git status for a single file.
-func (sd *StalenessDetector) getGitStatus(ctx context.Context, path string) (GitFileStatus, error) {
-	status := GitFileStatus{}
-
-	// Make path relative to repo root
-	relPath := path
-	if sd.repoRoot != "" {
-		var err error
-		relPath, err = filepath.Rel(sd.repoRoot, path)
-		if err != nil {
-			relPath = path
-		}
-	}
-
-	// Check if file is tracked (limit output to avoid OOM)
-	if _, err := runCmdLimited(exec.CommandContext(ctx, "git", "-C", sd.repoRoot, "ls-files", "--error-unmatch", relPath), 1<<20); err != nil {
-		// File is not tracked
-		status.IsTracked = false
-		status.IsNew = true
-		return status, nil
-	}
-	status.IsTracked = true
-
-	// Check for changes
-	if out, err := runCmdLimited(exec.CommandContext(ctx, "git", "-C", sd.repoRoot, "diff", "--name-only", relPath), 1<<20); err == nil {
-		if len(strings.TrimSpace(string(out))) > 0 {
-			status.HasChanges = true
-		}
-	}
-
-	// Check for staged changes
-	if out, err := runCmdLimited(exec.CommandContext(ctx, "git", "-C", sd.repoRoot, "diff", "--cached", "--name-only", relPath), 1<<20); err == nil {
-		if len(strings.TrimSpace(string(out))) > 0 {
-			status.IsStaged = true
-			status.HasChanges = true
-		}
-	}
-
-	return status, nil
-}
-
-// refreshGitStatus refreshes git status for all tracked files.
-func (sd *StalenessDetector) refreshGitStatus(ctx context.Context) error {
-	sd.mu.Lock()
-	sd.lastGitCheck = time.Now()
-	sd.mu.Unlock()
-
-	// Get all changed files (limit output size)
-	out, err := runCmdLimited(exec.CommandContext(ctx, "git", "-C", sd.repoRoot, "status", "--porcelain", "--untracked-files=all"), 2<<20)
-	if err != nil {
-		return err
-	}
-
-	// Parse status output
-	changedFiles := make(map[string]GitFileStatus)
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
-		if len(line) < 4 {
-			continue
-		}
-		// Status format: XY PATH
-		status := line[:2]
-		path := strings.TrimSpace(line[3:])
-		if path == "" {
-			continue
-		}
-
-		fullPath := filepath.Join(sd.repoRoot, path)
-		gitStatus := GitFileStatus{IsTracked: true}
-
-		// Parse status codes
-		switch {
-		case status[0] == '?' || status[1] == '?':
-			gitStatus.IsNew = true
-			gitStatus.IsTracked = false
-		case status[0] == 'D' || status[1] == 'D':
-			gitStatus.IsDeleted = true
-			gitStatus.HasChanges = true
-		case status[0] != ' ':
-			gitStatus.IsStaged = true
-			gitStatus.HasChanges = true
-		case status[1] != ' ':
-			gitStatus.HasChanges = true
-		}
-
-		changedFiles[fullPath] = gitStatus
-	}
-
-	// Update cache with git status
-	sd.mu.Lock()
-	for path, gitStatus := range changedFiles {
-		if cached, exists := sd.cache[path]; exists {
-			cached.GitStatus = gitStatus
-			if gitStatus.HasChanges {
-				cached.State = StateModified
-				cached.NeedsRefresh = true
-			}
-		}
-	}
-	sd.mu.Unlock()
-
-	return nil
-}
-
-// runCmdLimited runs a command and limits the amount of stdout read to maxBytes.
-func runCmdLimited(cmd *exec.Cmd, maxBytes int64) ([]byte, error) {
-	outPipe, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, err
-	}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	lr := io.LimitReader(outPipe, maxBytes+1)
-	data, _ := io.ReadAll(lr)
-	err = cmd.Wait()
-	if int64(len(data)) > maxBytes {
-		return data[:maxBytes], fmt.Errorf("command output truncated")
-	}
-	return data, err
-}
-
-// GetModifiedFiles returns all files with uncommitted changes.
-func (sd *StalenessDetector) GetModifiedFiles(ctx context.Context) ([]string, error) {
-	if err := sd.refreshGitStatus(ctx); err != nil {
-		return nil, err
-	}
-
-	sd.mu.RLock()
-	defer sd.mu.RUnlock()
-
-	var modified []string
-	for path, status := range sd.cache {
-		if status.GitStatus.HasChanges || status.GitStatus.IsNew {
-			modified = append(modified, path)
-		}
-	}
-	return modified, nil
-}
-
 // WatchForChanges starts watching for file changes (blocking).
 func (sd *StalenessDetector) WatchForChanges(ctx context.Context, onChange func(path string)) error {
-	// Simple polling implementation
-	ticker := time.NewTicker(sd.gitCheckInterval)
+	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -485,7 +286,6 @@ func (cr *CacheRefresher) RefreshStale(ctx context.Context) error {
 	errCh := make(chan error, 1)
 
 	for _, path := range stale {
-		// Check if already refreshing
 		cr.mu.RLock()
 		if cr.refreshing[path] {
 			cr.mu.RUnlock()
@@ -513,9 +313,9 @@ func (cr *CacheRefresher) RefreshStale(ctx context.Context) error {
 					case errCh <- err:
 					default:
 					}
-					return
 				}
 			}
+
 			cr.detector.MarkFresh(p)
 		}(path)
 	}
@@ -530,8 +330,12 @@ func (cr *CacheRefresher) RefreshStale(ctx context.Context) error {
 	}
 }
 
-// StartAutoRefresh starts automatic background refresh.
+// StartAutoRefresh starts automatic refresh in the background.
 func (cr *CacheRefresher) StartAutoRefresh(ctx context.Context, interval time.Duration) {
+	if cr.strategy != RefreshProactive {
+		return
+	}
+
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -541,10 +345,25 @@ func (cr *CacheRefresher) StartAutoRefresh(ctx context.Context, interval time.Du
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if cr.strategy == RefreshProactive {
-					_ = cr.RefreshStale(ctx)
-				}
+				_ = cr.RefreshStale(ctx)
 			}
 		}
 	}()
+}
+
+// updateCache updates the cache with a new status.
+func (sd *StalenessDetector) updateCache(path string, status *FileStatus) {
+	sd.mu.Lock()
+	defer sd.mu.Unlock()
+	sd.cache[path] = status
+}
+
+// osStat is an alias for os.Stat for testing.
+func osStat(path string) (os.FileInfo, error) {
+	return os.Stat(path)
+}
+
+// isNotExist checks if an error is a file not exists error.
+func isNotExist(err error) bool {
+	return os.IsNotExist(err)
 }

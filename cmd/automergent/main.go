@@ -30,7 +30,6 @@ import (
 	toolsAgent "github.com/iSundram/Automergent/internal/tools/agent"
 	toolsDB "github.com/iSundram/Automergent/internal/tools/database"
 	toolsFS "github.com/iSundram/Automergent/internal/tools/filesystem"
-	toolsGit "github.com/iSundram/Automergent/internal/tools/git"
 	toolsInteraction "github.com/iSundram/Automergent/internal/tools/interaction"
 	toolsLSP "github.com/iSundram/Automergent/internal/tools/lsp"
 	toolsSecurity "github.com/iSundram/Automergent/internal/tools/security"
@@ -234,6 +233,19 @@ func run(cmd *cobra.Command, args []string) error {
 		cfg.NoTUI = true
 	}
 
+	// Determine if we should save config on exit (only for explicit user changes)
+	shouldSaveConfig := flags.Provider != "" || flags.Model != "" || flags.APIKey != "" || flags.BaseURL != ""
+
+	projectApprovalPath, needsProjectApproval := projectApprovalRequired(cfg)
+	if !needsProjectApproval {
+		projectApprovalPath = ""
+	} else if cfg.NoTUI && prompt == "" && !flags.Stdin {
+		promptProjectAllowedCLI(cfg, projectApprovalPath)
+		projectApprovalPath = ""
+	} else if cfg.NoTUI {
+		projectApprovalPath = ""
+	}
+
 	// Setup session
 	storage, err := session.NewStorage(cfg.SessionDir)
 	if err != nil {
@@ -262,8 +274,10 @@ func run(cmd *cobra.Command, args []string) error {
 		if flags.Model == "" && sess.Model != "" {
 			cfg.Model = sess.Model
 		}
-		// Save resumed session's settings as new default
-		_ = cfg.Save()
+		// Save resumed session's settings as new default (only if provider/model changed)
+		if flags.Provider != "" || flags.Model != "" {
+			_ = cfg.Save()
+		}
 	} else {
 		sess = session.New()
 		if prompt != "" {
@@ -292,7 +306,6 @@ func run(cmd *cobra.Command, args []string) error {
 	reg.Register(&toolsFS.ListDirectoryTool{})
 	reg.Register(&toolsFS.GlobTool{})
 	reg.Register(&toolsFS.GrepTool{})
-	reg.Register(&toolsFS.StructureTool{})
 	reg.Register(&toolsFS.RefinedSearchTool{})
 
 	// Shell tools (async-capable)
@@ -301,18 +314,6 @@ func run(cmd *cobra.Command, args []string) error {
 	reg.Register(&toolsShell.WriteShellTool{})
 	reg.Register(&toolsShell.StopShellTool{})
 	reg.Register(&toolsShell.ListShellsTool{})
-
-	// Git tools
-	reg.Register(&toolsGit.StatusTool{})
-	reg.Register(&toolsGit.DiffTool{})
-	reg.Register(&toolsGit.LogTool{})
-	reg.Register(toolsGit.NewCommitTool(cfg))
-	reg.Register(&toolsGit.AddTool{})
-	reg.Register(&toolsGit.CheckoutTool{})
-	reg.Register(&toolsGit.BranchTool{})
-	reg.Register(&toolsGit.StashTool{})
-	reg.Register(&toolsGit.BlameTool{})
-	reg.Register(&toolsGit.ShowTool{})
 
 	// Web tools
 	reg.Register(toolsWeb.NewFetchTool())
@@ -420,10 +421,12 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	}))
 
-	// Save session and config on exit
+	// Save session on exit; only save config if explicitly modified via flags
 	defer func() {
 		_ = storage.Save(sess)
-		_ = cfg.Save()
+		if shouldSaveConfig {
+			_ = cfg.Save()
+		}
 		if !flags.Quiet && (format == outputFormatText) {
 			printComprehensiveExitMessage(sess)
 		}
@@ -437,7 +440,7 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	showPicker := flags.Resume && flags.Session == ""
-	return tui.Run(cfg, ag, sess, storage, prompt, showPicker)
+	return tui.Run(cfg, ag, sess, storage, prompt, showPicker, projectApprovalPath)
 }
 
 func applyProjectDefaults(cfg *config.Config, cmd *cobra.Command) {
@@ -1199,6 +1202,10 @@ func decodeConfigFromViper(cfg *config.Config) error {
 }
 
 func printComprehensiveExitMessage(sess *session.Session) {
+	fmt.Println(formatComprehensiveExitMessage(sess))
+}
+
+func formatComprehensiveExitMessage(sess *session.Session) string {
 	duration := time.Since(sess.CreatedAt).Round(time.Second)
 	toolCount := 0
 	for _, m := range sess.Messages {
@@ -1216,90 +1223,78 @@ func printComprehensiveExitMessage(sess *session.Session) {
 	}
 	tip := tips[time.Now().Unix()%int64(len(tips))]
 
-	// Styling
-	borderStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("36")).
-		Padding(0, 1)
+	accent := lipgloss.NewStyle().Foreground(lipgloss.Color("255")).Bold(true)
+	textStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("252"))
+	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
+	command := lipgloss.NewStyle().Foreground(lipgloss.Color("153")).Bold(true)
+	success := lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
 
-	titleStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("228")).
-		Bold(true).
-		MarginBottom(1)
+	const width = 72
+	rule := dim.Render(strings.Repeat("─", width))
+	shortID := sess.ID
+	if len(shortID) > 8 {
+		shortID = shortID[:8] + "…"
+	}
+	field := func(label, value string) string {
+		return " " + dim.Width(12).Render(label) + textStyle.Render(value)
+	}
 
-	labelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("35")).
-		Bold(true)
+	stats := fmt.Sprintf(" Messages %-6d  Tools %-6d  Tokens %d in / %d out",
+		len(sess.Messages), toolCount, sess.TotalInputTokens, sess.TotalOutputTokens)
 
-	valueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
-
-	statLabelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("39")).
-		Bold(true)
-
-	statValueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("252"))
-
-	tipLabelStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("213")).
-		Bold(true)
-
-	tipValueStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("246")).
-		Italic(true)
-
-	// Build Content
-	title := titleStyle.Render("✨ AUTOMERGENT SESSION COMPLETE ✨")
-
-	sessionID := lipgloss.JoinHorizontal(lipgloss.Left,
-		labelStyle.Render("Session ID: "),
-		valueStyle.Render(sess.ID[:8]+"..."),
-	)
-
-	dur := lipgloss.JoinHorizontal(lipgloss.Left,
-		labelStyle.Render("Duration:   "),
-		valueStyle.Render(duration.String()),
-	)
-
-	resumeCmd := lipgloss.JoinHorizontal(lipgloss.Left,
-		labelStyle.Render("Resume:     "),
-		lipgloss.NewStyle().Foreground(lipgloss.Color("214")).Render("automergent -s "+sess.ID),
-	)
-
-	statsLeft := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.JoinHorizontal(lipgloss.Left, statLabelStyle.Render("Messages: "), statValueStyle.Render(fmt.Sprintf("%d", len(sess.Messages)))),
-		lipgloss.JoinHorizontal(lipgloss.Left, statLabelStyle.Render("Tokens In:"), statValueStyle.Render(fmt.Sprintf("%d", sess.TotalInputTokens))),
-	)
-
-	statsRight := lipgloss.JoinVertical(lipgloss.Left,
-		lipgloss.JoinHorizontal(lipgloss.Left, statLabelStyle.Render("Tools Exec:"), statValueStyle.Render(fmt.Sprintf("%d", toolCount))),
-		lipgloss.JoinHorizontal(lipgloss.Left, statLabelStyle.Render("Tokens Out:"), statValueStyle.Render(fmt.Sprintf("%d", sess.TotalOutputTokens))),
-	)
-
-	stats := lipgloss.JoinHorizontal(lipgloss.Top,
-		statsLeft,
-		lipgloss.NewStyle().MarginLeft(4).Render(statsRight),
-	)
-
-	tipView := lipgloss.JoinHorizontal(lipgloss.Left,
-		tipLabelStyle.Render("Pro Tip: "),
-		tipValueStyle.Render(tip),
-	)
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		title,
-		sessionID,
-		dur,
-		resumeCmd,
+	return strings.Join([]string{
 		"",
-		stats,
+		" " + accent.Render("⟡ AUTOMERGENT") + "   " + dim.Render("SESSION COMPLETE"),
+		rule,
 		"",
-		tipView,
-	)
+		field("Session", shortID),
+		field("Duration", duration.String()),
+		"",
+		" " + dim.Render("Resume this session"),
+		"   " + command.Render("amt -s "+sess.ID),
+		"   " + command.Render("automergent -s "+sess.ID),
+		"",
+		textStyle.Render(stats),
+		"",
+		" " + dim.Render("Tip") + "  " + dim.Italic(true).Render(tip),
+		"",
+		rule,
+		" " + success.Render("󰄬 Session saved") + "  " + dim.Render("See you next time."),
+		"",
+	}, "\n")
+}
 
-	fmt.Println()
-	fmt.Println(borderStyle.Render(content))
-	fmt.Println("  \x1b[1;32m👋 Thank you for using Automergent! Happy coding!\x1b[0m")
-	fmt.Println()
+func projectApprovalRequired(cfg *config.Config) (string, bool) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+	absCwd, err := filepath.Abs(cwd)
+	if err != nil {
+		return "", false
+	}
+
+	allowed := false
+	for _, p := range cfg.Security.AllowedWritePaths {
+		absP, err := filepath.Abs(p)
+		if err == nil && (absCwd == absP || strings.HasPrefix(absCwd, absP+string(filepath.Separator))) {
+			allowed = true
+			break
+		}
+	}
+	return absCwd, !allowed
+}
+
+func promptProjectAllowedCLI(cfg *config.Config, projectPath string) {
+	fmt.Fprintf(os.Stderr, "This project is not in allowed directory (%s). Do you want to add it? [y/N]: ", projectPath)
+	reader := bufio.NewReader(os.Stdin)
+	resp, err := reader.ReadString('\n')
+	if err == nil {
+		resp = strings.TrimSpace(strings.ToLower(resp))
+		if resp == "y" || resp == "yes" {
+			cfg.Security.AllowedWritePaths = append(cfg.Security.AllowedWritePaths, projectPath)
+			_ = cfg.Save()
+			fmt.Fprintln(os.Stderr, "Project added to allowed directories.")
+		}
+	}
 }
