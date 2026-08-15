@@ -4,3 +4,6 @@ error.txt
 *_*.md
 *-research
 !.github/pull_request_template.md
+.automergent/
+.agents/
+.codex/
