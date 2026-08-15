@@ -346,7 +346,7 @@ func (e *Engine) verify(ctx context.Context, plan *ExecutionPlan) (*verification
 		ToolName:        "reasoning-engine",
 		ExpectedOutcome: plan.Analysis.Intent,
 	}
-	res, err := e.verifier.Verify(vctx)
+	res, err := e.verifier.Verify(ctx, vctx)
 	if err != nil {
 		return nil, fmt.Errorf("verification failed: %w", err)
 	}
@@ -1593,16 +1593,14 @@ func (e *Engine) refineStrategy(ctx context.Context, plan *ExecutionPlan, verifi
 		return nil
 	}
 
-	e.mu.Lock()
+	// NOTE: callers (Process, recover) already hold e.mu; do not lock here.
 	strategy, ok := e.strategies[plan.Analysis.TaskType]
 	if !ok || strategy == nil {
-		e.mu.Unlock()
 		return nil
 	}
 
 	concrete, ok := strategy.(*ConcreteStrategy)
 	if !ok || concrete == nil {
-		e.mu.Unlock()
 		return nil
 	}
 
@@ -1638,7 +1636,6 @@ func (e *Engine) refineStrategy(ctx context.Context, plan *ExecutionPlan, verifi
 	historicalSuccessRate := float64(concrete.TotalSuccesses) / float64(concrete.TimesUsed)
 	concrete.NeedsReview = concrete.TimesUsed >= 10 && historicalSuccessRate < 0.6
 	snapshot := *concrete
-	e.mu.Unlock()
 
 	if e.learningStorage != nil {
 		_ = e.learningStorage.SaveStrategy(ctx, learning.Strategy{

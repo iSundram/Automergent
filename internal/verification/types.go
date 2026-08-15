@@ -236,6 +236,9 @@ type Context struct {
 	AfterDiags      []types.Diagnostic
 	ExpectedOutcome string
 	Metadata        map[string]interface{}
+
+	// OnProgress is called as each verification layer starts and completes.
+	OnProgress func(layer Layer, status Status, message string)
 }
 
 // LayerHook can override a verification layer execution.

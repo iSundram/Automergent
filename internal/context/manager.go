@@ -210,7 +210,7 @@ func (m *Manager) GetFileContext(ctx context.Context, path string) (*FileContext
 		// Check staleness
 		status, err := m.detector.Check(ctx, path)
 		if err == nil && !status.NeedsRefresh {
-			m.recordAccess(path)
+			m.recordAccessUnlocked(path)
 			return &FileContext{
 				Path:    cached.path,
 				Content: cached.content,
@@ -250,7 +250,8 @@ func (m *Manager) GetFileContext(ctx context.Context, path string) (*FileContext
 	// Evict old entries if needed
 	m.evictCache()
 
-	m.recordAccess(path)
+	// Caller holds m.mu (GetFileContext locks at entry)
+	m.recordAccessUnlocked(path)
 	m.detector.MarkFresh(path)
 
 	return &FileContext{

@@ -1158,9 +1158,12 @@ func (a *Agent) verifyTaskCompletion(ctx context.Context) (*verification.Result,
 	vCtx := &verification.Context{
 		WorkingDir:   cwd,
 		ChangedFiles: changedFiles,
+		OnProgress: func(layer verification.Layer, status verification.Status, _ string) {
+			a.Emit(EventStatus, fmt.Sprintf("Verification Gate: [%s] %s", layer, status))
+		},
 	}
 
-	return engine.Verify(vCtx)
+	return engine.Verify(ctx, vCtx)
 }
 
 // triggerRecoveryTurn creates a system message explaining the verification failures.

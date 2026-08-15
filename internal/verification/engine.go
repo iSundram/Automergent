@@ -76,7 +76,7 @@ func NewDefaultEngine() *Engine {
 }
 
 // Verify performs multi-layer verification.
-func (e *Engine) Verify(vctx *Context) (*Result, error) {
+func (e *Engine) Verify(ctx context.Context, vctx *Context) (*Result, error) {
 	if vctx == nil {
 		vctx = &Context{}
 	}
@@ -101,8 +101,9 @@ func (e *Engine) Verify(vctx *Context) (*Result, error) {
 		StartedAt: startedAt,
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), e.config.Timeout)
-	defer cancel()
+	if ctx == nil {
+		ctx = context.Background()
+	}
 
 	for _, layer := range []Layer{LayerSyntax, LayerSemantic, LayerTest, LayerIntegration} {
 		if !e.isLayerEnabled(layer) {
@@ -114,6 +115,7 @@ func (e *Engine) Verify(vctx *Context) (*Result, error) {
 			return nil, fmt.Errorf("layer %s failed: %w", layer, err)
 		}
 		result.Layers = append(result.Layers, *layerResult)
+		e.reportProgress(vctx, layer, layerResult.Status, "")
 
 		if e.shouldStop(layerResult) {
 			break
@@ -141,6 +143,34 @@ func (e *Engine) verifyLayer(ctx context.Context, layer Layer, vctx *Context) (*
 		StartedAt: now,
 	}
 
+	// Give each layer its own timeout (falls back to the global timeout).
+	layerTimeout := e.config.Timeout
+	switch layer {
+	case LayerSyntax:
+		if e.config.SyntaxTimeout > 0 {
+			layerTimeout = e.config.SyntaxTimeout
+		}
+	case LayerSemantic:
+		if e.config.SemanticTimeout > 0 {
+			layerTimeout = e.config.SemanticTimeout
+		}
+	case LayerTest:
+		if e.config.TestTimeout > 0 {
+			layerTimeout = e.config.TestTimeout
+		}
+	case LayerIntegration:
+		if e.config.IntegrationTimeout > 0 {
+			layerTimeout = e.config.IntegrationTimeout
+		}
+	}
+	if layerTimeout <= 0 {
+		layerTimeout = 5 * time.Minute
+	}
+	layerCtx, cancel := context.WithTimeout(ctx, layerTimeout)
+	defer cancel()
+
+	e.reportProgress(vctx, layer, StatusRunning, "")
+
 	var hook LayerHook
 	switch layer {
 	case LayerSyntax:
@@ -154,7 +184,7 @@ func (e *Engine) verifyLayer(ctx context.Context, layer Layer, vctx *Context) (*
 	}
 
 	if hook != nil {
-		hookResult, err := hook(ctx, vctx)
+		hookResult, err := hook(layerCtx, vctx)
 		if err != nil {
 			res.Issues = append(res.Issues, newIssue(layer, SeverityError, err.Error(), "", 0, "", "", false))
 			res.Status = StatusFailed
@@ -166,7 +196,7 @@ func (e *Engine) verifyLayer(ctx context.Context, layer Layer, vctx *Context) (*
 			mergeLayerResult(res, hookResult)
 		}
 	} else {
-		builtIn, err := e.runBuiltInLayer(ctx, layer, vctx)
+		builtIn, err := e.runBuiltInLayer(layerCtx, layer, vctx)
 		if err != nil {
 			res.Issues = append(res.Issues, newIssue(layer, SeverityError, err.Error(), "", 0, "", "", false))
 			res.Status = StatusFailed
@@ -216,6 +246,13 @@ func (e *Engine) verifyLayer(ctx context.Context, layer Layer, vctx *Context) (*
 	res.FinishedAt = time.Now()
 	res.Duration = res.FinishedAt.Sub(res.StartedAt)
 	return res, nil
+}
+
+func (e *Engine) reportProgress(vctx *Context, layer Layer, status Status, message string) {
+	if vctx == nil || vctx.OnProgress == nil {
+		return
+	}
+	vctx.OnProgress(layer, status, message)
 }
 
 func (e *Engine) runBuiltInLayer(ctx context.Context, layer Layer, vctx *Context) (*LayerResult, error) {
@@ -282,8 +319,9 @@ func runSemanticChecks(ctx context.Context, vctx *Context) (*LayerResult, error)
 		return res, nil
 	}
 
-	output, err := runCommand(ctx, dir, "go", "vet", "./...")
-	res.Metadata["command"] = []string{"go", "vet", "./..."}
+	args := append([]string{"vet"}, packageTargets(vctx, dir)...)
+	output, err := runCommand(ctx, dir, "go", args...)
+	res.Metadata["command"] = append([]string{"go"}, args...)
 	res.Metadata["output"] = output
 	if err != nil {
 		res.Status = StatusFailed
@@ -304,8 +342,9 @@ func runTestChecks(ctx context.Context, vctx *Context) (*LayerResult, error) {
 		return res, nil
 	}
 
-	output, err := runCommand(ctx, dir, "go", "test", "./...")
-	res.Metadata["command"] = []string{"go", "test", "./..."}
+	args := append([]string{"test"}, packageTargets(vctx, dir)...)
+	output, err := runCommand(ctx, dir, "go", args...)
+	res.Metadata["command"] = append([]string{"go"}, args...)
 	res.Metadata["output"] = output
 	if err != nil {
 		res.Status = StatusFailed
@@ -326,14 +365,72 @@ func runIntegrationChecks(ctx context.Context, vctx *Context) (*LayerResult, err
 		return res, nil
 	}
 
-	output, err := runCommand(ctx, dir, "go", "build", "./...")
-	res.Metadata["command"] = []string{"go", "build", "./..."}
+	args := append([]string{"build"}, packageTargets(vctx, dir)...)
+	output, err := runCommand(ctx, dir, "go", args...)
+	res.Metadata["command"] = append([]string{"go"}, args...)
 	res.Metadata["output"] = output
 	if err != nil {
 		res.Status = StatusFailed
 		res.Issues = append(res.Issues, newIssue(LayerIntegration, SeverityError, compactOutput(output, err), "", 0, "", "go-build", false))
 	}
 	return res, nil
+}
+
+// packageTargets derives go package targets from changed files so verification
+// is scoped to affected packages instead of always running ./... across the repo.
+func packageTargets(vctx *Context, moduleRoot string) []string {
+	fallback := []string{"./..."}
+	if vctx == nil || len(vctx.ChangedFiles) == 0 {
+		return fallback
+	}
+
+	seen := make(map[string]struct{})
+	var targets []string
+	for _, f := range vctx.ChangedFiles {
+		pkg := packageDirForFile(f, moduleRoot)
+		if pkg == "" {
+			continue
+		}
+		if _, ok := seen[pkg]; ok {
+			continue
+		}
+		seen[pkg] = struct{}{}
+		targets = append(targets, pkg)
+	}
+	if len(targets) == 0 {
+		return fallback
+	}
+	return targets
+}
+
+// packageDirForFile returns the module-relative package directory of a changed
+// file (e.g. "./internal/foo/"), or "" if the file is outside the module root.
+func packageDirForFile(file, moduleRoot string) string {
+	if file == "" {
+		return ""
+	}
+	rootAbs, err := filepath.Abs(moduleRoot)
+	if err != nil {
+		return ""
+	}
+	filePath := file
+	if !filepath.IsAbs(filePath) {
+		filePath = filepath.Join(moduleRoot, filePath)
+	}
+	fileAbs, err := filepath.Abs(filePath)
+	if err != nil {
+		return ""
+	}
+	rel, err := filepath.Rel(rootAbs, fileAbs)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return ""
+	}
+	rel = filepath.ToSlash(rel)
+	dir := filepath.ToSlash(filepath.Dir(rel))
+	if dir == "." {
+		return "./"
+	}
+	return "./" + dir + "/"
 }
 
 func resolveTargets(vctx *Context) []string {
