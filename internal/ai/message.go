@@ -116,6 +116,11 @@ func (m Message) PlaintextForHistory() string {
 	return sb.String()
 }
 
+// Plaintext returns plain text representation for token estimation.
+func (m Message) Plaintext() string {
+	return m.PlaintextForHistory()
+}
+
 // ToolCalls returns all tool-call parts in a message.
 func (m Message) ToolCallParts() []ToolCall {
 	var calls []ToolCall

@@ -878,6 +878,13 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		if calc := a.ag.AdaptiveCalculator(); calc != nil {
 			a.header.SetAdaptiveWeight(calc.Weight())
 		}
+		// Active tokens = estimated tokens in current prompt
+		if mgr := a.ag.ContextManager(); mgr != nil {
+			if calc := mgr.AdaptiveCalculator(); calc != nil {
+				active := calc.EstimateMessages(a.sess.Messages)
+				a.header.SetActiveTokens(active)
+			}
+		}
 		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
 		if strings.TrimSpace(text) != "" && !a.streamedReply {
 			a.conversation.AddMessage("assistant", text, false)

@@ -17,7 +17,8 @@ type Header struct {
 	provider        string
 	mode            string
 	phase           string // "research", "plan", "execute"
-	tokens          int
+	activeTokens    int    // tokens in current prompt (active context)
+	totalTokens     int    // cumulative session tokens
 	maxTokens       int
 	adaptiveWeight  float64 // learned token estimation weight (1.0 = perfect)
 }
@@ -35,7 +36,8 @@ func (h *Header) SetModel(m string)    { h.model = m }
 func (h *Header) SetProvider(p string) { h.provider = p }
 func (h *Header) SetMode(m string)     { h.mode = m }
 func (h *Header) SetPhase(p string)    { h.phase = p }
-func (h *Header) SetTokens(n int)      { h.tokens = n }
+func (h *Header) SetTokens(n int)      { h.totalTokens = n }
+func (h *Header) SetActiveTokens(n int) { h.activeTokens = n }
 func (h *Header) SetMaxTokens(n int)   { h.maxTokens = n }
 func (h *Header) SetAdaptiveWeight(w float64) { h.adaptiveWeight = w }
 
@@ -67,7 +69,12 @@ func (h *Header) renderProgressBar(width int) string {
 	if h.maxTokens <= 0 || width <= 0 {
 		return ""
 	}
-	ratio := float64(h.tokens) / float64(h.maxTokens)
+	// Progress bar shows active context usage
+	tokens := h.activeTokens
+	if tokens == 0 {
+		tokens = h.totalTokens
+	}
+	ratio := float64(tokens) / float64(h.maxTokens)
 	if ratio > 1.0 {
 		ratio = 1.0
 	}
@@ -133,7 +140,13 @@ func (h Header) View() string {
 	)
 
 	// 3. Right Section: Tokens, Adaptive Weight & Bar
-	tokenStr := formatTokens(h.tokens)
+	// Show active/total format
+	var tokenStr string
+	if h.activeTokens > 0 {
+		tokenStr = fmt.Sprintf("%s/%s", formatTokens(h.activeTokens), formatTokens(h.totalTokens))
+	} else {
+		tokenStr = formatTokens(h.totalTokens)
+	}
 	var usageInfo string
 	if h.adaptiveWeight > 0 {
 		weightStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)

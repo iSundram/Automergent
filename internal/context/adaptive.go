@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/iSundram/Automergent/internal/ai"
 )
 
 // AdaptiveTokenCalculator estimates tokens from characters and learns a
@@ -70,7 +72,7 @@ func (c *AdaptiveTokenCalculator) Estimate(text string) int {
 }
 
 // EstimateMessages estimates tokens for a message slice.
-func (c *AdaptiveTokenCalculator) EstimateMessages(messages []MessageLike) int {
+func (c *AdaptiveTokenCalculator) EstimateMessages(messages []ai.Message) int {
 	total := 0
 	for _, m := range messages {
 		total += c.Estimate(m.Plaintext())
