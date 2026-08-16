@@ -278,7 +278,7 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 		// Save resumed session's settings as new default (only if provider/model changed)
 		if flags.Provider != "" || flags.Model != "" {
-			_ = cfg.Save()
+			_ = cfg.SaveIfLoaded()
 		}
 	} else {
 		sess = session.New()
@@ -427,7 +427,7 @@ func run(cmd *cobra.Command, args []string) error {
 	defer func() {
 		_ = storage.Save(sess)
 		if shouldSaveConfig {
-			_ = cfg.Save()
+			_ = cfg.SaveIfLoaded()
 		}
 		if !flags.Quiet && (format == outputFormatText) {
 			printComprehensiveExitMessage(sess)
@@ -1295,7 +1295,7 @@ func promptProjectAllowedCLI(cfg *config.Config, projectPath string) {
 		resp = strings.TrimSpace(strings.ToLower(resp))
 		if resp == "y" || resp == "yes" {
 			cfg.Security.AllowedWritePaths = append(cfg.Security.AllowedWritePaths, projectPath)
-			_ = cfg.Save()
+			_ = cfg.SaveIfLoaded()
 			fmt.Fprintln(os.Stderr, "Project added to allowed directories.")
 		}
 	}

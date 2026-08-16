@@ -152,6 +152,15 @@ func (c *Config) Save() error {
 	return nil
 }
 
+// SaveIfLoaded saves the config only if a config file was originally loaded.
+// Returns nil if no config file was loaded (no-op), otherwise returns the save error.
+func (c *Config) SaveIfLoaded() error {
+	if c.ConfigFile == "" {
+		return nil
+	}
+	return c.Save()
+}
+
 // CLIFlags holds flags parsed from the command line.
 type CLIFlags struct {
 	Provider     string
