@@ -208,7 +208,9 @@ func run(cmd *cobra.Command, args []string) error {
 	cfg.Output = string(format)
 
 	// Save config if critical settings were changed via flags to persist as last used.
-	if flags.Provider != "" || flags.Model != "" || flags.APIKey != "" || flags.BaseURL != "" {
+	// Only save if a config file was actually loaded (avoid creating fresh config.yaml).
+	configFileWasLoaded := viper.ConfigFileUsed() != ""
+	if configFileWasLoaded && (flags.Provider != "" || flags.Model != "" || flags.APIKey != "" || flags.BaseURL != "") {
 		_ = cfg.Save()
 	}
 
