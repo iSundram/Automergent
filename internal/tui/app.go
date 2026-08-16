@@ -228,6 +228,7 @@ func (a *App) startAgent(prompt string) tea.Cmd {
 	a.streamedReply = false
 	a.spin.Start()
 	a.conversation.AddMessage("user", prompt, false)
+	a.updateActiveTokens()
 	a.statusBar.SetStatus("Thinking…")
 	a.layout() // Adjust for thinking spinner
 	go func() { _ = a.ag.Run(a.ctx, prompt) }()
@@ -358,6 +359,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.stats.InputTokens = m.Session.TotalInputTokens
 			a.stats.OutputTokens = m.Session.TotalOutputTokens
 			a.header.SetTokens(m.Session.TotalInputTokens + m.Session.TotalOutputTokens)
+			a.updateActiveTokens()
 			if calc := a.ag.AdaptiveCalculator(); calc != nil {
 				a.header.SetAdaptiveWeight(calc.Weight())
 			}
@@ -900,6 +902,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		}
 		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
 		a.conversation.AddMessage("system", "Context compacted successfully", false)
+		a.updateActiveTokens()
 		return nil
 	case agent.EventError:
 		a.thinking = false
@@ -1111,6 +1114,7 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		a.sess = session.New()
 		a.sess.Provider, a.sess.Model = a.cfg.Provider, a.cfg.Model
 		a.ag.SetSession(a.sess)
+		a.updateActiveTokens()
 		a.stats.TotalCost = 0
 		a.statusBar.SetStatus("New session started")
 	case "/context":
@@ -1850,6 +1854,18 @@ func defaultModelForProvider(provider string) string {
 		return "gemini-3.6-flash"
 	default:
 		return ""
+	}
+}
+
+func (a *App) updateActiveTokens() {
+	if a.ag == nil {
+		return
+	}
+	if mgr := a.ag.ContextManager(); mgr != nil {
+		if calc := mgr.AdaptiveCalculator(); calc != nil {
+			active := calc.EstimateMessages(a.sess.Messages)
+			a.header.SetActiveTokens(active)
+		}
 	}
 }
 
