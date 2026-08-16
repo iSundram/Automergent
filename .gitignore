@@ -8,3 +8,4 @@ error.txt
 *.transcript.jsonl
 token_calibration.json
 *.calibration.json
+automergent
