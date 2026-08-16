@@ -4,3 +4,7 @@ error.txt
 *_*.md
 *-research
 !.github/pull_request_template.md
+# Runtime persistence files
+*.transcript.jsonl
+token_calibration.json
+*.calibration.json
