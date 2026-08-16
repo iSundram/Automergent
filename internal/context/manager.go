@@ -24,6 +24,15 @@ type Manager struct {
 	selector   *ContextSelector
 	summarizer *ContextSummarizer
 
+	// Transcript (durable conversation history)
+	transcript *TranscriptManager
+
+	// Adaptive token estimation
+	adaptiveCalc *AdaptiveTokenCalculator
+
+	// Telemetry
+	telemetry *TelemetryCollector
+
 	// Caches
 	fileCache   map[string]*cachedFile
 	accessLog   []accessEntry
@@ -95,6 +104,17 @@ func NewManager(rootDir string, cfg ManagerConfig) *Manager {
 
 	selector := NewContextSelector(graph, ranker, budget, detector)
 
+	// Create transcript with persistence
+	transcriptPath := TranscriptPathFor(rootDir, "default")
+	transcript := NewTranscriptManager(NewTranscript(transcriptPath))
+
+	// Create adaptive token calculator with persistence
+	adaptiveCalc := NewAdaptiveTokenCalculator(cfg.ModelLimits.Name).WithPersistence(rootDir)
+
+	// Create telemetry collector with persistence
+	telemetry := NewTelemetryCollector(rootDir, 1000)
+	_ = telemetry.Load()
+
 	m := &Manager{
 		ranker:        ranker,
 		budget:        budget,
@@ -103,6 +123,9 @@ func NewManager(rootDir string, cfg ManagerConfig) *Manager {
 		analyzer:      analyzer,
 		selector:      selector,
 		summarizer:    NewContextSummarizer(nil),
+		transcript:    transcript,
+		adaptiveCalc:  adaptiveCalc,
+		telemetry:     telemetry,
 		fileCache:     make(map[string]*cachedFile),
 		accessLog:     make([]accessEntry, 0, cfg.AccessLogLimit),
 		accessLimit:   cfg.AccessLogLimit,
@@ -442,6 +465,40 @@ func (m *Manager) SetModel(modelLimits ModelTokenLimits) {
 
 	m.config.ModelLimits = modelLimits
 	m.budget = NewTokenBudget(modelLimits, m.config.BudgetConfig)
+
+	// Update adaptive calculator model
+	if m.adaptiveCalc != nil {
+		// Create new calculator for the new model
+		m.adaptiveCalc = NewAdaptiveTokenCalculator(modelLimits.Name).WithPersistence(m.rootDir)
+	}
+}
+
+// TranscriptManager returns the transcript manager for durable conversation history.
+func (m *Manager) TranscriptManager() *TranscriptManager {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.transcript
+}
+
+// AdaptiveCalculator returns the adaptive token calculator.
+func (m *Manager) AdaptiveCalculator() *AdaptiveTokenCalculator {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.adaptiveCalc
+}
+
+// Telemetry returns the telemetry collector.
+func (m *Manager) Telemetry() *TelemetryCollector {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.telemetry
+}
+
+// RecordGroundTruth records actual token usage from the provider for learning.
+func (m *Manager) RecordGroundTruth(promptText string, actualTokens int) {
+	if m.adaptiveCalc != nil {
+		m.adaptiveCalc.RecordGroundTruth(promptText, actualTokens)
+	}
 }
 
 // Clear clears all caches and state.

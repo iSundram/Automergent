@@ -9,6 +9,7 @@ import (
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/cache"
 	"github.com/iSundram/Automergent/internal/config"
+	contextmgr "github.com/iSundram/Automergent/internal/context"
 )
 
 func TestAssemblePromptSectionsOrderAndBoundary(t *testing.T) {
@@ -49,9 +50,10 @@ func TestRenderManagedContextSelectionRespectsFileLimit(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.ContextFiles = files
+	cm := contextmgr.NewManager(dir, contextmgr.DefaultManagerConfig())
 
 	var sb strings.Builder
-	renderManagedContextSelection(&sb, cfg, []ai.Message{ai.NewTextMessage(ai.RoleUser, "inspect context")}, dir)
+	renderManagedContextSelection(&sb, cfg, []ai.Message{ai.NewTextMessage(ai.RoleUser, "inspect context")}, dir, cm)
 	rendered := sb.String()
 	if rendered == "" {
 		t.Fatalf("expected managed context rendering")

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -41,7 +42,8 @@ type Agent struct {
 	consecutiveVerifications int
 
 	// Persistent components
-	contextManager *contextmgr.Manager
+	contextManager    *contextmgr.Manager
+	contextManagerRoot string
 	reasoningEngine *reasoning.Engine
 	coordinator    *coordinator.Engine
 	coordinatorOnce sync.Once
@@ -173,6 +175,7 @@ const (
 	EventNotify    = "notify"
 	EventStatus    = "status"
 	EventThinking  = "thinking"
+	EventCompacted = "compacted"
 )
 
 const (
@@ -338,7 +341,9 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	select {
 	case result := <-coordCh:
 		if result != "" {
-			a.sess.AddMessage(ai.NewTextMessage(ai.RoleAssistant, result))
+			msg := ai.NewTextMessage(ai.RoleAssistant, result)
+			a.sess.AddMessage(msg)
+			a.recordToTranscript(msg)
 			a.Emit(EventStatus, "Coordinator: task completed")
 			return nil
 		}
@@ -376,6 +381,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		}
 	}
 	a.sess.AddMessage(userMsg)
+	a.recordToTranscript(userMsg)
 
 	for {
 		provider := a.Provider()
@@ -403,7 +409,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 
 		a.checkContextLimit(provider, a.sess.Messages)
 
-		systemPrompt := buildSystemPrompt(a.cfg, a.tools, a.sess.Messages)
+		systemPrompt := buildSystemPrompt(a.cfg, a.tools, a.sess.Messages, a.ContextManager())
 		toolSchemas := buildToolSchemas(a.tools)
 
 		// Dynamically adjust thinking budget based on complexity
@@ -446,6 +452,24 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		stop := resp.StopReason()
 		a.sess.AddUsage(usage)
 
+		// Record ground truth for adaptive token estimation
+		if mgr := a.ContextManager(); mgr != nil && usage.InputTokens > 0 {
+			// Build the prompt text that was sent to the model
+			systemPrompt := buildSystemPrompt(a.cfg, a.tools, a.sess.Messages, mgr)
+			toolSchemas := buildToolSchemas(a.tools)
+			// Approximate the prompt text
+			promptText := systemPrompt
+			for _, m := range a.sess.Messages {
+				promptText += m.PlaintextForHistory()
+			}
+			for _, tc := range toolSchemas {
+				if b, err := json.Marshal(tc); err == nil {
+					promptText += string(b)
+				}
+			}
+			mgr.RecordGroundTruth(promptText, usage.InputTokens)
+		}
+
 		msg := ai.Message{
 			Role:     ai.RoleAssistant,
 			Metadata: resp.GetMetadata(),
@@ -465,6 +489,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		}
 		if len(msg.Content) > 0 {
 			a.sess.AddMessage(msg)
+			a.recordToTranscript(msg)
 		}
 
 		// Pruning Logic: If we just finished the first turn which had the triage instruction,
@@ -486,6 +511,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 					a.Emit(EventStatus, "Verification Gate: Failures detected. Triggering recovery turn.")
 					recoveryMsg := a.triggerRecoveryTurn(vResult, err)
 					a.sess.AddMessage(recoveryMsg)
+					a.recordToTranscript(recoveryMsg)
 					continue // Back into the loop
 				}
 				a.Emit(EventStatus, "Verification Gate: Integrity confirmed.")
@@ -527,6 +553,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 				},
 			})
 			a.sess.AddMessage(toolMsg)
+			a.recordToTranscript(toolMsg)
 		}
 		a.tryPersist()
 	}
@@ -861,6 +888,15 @@ func (a *Agent) Emit(eventType string, payload any) {
 	}
 }
 
+// recordToTranscript appends a message to the durable transcript.
+func (a *Agent) recordToTranscript(msg ai.Message) {
+	if mgr := a.ContextManager(); mgr != nil {
+		if tm := mgr.TranscriptManager(); tm != nil {
+			tm.Append(msg)
+		}
+	}
+}
+
 func buildToolSchemas(reg *tools.Registry) []ai.ToolSchema {
 	var schemas []ai.ToolSchema
 	for _, t := range reg.All() {
@@ -1084,9 +1120,14 @@ func (a *Agent) ContextManager() *contextmgr.Manager {
 	defer a.mu.Unlock()
 
 	if a.contextManager != nil {
-		// Check if working directory changed
-		// The manager doesn't expose cwd, so we recreate if needed
-		// For now, just return existing manager
+		// Recreate if the working directory changed (manager is bound to a root dir).
+		if cwd, _ := os.Getwd(); cwd != a.contextManagerRoot {
+			managerCfg := contextmgr.DefaultManagerConfig()
+			managerCfg.ModelLimits = contextmgr.GetModelLimits(a.cfg.Model)
+			managerCfg.BudgetConfig = contextmgr.DefaultBudgetConfig()
+			a.contextManager = contextmgr.NewManager(cwd, managerCfg)
+			a.contextManagerRoot = cwd
+		}
 		return a.contextManager
 	}
 
@@ -1095,7 +1136,24 @@ func (a *Agent) ContextManager() *contextmgr.Manager {
 	managerCfg.ModelLimits = contextmgr.GetModelLimits(a.cfg.Model)
 	managerCfg.BudgetConfig = contextmgr.DefaultBudgetConfig()
 	a.contextManager = contextmgr.NewManager(cwd, managerCfg)
+	a.contextManagerRoot = cwd
 	return a.contextManager
+}
+
+// Telemetry returns the telemetry collector for context observability.
+func (a *Agent) Telemetry() *contextmgr.TelemetryCollector {
+	if mgr := a.ContextManager(); mgr != nil {
+		return mgr.Telemetry()
+	}
+	return nil
+}
+
+// AdaptiveCalculator returns the adaptive token calculator.
+func (a *Agent) AdaptiveCalculator() *contextmgr.AdaptiveTokenCalculator {
+	if mgr := a.ContextManager(); mgr != nil {
+		return mgr.AdaptiveCalculator()
+	}
+	return nil
 }
 
 // ReasoningEngine returns the persistent reasoning engine, initializing it on first use.

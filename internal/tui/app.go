@@ -358,6 +358,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.stats.InputTokens = m.Session.TotalInputTokens
 			a.stats.OutputTokens = m.Session.TotalOutputTokens
 			a.header.SetTokens(m.Session.TotalInputTokens + m.Session.TotalOutputTokens)
+			if calc := a.ag.AdaptiveCalculator(); calc != nil {
+				a.header.SetAdaptiveWeight(calc.Weight())
+			}
 			// Restore provider/model from session
 			if m.Session.Provider != "" {
 				model := m.Session.Model
@@ -868,11 +871,28 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		a.statusBar.SetStatus("Ready")
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
+		if tel := a.ag.Telemetry(); tel != nil {
+			a.stats.TotalCost = tel.GetCostSummary().TotalCostUSD
+		}
 		a.header.SetTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
+		if calc := a.ag.AdaptiveCalculator(); calc != nil {
+			a.header.SetAdaptiveWeight(calc.Weight())
+		}
 		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
 		if strings.TrimSpace(text) != "" && !a.streamedReply {
 			a.conversation.AddMessage("assistant", text, false)
 		}
+		return nil
+	case agent.EventCompacted:
+		a.statusBar.SetStatus("Context compacted")
+		a.stats.InputTokens = a.sess.TotalInputTokens
+		a.stats.OutputTokens = a.sess.TotalOutputTokens
+		a.header.SetTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
+		if calc := a.ag.AdaptiveCalculator(); calc != nil {
+			a.header.SetAdaptiveWeight(calc.Weight())
+		}
+		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
+		a.conversation.AddMessage("system", "Context compacted successfully", false)
 		return nil
 	case agent.EventError:
 		a.thinking = false
@@ -1073,6 +1093,9 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		a.conversation.Clear()
 		a.sess.Messages = nil
 		a.statusBar.SetStatus("History reset")
+	case "/compact":
+		a.statusBar.SetStatus("Compacting context...")
+		return a.compactContext()
 	case "/new":
 		if a.storage != nil && a.sess != nil && len(a.sess.Messages) > 0 {
 			_ = a.storage.Save(a.sess)
@@ -1081,11 +1104,19 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		a.sess = session.New()
 		a.sess.Provider, a.sess.Model = a.cfg.Provider, a.cfg.Model
 		a.ag.SetSession(a.sess)
+		a.stats.TotalCost = 0
 		a.statusBar.SetStatus("New session started")
 	case "/context":
-		a.stats.InputTokens = a.sess.TotalInputTokens
-		a.stats.OutputTokens = a.sess.TotalOutputTokens
-		a.conversation.AddMessage("system", fmt.Sprintf("Provider: %s\nModel: %s\nInput tokens: %d\nOutput tokens: %d", a.cfg.Provider, a.cfg.Model, a.sess.TotalInputTokens, a.sess.TotalOutputTokens), false)
+		if len(args) > 0 && args[0] == "detail" {
+			a.showContextDetail()
+		} else {
+			a.stats.InputTokens = a.sess.TotalInputTokens
+			a.stats.OutputTokens = a.sess.TotalOutputTokens
+			if tel := a.ag.Telemetry(); tel != nil {
+				a.stats.TotalCost = tel.GetCostSummary().TotalCostUSD
+			}
+			a.conversation.AddMessage("system", fmt.Sprintf("Provider: %s\nModel: %s\nInput tokens: %d\nOutput tokens: %d\nTotal cost: $%.4f\n\nUse '/context detail' for telemetry breakdown.", a.cfg.Provider, a.cfg.Model, a.sess.TotalInputTokens, a.sess.TotalOutputTokens, a.stats.TotalCost), false)
+		}
 	case "/provider":
 		if len(args) == 0 {
 			a.conversation.AddMessage("system", fmt.Sprintf("Current provider: %s (model: %s)", a.cfg.Provider, a.cfg.Model), false)
@@ -1812,6 +1843,88 @@ func defaultModelForProvider(provider string) string {
 		return "gemini-3.6-flash"
 	default:
 		return ""
+	}
+}
+
+func (a *App) showContextDetail() {
+	var b strings.Builder
+	b.WriteString("# Context Telemetry\n\n")
+
+	// Adaptive token weight
+	if calc := a.ag.AdaptiveCalculator(); calc != nil {
+		b.WriteString(fmt.Sprintf("## Adaptive Token Estimation\n- Model: %s\n- Learned Weight: %.2f\n- Samples: %d\n\n",
+			calc.Model(), calc.Weight(), calc.Samples()))
+	}
+
+	// Telemetry collector
+	if tel := a.ag.Telemetry(); tel != nil {
+		breakdowns := tel.GetBreakdowns(1)
+		if len(breakdowns) > 0 {
+			bd := breakdowns[0]
+			b.WriteString(fmt.Sprintf("## Latest Context Breakdown\n- Total: %d tokens\n- System Prompt: %d\n- Tool Definitions: %d\n- Conversation: %d\n- Context Files: %d\n- Tool Calls: %d\n- Thinking: %d\n- Output Reserve: %d\n- Safety Margin: %d\n- Provider Actual: %d\n- Est. Weight: %.2f\n\n",
+				bd.TotalTokens, bd.SystemPrompt, bd.ToolDefinitions, bd.Conversation,
+				bd.ContextFiles, bd.ToolCalls, bd.Thinking, bd.OutputReserve, bd.SafetyMargin,
+				bd.ProviderActual, bd.EstimationWeight))
+		}
+
+		compacts := tel.GetCompactionEvents(5)
+		if len(compacts) > 0 {
+			b.WriteString("## Recent Compaction Events\n")
+			for _, c := range compacts {
+				b.WriteString(fmt.Sprintf("- %s: %s (tier: %s) %d→%d tokens (%dms) %s\n",
+					c.Timestamp.Format("15:04:05"), c.Reason, c.Strategy,
+					c.TokensBefore, c.TokensAfter, c.DurationMs,
+					map[bool]string{true: "✓", false: "✗"}[c.Success]))
+			}
+			b.WriteString("\n")
+		}
+
+		cost := tel.GetCostSummary()
+		if cost.TotalCostUSD > 0 || cost.TotalInputTokens > 0 {
+			b.WriteString(fmt.Sprintf("## Cost Summary\n- Total: $%.4f\n- Input Tokens: %d\n- Output Tokens: %d\n",
+				cost.TotalCostUSD, cost.TotalInputTokens, cost.TotalOutputTokens))
+			for model, mc := range cost.ByModel {
+				if mc.TotalCost > 0 || mc.InputTokens > 0 || mc.OutputTokens > 0 {
+					b.WriteString(fmt.Sprintf("  - %s: $%.4f (%d in / %d out)\n", model, mc.TotalCost, mc.InputTokens, mc.OutputTokens))
+				}
+			}
+			b.WriteString("\n")
+		}
+
+		// Transcript info
+		if mgr := a.ag.ContextManager(); mgr != nil {
+			if tm := mgr.TranscriptManager(); tm != nil {
+				items := tm.RawMessages()
+				b.WriteString(fmt.Sprintf("## Transcript\n- Total messages: %d\n", len(items)))
+				if pt := tm.PristineMessages(); len(pt) != len(items) {
+					b.WriteString(fmt.Sprintf("- Pristine (never compacted): %d\n", len(pt)))
+				}
+			}
+		}
+	}
+
+	a.conversation.AddMessage("system", b.String(), false)
+}
+
+func (a *App) compactContext() tea.Cmd {
+	ctx := a.ctx
+	return func() tea.Msg {
+		if a.ag == nil {
+			return nil
+		}
+		compacted := a.ag.CompactSessionMessages(ctx, a.sess.Messages)
+		a.sess.Messages = compacted
+		// Update transcript with compacted messages
+		if mgr := a.ag.ContextManager(); mgr != nil {
+			if tm := mgr.TranscriptManager(); tm != nil {
+				// Rebuild transcript from compacted messages
+				tm.Rollback(0)
+				for _, m := range compacted {
+					tm.Append(m)
+				}
+			}
+		}
+		return agentEventMsg{ev: agent.Event{Type: agent.EventCompacted}}
 	}
 }
 

@@ -11,14 +11,15 @@ import (
 
 // Header renders the top bar with a modern HUD look.
 type Header struct {
-	styles    *themes.Styles
-	width     int
-	model     string
-	provider  string
-	mode      string
-	phase     string // "research", "plan", "execute"
-	tokens    int
-	maxTokens int
+	styles          *themes.Styles
+	width           int
+	model           string
+	provider        string
+	mode            string
+	phase           string // "research", "plan", "execute"
+	tokens          int
+	maxTokens       int
+	adaptiveWeight  float64 // learned token estimation weight (1.0 = perfect)
 }
 
 // NewHeader creates a new Header component.
@@ -36,6 +37,7 @@ func (h *Header) SetMode(m string)     { h.mode = m }
 func (h *Header) SetPhase(p string)    { h.phase = p }
 func (h *Header) SetTokens(n int)      { h.tokens = n }
 func (h *Header) SetMaxTokens(n int)   { h.maxTokens = n }
+func (h *Header) SetAdaptiveWeight(w float64) { h.adaptiveWeight = w }
 
 func (h *Header) getPhaseStyle() lipgloss.Style {
 	base := lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(h.styles.T.Background)
@@ -130,9 +132,18 @@ func (h Header) View() string {
 		lipgloss.NewStyle().Foreground(h.styles.T.Text).Render(modelStr),
 	)
 
-	// 3. Right Section: Tokens & Bar
+	// 3. Right Section: Tokens, Adaptive Weight & Bar
 	tokenStr := formatTokens(h.tokens)
-	usageInfo := lipgloss.NewStyle().Foreground(h.styles.T.Subtext).Render(tokenStr)
+	var usageInfo string
+	if h.adaptiveWeight > 0 {
+		weightStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)
+		if h.adaptiveWeight < 0.8 || h.adaptiveWeight > 1.2 {
+			weightStyle = lipgloss.NewStyle().Foreground(h.styles.T.Yellow)
+		}
+		usageInfo = lipgloss.NewStyle().Foreground(h.styles.T.Subtext).Render(tokenStr) + " " + weightStyle.Render(fmt.Sprintf("w:%.2f", h.adaptiveWeight))
+	} else {
+		usageInfo = lipgloss.NewStyle().Foreground(h.styles.T.Subtext).Render(tokenStr)
+	}
 
 	barWidth := 0
 	if h.width > 120 {

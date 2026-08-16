@@ -119,7 +119,7 @@ const (
 )
 
 // buildSystemPrompt orchestrates the modular prompt construction with explicit cache policy boundaries.
-func buildSystemPrompt(cfg *config.Config, reg *tools.Registry, messages []ai.Message) string {
+func buildSystemPrompt(cfg *config.Config, reg *tools.Registry, messages []ai.Message, cm *contextmgr.Manager) string {
 	sections := []promptSection{
 		{name: "identity", content: renderIdentity(), classifyAs: cache.ClassificationStatic},
 		{name: "task-protocol", content: renderTaskProtocol(), classifyAs: cache.ClassificationStatic},
@@ -128,7 +128,7 @@ func buildSystemPrompt(cfg *config.Config, reg *tools.Registry, messages []ai.Me
 		{name: "verification", content: renderVerificationGate(), classifyAs: cache.ClassificationStatic},
 		{name: "efficiency", content: renderEfficiencyProtocols(reg), classifyAs: cache.ClassificationSemiStatic},
 		{name: "cache-break", isCacheBreak: true},
-		{name: "project-context", content: renderProjectContext(cfg, messages), classifyAs: cache.ClassificationDynamic},
+		{name: "project-context", content: renderProjectContext(cfg, messages, cm), classifyAs: cache.ClassificationDynamic},
 	}
 	return assemblePromptSections(sections)
 }
@@ -217,7 +217,7 @@ func renderEfficiencyProtocols(reg *tools.Registry) string {
 	return sb.String()
 }
 
-func renderProjectContext(cfg *config.Config, messages []ai.Message) string {
+func renderProjectContext(cfg *config.Config, messages []ai.Message, cm *contextmgr.Manager) string {
 	var sb strings.Builder
 	cwd, _ := os.Getwd()
 	sb.WriteString(fmt.Sprintf("\n# Project Context\n- Working Directory: %s\n- Mode: %s\n", cwd, cfg.Mode))
@@ -232,7 +232,7 @@ func renderProjectContext(cfg *config.Config, messages []ai.Message) string {
 		sb.WriteString("\n## Project Mandates (AUTOMERGENT.md)\n")
 		sb.WriteString(string(data))
 	}
-	renderManagedContextSelection(&sb, cfg, messages, cwd)
+	renderManagedContextSelection(&sb, cfg, messages, cwd, cm)
 
 	return sb.String()
 }
@@ -262,15 +262,16 @@ func assemblePromptSections(sections []promptSection) string {
 	return cache.InsertBoundaryMarker(staticPart, dynamicPart)
 }
 
-func renderManagedContextSelection(sb *strings.Builder, cfg *config.Config, messages []ai.Message, cwd string) {
+func renderManagedContextSelection(sb *strings.Builder, cfg *config.Config, messages []ai.Message, cwd string, cm *contextmgr.Manager) {
 	activeFiles := resolveExistingContextFiles(cwd, cfg.ContextFiles)
 	if len(activeFiles) == 0 {
 		return
 	}
 
-	managerCfg := contextmgr.DefaultManagerConfig()
-	managerCfg.ModelLimits = contextmgr.GetModelLimits(cfg.Model)
-	manager := contextmgr.NewManager(cwd, managerCfg)
+	if cm == nil {
+		return
+	}
+	manager := cm
 	intent := latestUserIntent(messages)
 	resp, err := manager.GetContext(context.Background(), contextmgr.ContextRequest{
 		Intent:      intent,
