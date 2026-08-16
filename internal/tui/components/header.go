@@ -140,13 +140,8 @@ func (h Header) View() string {
 	)
 
 	// 3. Right Section: Tokens, Adaptive Weight & Bar
-	// Show active/total format
-	var tokenStr string
-	if h.activeTokens > 0 {
-		tokenStr = fmt.Sprintf("%s/%s", formatTokens(h.activeTokens), formatTokens(h.totalTokens))
-	} else {
-		tokenStr = formatTokens(h.totalTokens)
-	}
+	// Always show active/total format
+	tokenStr := fmt.Sprintf("%s/%s", formatTokens(h.activeTokens), formatTokens(h.totalTokens))
 	var usageInfo string
 	if h.adaptiveWeight > 0 {
 		weightStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)

@@ -142,6 +142,8 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	if len(sess.Messages) == 0 && initialPrompt == "" {
 		app.conversation.SetWelcomeState()
 	}
+	// Initialize active token estimate
+	app.updateActiveTokens()
 	return app
 }
 
@@ -563,6 +565,7 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		return nil
 	case "ctrl+u":
 		a.input.SetValue("")
+		a.updateActiveTokens()
 		return nil
 	case "ctrl+t":
 		a.showFileTree = !a.showFileTree
@@ -634,6 +637,7 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		}
 		inp, cmd := a.input.Update(m)
 		a.input = inp
+		a.updateActiveTokens()
 		trigger := a.input.TriggerType()
 		if trigger != "" {
 			a.updatePalette()
@@ -881,12 +885,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.header.SetAdaptiveWeight(calc.Weight())
 		}
 		// Active tokens = estimated tokens in current prompt
-		if mgr := a.ag.ContextManager(); mgr != nil {
-			if calc := mgr.AdaptiveCalculator(); calc != nil {
-				active := calc.EstimateMessages(a.sess.Messages)
-				a.header.SetActiveTokens(active)
-			}
-		}
+		a.updateActiveTokens()
 		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
 		if strings.TrimSpace(text) != "" && !a.streamedReply {
 			a.conversation.AddMessage("assistant", text, false)
@@ -1857,17 +1856,50 @@ func defaultModelForProvider(provider string) string {
 	}
 }
 
-func (a *App) updateActiveTokens() {
-	if a.ag == nil {
-		return
-	}
-	if mgr := a.ag.ContextManager(); mgr != nil {
-		if calc := mgr.AdaptiveCalculator(); calc != nil {
-			active := calc.EstimateMessages(a.sess.Messages)
-			a.header.SetActiveTokens(active)
-		}
+func writeDebugLog(format string, args ...any) {
+	f, err := os.OpenFile("/tmp/opencode/automergent_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err == nil {
+		f.Write([]byte(fmt.Sprintf(format, args...)))
+		f.Close()
 	}
 }
+
+func (a *App) updateActiveTokens() {
+	if a.ag == nil {
+		writeDebugLog("updateActiveTokens: ag is nil\n")
+		return
+	}
+	mgr := a.ag.ContextManager()
+	if mgr == nil {
+		writeDebugLog("updateActiveTokens: ContextManager is nil\n")
+		return
+	}
+	calc := mgr.AdaptiveCalculator()
+	if calc == nil {
+		writeDebugLog("updateActiveTokens: AdaptiveCalculator is nil\n")
+		return
+	}
+	if a.sess == nil {
+		writeDebugLog("updateActiveTokens: sess is nil\n")
+		return
+	}
+	msgCount := len(a.sess.Messages)
+	active := calc.EstimateMessages(a.sess.Messages)
+
+	// Add currently-being-typed prompt if it's non-empty
+	pending := a.input.Value()
+	if pending != "" {
+		active += calc.Estimate(pending)
+	}
+
+	a.header.SetActiveTokens(active)
+	pendingTokens := 0
+	if pending != "" {
+		pendingTokens = calc.Estimate(pending)
+	}
+	writeDebugLog("updateActiveTokens: msgs=%d active=%d pending_tokens=%d\n", msgCount, active, pendingTokens)
+}
+
 
 func (a *App) showContextDetail() {
 	var b strings.Builder
