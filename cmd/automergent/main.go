@@ -300,6 +300,9 @@ func run(cmd *cobra.Command, args []string) error {
 	// Ensure session reflects the current provider/model.
 	sess.Provider = cfg.Provider
 	sess.Model = cfg.Model
+	if wd, err := os.Getwd(); err == nil {
+		sess.WorkDir = wd
+	}
 
 	// Build tool registry
 	reg := tools.NewRegistry()

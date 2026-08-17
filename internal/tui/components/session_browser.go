@@ -89,6 +89,11 @@ func (sb *SessionBrowser) SetSessions(sessions []*session.Session) {
 	sb.list.SetItems(items)
 }
 
+// ItemCount reports the number of sessions currently in the list.
+func (sb *SessionBrowser) ItemCount() int {
+	return len(sb.list.Items())
+}
+
 // SetSize updates dimensions.
 func (sb *SessionBrowser) SetSize(w, h int) {
 	sb.list.SetSize(w, h)

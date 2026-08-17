@@ -71,6 +71,7 @@ type App struct {
 	height            int
 	thinking          bool
 	showSessionPicker bool
+	workDir           string
 	statusMsg         string
 
 	showFileTree  bool
@@ -141,6 +142,9 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	app.header.SetProvider(cfg.Provider)
 	app.header.SetMode(cfg.Mode)
 	app.header.SetPhase(string(agent.DetectPhase(sess.Messages)))
+	if wd, err := os.Getwd(); err == nil {
+		app.workDir = wd
+	}
 	if len(sess.Messages) == 0 && initialPrompt == "" {
 		app.conversation.SetWelcomeState()
 	}
@@ -168,7 +172,7 @@ func (a *App) Init() tea.Cmd {
 			if err != nil {
 				return nil
 			}
-			return sessionsLoadedMsg{sessions: sessions}
+			return sessionsLoadedMsg{sessions: a.projectSessions(sessions)}
 		})
 	}
 	if a.pendingProjectPath != "" {
@@ -355,7 +359,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case components.SessionSelectedMsg:
 		if m.Session != nil {
 			a.sess = m.Session
+			if a.sess.WorkDir == "" {
+				a.sess.WorkDir = a.workDir
+			}
 			a.ag.SetSession(m.Session)
+			if a.persist != nil {
+				a.persist.SetSession(m.Session)
+			}
 			a.conversation.Clear()
 			for _, sm := range m.Session.Messages {
 				a.conversation.AddMessage(string(sm.Role), sm.TextContent(), false)
@@ -551,7 +561,7 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 				a.statusBar.SetStatus(fmt.Sprintf("Error listing sessions: %v", err))
 				return nil
 			}
-			a.sessionBrowser.SetSessions(sessions)
+			a.sessionBrowser.SetSessions(a.projectSessions(sessions))
 		} else {
 			a.sessionBrowser.SetSessions([]*session.Session{a.sess})
 		}
@@ -1113,7 +1123,11 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		a.conversation.Clear()
 		a.sess = session.New()
 		a.sess.Provider, a.sess.Model = a.cfg.Provider, a.cfg.Model
+		a.sess.WorkDir = a.workDir
 		a.ag.SetSession(a.sess)
+		if a.persist != nil {
+			a.persist.SetSession(a.sess)
+		}
 		a.updateActiveTokens()
 		a.stats.TotalCost = 0
 		a.statusBar.SetStatus("New session started")

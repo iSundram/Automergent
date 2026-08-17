@@ -22,6 +22,7 @@ type Session struct {
 
 	ID        string            `json:"id"`
 	Title     string            `json:"title"`
+	WorkDir   string            `json:"work_dir,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`
 	UpdatedAt time.Time         `json:"updated_at"`
 	Messages  []ai.Message      `json:"messages"`

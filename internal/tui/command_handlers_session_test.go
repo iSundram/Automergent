@@ -94,6 +94,70 @@ func TestNewSessionSavesCurrentHistory(t *testing.T) {
 	}
 }
 
+func TestProjectSessionsFiltersByWorkDir(t *testing.T) {
+	app := newTestApp(t)
+	app.workDir = "/projects/alpha"
+
+	current := session.New()
+	current.Title = "Current project"
+	current.WorkDir = "/projects/alpha"
+
+	other := session.New()
+	other.Title = "Other project"
+	other.WorkDir = "/projects/beta"
+
+	legacy := session.New()
+	legacy.Title = "Legacy (no workdir)"
+
+	filtered := app.projectSessions([]*session.Session{current, other, legacy})
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 sessions (current + legacy), got %d", len(filtered))
+	}
+	if filtered[0].Title != "Current project" || filtered[1].Title != "Legacy (no workdir)" {
+		t.Fatalf("unexpected filter result: %+v", filtered)
+	}
+}
+
+func TestShowSessionsPickerShowsProjectSessions(t *testing.T) {
+	app := newTestApp(t)
+	app.workDir = "/projects/alpha"
+	storage, err := session.NewStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.storage = storage
+
+	current := session.New()
+	current.Title = "Current project"
+	current.WorkDir = "/projects/alpha"
+	if err := storage.Save(current); err != nil {
+		t.Fatal(err)
+	}
+	other := session.New()
+	other.Title = "Other project"
+	other.WorkDir = "/projects/beta"
+	if err := storage.Save(other); err != nil {
+		t.Fatal(err)
+	}
+
+	app.handleSlashCommand("/sessions")
+	if !app.sessionBrowser.Visible() {
+		t.Fatal("expected session picker to be open")
+	}
+	if app.sessionBrowser.ItemCount() != 1 {
+		t.Fatalf("expected 1 project session in picker, got %d", app.sessionBrowser.ItemCount())
+	}
+
+	app.sessionBrowser.Hide()
+	app.handleSlashCommand("/resume")
+	if !app.sessionBrowser.Visible() {
+		t.Fatal("expected /resume to open the session picker")
+	}
+	if app.sessionBrowser.ItemCount() != 1 {
+		t.Fatalf("expected 1 project session in picker, got %d", app.sessionBrowser.ItemCount())
+	}
+}
+
 func TestApprovalsCommandListsAndRevokes(t *testing.T) {
 	app := newTestApp(t)
 	storage, err := session.NewStorage(t.TempDir())

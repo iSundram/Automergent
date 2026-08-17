@@ -166,10 +166,26 @@ func formatApprovalScope(scope string) string {
 	return label
 }
 
+// projectSessions filters the session list to those belonging to the current
+// project (matching work directory). Sessions that predate work-dir tracking
+// (no recorded workdir) are kept so they remain resumable.
+func (a *App) projectSessions(all []*session.Session) []*session.Session {
+	if a.workDir == "" || len(all) == 0 {
+		return all
+	}
+	out := make([]*session.Session, 0, len(all))
+	for _, s := range all {
+		if s.WorkDir == "" || s.WorkDir == a.workDir {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 func (a *App) showSessions() {
 	if a.storage != nil {
 		if sessions, err := a.storage.List(); err == nil {
-			a.sessionBrowser.SetSessions(sessions)
+			a.sessionBrowser.SetSessions(a.projectSessions(sessions))
 		} else {
 			a.statusBar.SetStatus("Error listing sessions: " + err.Error())
 			return
@@ -202,6 +218,9 @@ func (a *App) resumeSession(id string) error {
 		s = loaded
 	}
 	a.sess = s
+	if a.sess.WorkDir == "" {
+		a.sess.WorkDir = a.workDir
+	}
 	a.ag.SetSession(s)
 	if a.persist != nil {
 		a.persist.SetSession(s)
