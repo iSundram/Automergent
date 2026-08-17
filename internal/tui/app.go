@@ -778,6 +778,8 @@ func (a *App) fuzzyFilter(items []components.PaletteItem, filter string) []compo
 }
 
 func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
+	// Live-update active token estimate on every agent event.
+	a.updateActiveTokens()
 	switch ev.Type {
 	case agent.EventToken:
 		if tok, ok := ev.Payload.(string); ok {
@@ -884,8 +886,6 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		if calc := a.ag.AdaptiveCalculator(); calc != nil {
 			a.header.SetAdaptiveWeight(calc.Weight())
 		}
-		// Active tokens = estimated tokens in current prompt
-		a.updateActiveTokens()
 		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
 		if strings.TrimSpace(text) != "" && !a.streamedReply {
 			a.conversation.AddMessage("assistant", text, false)
@@ -901,7 +901,6 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		}
 		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
 		a.conversation.AddMessage("system", "Context compacted successfully", false)
-		a.updateActiveTokens()
 		return nil
 	case agent.EventError:
 		a.thinking = false
@@ -1856,48 +1855,29 @@ func defaultModelForProvider(provider string) string {
 	}
 }
 
-func writeDebugLog(format string, args ...any) {
-	f, err := os.OpenFile("/tmp/opencode/automergent_debug.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err == nil {
-		f.Write([]byte(fmt.Sprintf(format, args...)))
-		f.Close()
-	}
-}
-
 func (a *App) updateActiveTokens() {
 	if a.ag == nil {
-		writeDebugLog("updateActiveTokens: ag is nil\n")
 		return
 	}
 	mgr := a.ag.ContextManager()
 	if mgr == nil {
-		writeDebugLog("updateActiveTokens: ContextManager is nil\n")
 		return
 	}
 	calc := mgr.AdaptiveCalculator()
 	if calc == nil {
-		writeDebugLog("updateActiveTokens: AdaptiveCalculator is nil\n")
 		return
 	}
 	if a.sess == nil {
-		writeDebugLog("updateActiveTokens: sess is nil\n")
 		return
 	}
-	msgCount := len(a.sess.Messages)
 	active := calc.EstimateMessages(a.sess.Messages)
 
 	// Add currently-being-typed prompt if it's non-empty
-	pending := a.input.Value()
-	if pending != "" {
+	if pending := a.input.Value(); pending != "" {
 		active += calc.Estimate(pending)
 	}
 
 	a.header.SetActiveTokens(active)
-	pendingTokens := 0
-	if pending != "" {
-		pendingTokens = calc.Estimate(pending)
-	}
-	writeDebugLog("updateActiveTokens: msgs=%d active=%d pending_tokens=%d\n", msgCount, active, pendingTokens)
 }
 
 func (a *App) showContextDetail() {
