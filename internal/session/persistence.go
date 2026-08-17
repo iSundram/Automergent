@@ -162,7 +162,14 @@ func (pm *PersistenceManager) Save() error {
 func (pm *PersistenceManager) saveLocked() error {
 	pm.state.Timestamp = time.Now()
 
-	data, err := json.MarshalIndent(pm.state, "", "  ")
+	// Snapshot the session under its own lock before marshaling to avoid
+	// torn JSON when the agent is concurrently mutating the session.
+	var data []byte
+	var err error
+	if pm.state.Session != nil {
+		pm.state.Session = pm.state.Session.Snapshot()
+	}
+	data, err = json.MarshalIndent(pm.state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("persistence: marshal: %w", err)
 	}
@@ -230,6 +237,9 @@ func (pm *PersistenceManager) SaveRecoveryPoint() error {
 	defer pm.mu.RUnlock()
 
 	pm.state.Timestamp = time.Now()
+	if pm.state.Session != nil {
+		pm.state.Session = pm.state.Session.Snapshot()
+	}
 	data, err := json.MarshalIndent(pm.state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("persistence: recovery marshal: %w", err)

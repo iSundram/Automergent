@@ -105,12 +105,27 @@ func (a *App) resumeSession(id string) error {
 	if a.storage == nil {
 		return fmt.Errorf("session storage unavailable")
 	}
-	s, err := a.storage.Load(id)
-	if err != nil {
-		return err
+	var s *session.Session
+	if a.persist != nil {
+		// Prefer a crash-recovery point for this session (may contain more
+		// recent messages than the last clean save), then fall back to disk.
+		recovered, err := a.persist.ResumeSession(id, a.storage)
+		if err != nil {
+			return err
+		}
+		s = recovered
+	} else {
+		loaded, err := a.storage.Load(id)
+		if err != nil {
+			return err
+		}
+		s = loaded
 	}
 	a.sess = s
 	a.ag.SetSession(s)
+	if a.persist != nil {
+		a.persist.SetSession(s)
+	}
 	a.conversation.Clear()
 	for _, m := range s.Messages {
 		a.conversation.AddMessage(string(m.Role), m.TextContent(), false)

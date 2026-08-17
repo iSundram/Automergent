@@ -24,6 +24,8 @@ import (
 	"github.com/iSundram/Automergent/internal/cache"
 	"github.com/iSundram/Automergent/internal/config"
 	automergentErrors "github.com/iSundram/Automergent/internal/errors"
+	"github.com/iSundram/Automergent/internal/git"
+	"github.com/iSundram/Automergent/internal/git"
 	planningPkg "github.com/iSundram/Automergent/internal/planning"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
@@ -34,7 +36,6 @@ import (
 	toolsLSP "github.com/iSundram/Automergent/internal/tools/lsp"
 	toolsSecurity "github.com/iSundram/Automergent/internal/tools/security"
 	toolsShell "github.com/iSundram/Automergent/internal/tools/shell"
-	toolsTesting "github.com/iSundram/Automergent/internal/tools/testing"
 	toolsWeb "github.com/iSundram/Automergent/internal/tools/web"
 	"github.com/iSundram/Automergent/internal/tui"
 	"github.com/iSundram/Automergent/internal/version"
@@ -254,6 +255,12 @@ func run(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("session storage: %w", err)
 	}
 
+	// Crash-recovery persistence (state.json + recovery.json + autosave).
+	pm, err := session.NewPersistenceManager(cfg.SessionDir)
+	if err != nil {
+		return fmt.Errorf("persistence manager: %w", err)
+	}
+
 	// Prune old sessions in the background to keep disk usage bounded.
 	go func() {
 		var maxAge time.Duration
@@ -265,7 +272,9 @@ func run(cmd *cobra.Command, args []string) error {
 
 	var sess *session.Session
 	if flags.Session != "" {
-		sess, err = storage.Load(flags.Session)
+		// Prefer a crash-recovery point for this session, then state.json,
+		// then the session file on disk.
+		sess, err = pm.ResumeSession(flags.Session, storage)
 		if err != nil {
 			return fmt.Errorf("load session %s: %w", flags.Session, err)
 		}
@@ -324,10 +333,6 @@ func run(cmd *cobra.Command, args []string) error {
 	// LSP tools
 	reg.Register(&toolsLSP.DiagnosticsTool{})
 
-	// Testing tools
-	reg.Register(&toolsTesting.RunTestsTool{})
-	reg.Register(&toolsTesting.TestCoverageTool{})
-
 	// Security tools
 	reg.Register(&toolsSecurity.SecretsScanTool{})
 	reg.Register(&toolsSecurity.DependencyAuditTool{})
@@ -353,7 +358,10 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Build agent
 	ag := agent.New(cfg, provider, sess, reg)
-	ag.SetSessionPersist(func() { _ = storage.Save(sess) })
+	ag.SetSessionPersist(func() {
+		_ = storage.Save(sess)
+		_ = pm.SaveRecoveryPoint()
+	})
 
 	// Register NotifyTool now that we have an agent to emit UI events.
 	reg.Register(toolsInteraction.NewNotifyTool(func(level string, title string, message string) error {
@@ -423,9 +431,20 @@ func run(cmd *cobra.Command, args []string) error {
 		}
 	}))
 
+	// Track workspace context for crash recovery and future editor resume.
+	if wd, err := os.Getwd(); err == nil {
+		pm.SetWorkDir(wd)
+		pm.SetProjectPath(wd)
+		pm.SetGitBranch(detectGitBranch(wd))
+	}
+	pm.SetSession(sess)
+	pm.StartAutoSave(30)
+
 	// Save session on exit; only save config if explicitly modified via flags
 	defer func() {
 		_ = storage.Save(sess)
+		_ = pm.Save()
+		pm.StopAutoSave()
 		if shouldSaveConfig {
 			_ = cfg.SaveIfLoaded()
 		}
@@ -442,7 +461,7 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	showPicker := flags.Resume && flags.Session == ""
-	return tui.Run(cfg, ag, sess, storage, prompt, showPicker, projectApprovalPath)
+	return tui.Run(cfg, ag, sess, storage, pm, prompt, showPicker, projectApprovalPath)
 }
 
 func applyProjectDefaults(cfg *config.Config, cmd *cobra.Command) {
@@ -455,6 +474,16 @@ func applyProjectDefaults(cfg *config.Config, cmd *cobra.Command) {
 	}
 	cfg.SessionDir = filepath.Join(home, ".automergent", "sessions")
 	_ = os.MkdirAll(filepath.Join(home, ".automergent"), 0o700)
+}
+
+// detectGitBranch returns the current git branch of dir, or "" when dir is
+// not inside a repository or git is unavailable.
+func detectGitBranch(dir string) string {
+	branch, err := git.CurrentBranch(context.Background(), dir)
+	if err != nil {
+		return ""
+	}
+	return branch
 }
 
 func parseOutputFormat(raw string) outputFormat {

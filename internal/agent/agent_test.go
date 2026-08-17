@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -168,6 +169,201 @@ func TestExecuteToolAcceptsLegacyApprovalScope(t *testing.T) {
 	}
 	if got := confirms.Load(); got != 0 {
 		t.Fatalf("expected legacy scope approval to avoid reconfirmation, got %d confirmations", got)
+	}
+}
+
+func TestExecuteToolAlwaysPersistsApprovalToSession(t *testing.T) {
+	reg := tools.NewRegistry()
+	tool := &persistenceScopeTool{risk: "low"}
+	reg.Register(tool)
+
+	sess := session.New()
+	ag := &Agent{
+		cfg:                 &config.Config{Mode: "plan"},
+		sess:                sess,
+		tools:               reg,
+		events:              make(chan Event, 8),
+		sessionAllowedTools: map[string]bool{},
+		approvalSource:      "test",
+	}
+
+	go func() {
+		for event := range ag.Events() {
+			if event.Type != EventConfirm {
+				continue
+			}
+			payload := event.Payload.(map[string]any)
+			reply := payload["reply"].(chan ConfirmationResponse)
+			reply <- ConfirmationResponse{Allow: true, Always: true}
+		}
+	}()
+	defer func() { _ = ag.Close() }()
+
+	tc := ai.ToolCall{Name: tool.Name(), Args: map[string]any{"operation": "write"}}
+	res, err := ag.executeTool(context.Background(), tc)
+	if err != nil {
+		t.Fatalf("executeTool failed: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", res.Content)
+	}
+
+	scope := toolApprovalScope(tc, tool)
+	if !sess.HasApproval(scope) {
+		t.Fatalf("expected approval %q to be recorded in session, got %+v", scope, sess.AllowedTools)
+	}
+	if len(sess.AllowedTools) != 1 || sess.AllowedTools[0].Source != "test" {
+		t.Fatalf("unexpected approval record: %+v", sess.AllowedTools)
+	}
+}
+
+func TestNewSeedsApprovalsFromSession(t *testing.T) {
+	reg := tools.NewRegistry()
+	tool := &persistenceScopeTool{risk: "low"}
+	reg.Register(tool)
+
+	tc := ai.ToolCall{Name: tool.Name(), Args: map[string]any{"operation": "write"}}
+
+	ag := New(&config.Config{Mode: "plan"}, nil, nil, reg)
+	// Seed the session with the project-scoped key that New() will look up.
+	sess := session.New()
+	sess.AddApproval(ag.scopedToolApprovalKey(tc, tool), "tui")
+	ag.SetSession(sess)
+
+	var confirms atomic.Int32
+	go func() {
+		for event := range ag.Events() {
+			if event.Type == EventConfirm {
+				confirms.Add(1)
+			}
+		}
+	}()
+	defer func() { _ = ag.Close() }()
+
+	res, err := ag.executeTool(context.Background(), tc)
+	if err != nil {
+		t.Fatalf("executeTool failed: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", res.Content)
+	}
+	if got := confirms.Load(); got != 0 {
+		t.Fatalf("expected seeded approval to skip confirmation, got %d confirmations", got)
+	}
+}
+
+func TestSetSessionReseedsApprovals(t *testing.T) {
+	reg := tools.NewRegistry()
+	tool := &persistenceScopeTool{risk: "low"}
+	reg.Register(tool)
+
+	tc := ai.ToolCall{Name: tool.Name(), Args: map[string]any{"operation": "write"}}
+	scope := toolApprovalScope(tc, tool)
+
+	ag := &Agent{
+		cfg:                 &config.Config{Mode: "plan"},
+		tools:               reg,
+		events:              make(chan Event, 8),
+		sessionAllowedTools: map[string]bool{},
+	}
+
+	resumed := session.New()
+	resumed.AddApproval(scope, "tui")
+	ag.SetSession(resumed)
+
+	var confirms atomic.Int32
+	go func() {
+		for event := range ag.Events() {
+			if event.Type == EventConfirm {
+				confirms.Add(1)
+			}
+		}
+	}()
+	defer func() { _ = ag.Close() }()
+
+	res, err := ag.executeTool(context.Background(), tc)
+	if err != nil {
+		t.Fatalf("executeTool failed: %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("unexpected tool error: %s", res.Content)
+	}
+	if got := confirms.Load(); got != 0 {
+		t.Fatalf("expected resumed approvals to skip confirmation, got %d confirmations", got)
+	}
+}
+
+func TestProjectScopedApprovalDoesNotLeakAcrossProjects(t *testing.T) {
+	reg := tools.NewRegistry()
+	tool := &persistenceScopeTool{risk: "low"}
+	reg.Register(tool)
+
+	tc := ai.ToolCall{Name: tool.Name(), Args: map[string]any{"operation": "write"}}
+
+	ag := &Agent{
+		cfg:                 &config.Config{Mode: "plan"},
+		tools:               reg,
+		events:              make(chan Event, 8),
+		sessionAllowedTools: map[string]bool{},
+		approvalSource:      "test",
+		workDir:             "/projects/alpha",
+	}
+
+	var confirms atomic.Int32
+	go func() {
+		for event := range ag.Events() {
+			if event.Type != EventConfirm {
+				continue
+			}
+			confirms.Add(1)
+			payload := event.Payload.(map[string]any)
+			reply := payload["reply"].(chan ConfirmationResponse)
+			reply <- ConfirmationResponse{Allow: true, Always: true}
+		}
+	}()
+	defer func() { _ = ag.Close() }()
+
+	res, err := ag.executeTool(context.Background(), tc)
+	if err != nil || res.IsError {
+		t.Fatalf("executeTool failed: %v %s", err, res.Content)
+	}
+	if got := confirms.Load(); got != 1 {
+		t.Fatalf("expected 1 confirmation for first approval, got %d", got)
+	}
+
+	// Same scope key but a different project must re-confirm.
+	scoped := ag.scopedToolApprovalKey(tc, tool)
+	if !strings.HasPrefix(scoped, "project=/projects/alpha;") {
+		t.Fatalf("expected project-prefixed scope key, got %q", scoped)
+	}
+
+	other := &Agent{
+		cfg:                 &config.Config{Mode: "plan"},
+		tools:               reg,
+		events:              make(chan Event, 8),
+		sessionAllowedTools: map[string]bool{},
+		approvalSource:      "test",
+		workDir:             "/projects/beta",
+	}
+	go func() {
+		for event := range other.Events() {
+			if event.Type != EventConfirm {
+				continue
+			}
+			confirms.Add(1)
+			payload := event.Payload.(map[string]any)
+			reply := payload["reply"].(chan ConfirmationResponse)
+			reply <- ConfirmationResponse{Allow: true, Always: true}
+		}
+	}()
+	defer func() { _ = other.Close() }()
+
+	res, err = other.executeTool(context.Background(), tc)
+	if err != nil || res.IsError {
+		t.Fatalf("other project executeTool failed: %v %s", err, res.Content)
+	}
+	if got := confirms.Load(); got != 2 {
+		t.Fatalf("expected a second confirmation in another project, got %d", got)
 	}
 }
 

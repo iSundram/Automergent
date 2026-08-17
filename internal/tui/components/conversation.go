@@ -703,14 +703,6 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 		prettyName = "SQL"
 		icon = "󰆼"
 		accentColor = c.styles.T.Blue
-	case "run_tests":
-		prettyName = "Tests"
-		icon = "󰙨"
-		accentColor = c.styles.T.Green
-	case "test_coverage":
-		prettyName = "Coverage"
-		icon = "󰗡"
-		accentColor = c.styles.T.Blue
 	case "secrets_scan":
 		prettyName = "Secrets scan"
 		icon = "󰦝"

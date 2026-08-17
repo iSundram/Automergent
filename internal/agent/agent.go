@@ -33,6 +33,8 @@ type Agent struct {
 	sessionPersist           func()
 	mu                       sync.RWMutex
 	sessionAllowedTools      map[string]bool
+	approvalSource           string
+	workDir                  string
 	firstMessageHandled      bool
 	decisionRecords          []ToolDecisionRecord
 	reasoningPreAnalyze      func(context.Context, string) (string, error)
@@ -190,6 +192,25 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 		tools:               reg,
 		events:              make(chan Event, 8192),
 		sessionAllowedTools: make(map[string]bool),
+		approvalSource:      "tui",
+	}
+
+	if cfg != nil && cfg.NoTUI {
+		agent.approvalSource = "headless"
+	}
+
+	// Record the project directory so "always allow" approvals are scoped
+	// to this project and do not leak into sessions resumed elsewhere.
+	if wd, err := os.Getwd(); err == nil {
+		agent.workDir = wd
+	}
+
+	// Seed always-allow approvals persisted in the session so resumed runs
+	// do not re-prompt for tools the user already approved.
+	if sess != nil {
+		for _, scope := range sess.ApprovalScopes() {
+			agent.sessionAllowedTools[scope] = true
+		}
 	}
 
 	return agent
@@ -302,10 +323,18 @@ func (a *Agent) SetProvider(p ai.Provider) {
 func (a *Agent) Session() *session.Session { return a.sess }
 
 // SetSession replaces the current session (e.g., when loading a saved session).
+// Always-allow approvals are re-seeded from the incoming session so resumed
+// sessions keep their granted tool permissions.
 func (a *Agent) SetSession(sess *session.Session) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sess = sess
+	a.sessionAllowedTools = make(map[string]bool)
+	if sess != nil {
+		for _, scope := range sess.ApprovalScopes() {
+			a.sessionAllowedTools[scope] = true
+		}
+	}
 }
 
 // Run executes the agent loop for the given user prompt.
@@ -399,10 +428,10 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 
 		if limit > 0 && float64(tokens)/float64(limit) > autoCompressAt {
 			a.Emit(EventStatus, "Neural Compaction: Freeing up context window...")
-			a.sess.Messages = a.CompactSessionMessages(ctx, a.sess.Messages)
+			a.sess.SetMessages(a.CompactSessionMessages(ctx, a.sess.Messages))
 		} else {
 			// Even if not compacting, ghost large tool outputs to keep context lean
-			a.sess.Messages = a.GhostLargeOutputs(a.sess.Messages)
+			a.sess.SetMessages(a.GhostLargeOutputs(a.sess.Messages))
 		}
 
 		a.checkContextLimit(provider, a.sess.Messages)
@@ -690,7 +719,7 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 	if !ok {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("unknown tool: %s", tc.Name)}, nil
 	}
-	approvalScope := toolApprovalScope(tc, t)
+	approvalScope := a.scopedToolApprovalKey(tc, t)
 	legacyScope := legacyToolApprovalScope(tc, t)
 
 	a.mu.RLock()
@@ -710,6 +739,10 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 			a.mu.Lock()
 			a.sessionAllowedTools[approvalScope] = true
 			a.mu.Unlock()
+			if a.sess != nil {
+				a.sess.AddApproval(approvalScope, a.approvalSource)
+			}
+			a.tryPersist()
 		}
 	}
 
@@ -719,6 +752,18 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 func toolApprovalScope(tc ai.ToolCall, t tools.Tool) string {
 	action, risk := toolApprovalDimensions(tc, t)
 	return fmt.Sprintf("name=%q;action=%s;risk=%s", tc.Name, action, risk)
+}
+
+// scopedToolApprovalKey returns the approval scope key for this agent,
+// prefixed with the project directory so approvals granted in one project
+// never apply in another. When the work dir is unknown the plain scope is
+// used so lookups stay consistent within a session.
+func (a *Agent) scopedToolApprovalKey(tc ai.ToolCall, t tools.Tool) string {
+	scope := toolApprovalScope(tc, t)
+	if a.workDir == "" {
+		return scope
+	}
+	return "project=" + a.workDir + ";" + scope
 }
 
 func legacyToolApprovalScope(tc ai.ToolCall, t tools.Tool) string {

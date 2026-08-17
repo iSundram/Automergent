@@ -101,6 +101,91 @@ func TestStorageSaveLoad(t *testing.T) {
 	}
 }
 
+func TestStorageApprovalsSurviveSaveLoad(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	if err != nil {
+		t.Fatalf("NewStorage: %v", err)
+	}
+
+	sess := New()
+	sess.AddApproval(`name="run_shell_command";action=write;risk=high`, "tui")
+	sess.AddApproval(`name="run_shell_command";action=write;risk=high`, "tui") // duplicate ignored
+	sess.AddApproval(`name="edit_file";action=write;risk=low`, "headless")
+
+	if err := storage.Save(sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	loaded, err := storage.Load(sess.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(loaded.AllowedTools) != 2 {
+		t.Fatalf("expected 2 approvals after round-trip, got %+v", loaded.AllowedTools)
+	}
+	if !loaded.HasApproval(`name="edit_file";action=write;risk=low`) {
+		t.Fatalf("expected edit_file approval to survive round-trip")
+	}
+
+	// Revocation round-trips too.
+	if !loaded.RemoveApproval(`name="edit_file";action=write;risk=low`) {
+		t.Fatalf("expected RemoveApproval to find the scope")
+	}
+	if err := storage.Save(loaded); err != nil {
+		t.Fatalf("Save after revoke: %v", err)
+	}
+	reloaded, err := storage.Load(sess.ID)
+	if err != nil {
+		t.Fatalf("Load after revoke: %v", err)
+	}
+	if len(reloaded.AllowedTools) != 1 {
+		t.Fatalf("expected 1 approval after revoke round-trip, got %+v", reloaded.AllowedTools)
+	}
+}
+
+func TestStoragePruneCleansCheckpointsAndRecovery(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	if err != nil {
+		t.Fatalf("NewStorage: %v", err)
+	}
+
+	s := New()
+	if err := storage.Save(s); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	// Orphaned checkpoint for a session that no longer exists.
+	orphan := dir + "/deadbeef_cp0001.json"
+	if err := os.WriteFile(orphan, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write orphan checkpoint: %v", err)
+	}
+	// Recent checkpoint for the alive session (kept).
+	recent := dir + "/" + s.ID + "_cp0001.json"
+	if err := os.WriteFile(recent, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write recent checkpoint: %v", err)
+	}
+	// Stale recovery file referencing a dead session.
+	if err := os.WriteFile(dir+"/recovery.json", []byte(`{"session":{"id":"deadbeef"}}`), 0o600); err != nil {
+		t.Fatalf("write recovery: %v", err)
+	}
+
+	if err := storage.Prune(0, 0); err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Errorf("expected orphan checkpoint to be removed")
+	}
+	if _, err := os.Stat(dir + "/recovery.json"); !os.IsNotExist(err) {
+		t.Errorf("expected stale recovery.json to be removed")
+	}
+	if _, err := os.Stat(recent); err != nil {
+		t.Errorf("expected recent checkpoint for alive session to be kept: %v", err)
+	}
+}
+
 func TestStoragePrune(t *testing.T) {
 	dir := t.TempDir()
 	storage, err := NewStorage(dir)

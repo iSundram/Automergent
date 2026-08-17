@@ -30,7 +30,7 @@ func newTestApp(t *testing.T) *App {
 		APIKey:       cfg.Providers["google"].APIKey,
 		DefaultModel: cfg.Model,
 	}), sess, reg)
-	app := NewApp(cfg, ag, sess, nil, "", false)
+	app := NewApp(cfg, ag, sess, nil, nil, "", false)
 	return app
 }
 

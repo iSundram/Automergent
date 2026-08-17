@@ -49,6 +49,7 @@ type App struct {
 	ag                *agent.Agent
 	sess              *session.Session
 	storage           *session.Storage
+	persist           *session.PersistenceManager
 	keys              *keys.Bindings
 	styles            *themes.Styles
 	theme             *themes.Theme
@@ -98,7 +99,7 @@ type App struct {
 	projectApprovalCh     chan agent.ConfirmationResponse
 }
 
-func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string, showSessionPicker bool) *App {
+func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, persist *session.PersistenceManager, initialPrompt string, showSessionPicker bool) *App {
 	theme := themes.Get(cfg.Theme)
 	styles := themes.NewStyles(theme)
 	kb := keys.Get(cfg.Keybindings)
@@ -109,6 +110,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		ag:                 ag,
 		sess:               sess,
 		storage:            storage,
+		persist:            persist,
 		keys:               kb,
 		styles:             styles,
 		theme:              theme,
@@ -1099,7 +1101,7 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		a.statusBar.SetStatus("Conversation cleared")
 	case "/reset":
 		a.conversation.Clear()
-		a.sess.Messages = nil
+		a.sess.SetMessages(nil)
 		a.statusBar.SetStatus("History reset")
 	case "/compact":
 		a.statusBar.SetStatus("Compacting context...")
@@ -1621,14 +1623,14 @@ func isTransientStatus(s string) bool {
 	return strings.HasPrefix(n, "running ")
 }
 
-func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, initialPrompt string, showSessionPicker bool, projectApprovalPath string) error {
+func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, persist *session.PersistenceManager, initialPrompt string, showSessionPicker bool, projectApprovalPath string) error {
 	// Enter alternate screen immediately before TUI starts to prevent
 	// any flash of existing terminal content
 	fmt.Print("\x1b[?1049h") // Enter alt screen
 	fmt.Print("\x1b[H")      // Move cursor to home position
 	fmt.Print("\x1b[2J")     // Clear entire screen
 
-	app := NewApp(cfg, ag, sess, storage, initialPrompt, showSessionPicker)
+	app := NewApp(cfg, ag, sess, storage, persist, initialPrompt, showSessionPicker)
 	app.requireProjectApproval(projectApprovalPath)
 	p := tea.NewProgram(app)
 	_, err := p.Run()
@@ -1947,7 +1949,7 @@ func (a *App) compactContext() tea.Cmd {
 			return nil
 		}
 		compacted := a.ag.CompactSessionMessages(ctx, a.sess.Messages)
-		a.sess.Messages = compacted
+		a.sess.SetMessages(compacted)
 		// Update transcript with compacted messages
 		if mgr := a.ag.ContextManager(); mgr != nil {
 			if tm := mgr.TranscriptManager(); tm != nil {

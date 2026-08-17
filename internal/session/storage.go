@@ -25,8 +25,10 @@ func NewStorage(dir string) (*Storage, error) {
 }
 
 // Save writes a session to disk atomically with mode 0600 (owner-only).
+// The session is snapshotted before marshaling so a save racing with
+// concurrent agent mutations can never produce torn JSON.
 func (s *Storage) Save(sess *Session) error {
-	data, err := json.MarshalIndent(sess, "", "  ")
+	data, err := json.MarshalIndent(sess.Snapshot(), "", "  ")
 	if err != nil {
 		return err
 	}
@@ -116,6 +118,8 @@ func (s *Storage) Delete(id string) error {
 
 // Prune removes oldest sessions beyond maxSessions, and sessions older than maxAge
 // (maxAge == 0 means no age-based pruning). Sessions are sorted by last update time.
+// It also cleans up orphaned checkpoint files and stale crash-recovery state so
+// disk usage stays bounded.
 func (s *Storage) Prune(maxSessions int, maxAge time.Duration) error {
 	sessions, err := s.List()
 	if err != nil {
@@ -140,5 +144,70 @@ func (s *Storage) Prune(maxSessions int, maxAge time.Duration) error {
 		}
 	}
 
+	s.cleanupAuxFiles()
 	return nil
+}
+
+// cleanupAuxFiles removes checkpoint snapshots ("*_cp*.json") and crash-recovery
+// files (recovery.json, state.json, state.backup.json) whose owning session no
+// longer exists, or which are stale. Checkpoints are never restored automatically,
+// so orphaned ones are safe to delete.
+func (s *Storage) cleanupAuxFiles() {
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		return
+	}
+
+	alive := make(map[string]bool)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.HasSuffix(name, ".json") && !strings.Contains(name, "_cp") &&
+			!strings.HasPrefix(name, "state") && !strings.HasPrefix(name, "recovery") {
+			alive[strings.TrimSuffix(name, ".json")] = true
+		}
+	}
+
+	cutoff := time.Now().Add(-24 * time.Hour)
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if strings.Contains(name, "_cp") {
+			// Delete checkpoints for sessions that no longer exist; otherwise
+			// keep only recent ones (they may be restored manually).
+			owner := strings.SplitN(name, "_cp", 2)[0]
+			if !alive[owner] {
+				_ = os.Remove(filepath.Join(s.dir, name))
+				continue
+			}
+			if info, err := e.Info(); err == nil && info.ModTime().Before(cutoff) {
+				_ = os.Remove(filepath.Join(s.dir, name))
+			}
+			continue
+		}
+		if name == recoveryFileName || name == stateFileName || name == stateBackupFileName {
+			// Only remove if it references a session that is gone (stale) or
+			// older than a day (crash leftovers).
+			data, err := os.ReadFile(filepath.Join(s.dir, name))
+			if err != nil {
+				continue
+			}
+			var state PersistenceState
+			if err := json.Unmarshal(data, &state); err != nil {
+				_ = os.Remove(filepath.Join(s.dir, name))
+				continue
+			}
+			if state.Session != nil && !alive[state.Session.ID] {
+				_ = os.Remove(filepath.Join(s.dir, name))
+				continue
+			}
+			if info, err := e.Info(); err == nil && info.ModTime().Before(cutoff) {
+				_ = os.Remove(filepath.Join(s.dir, name))
+			}
+		}
+	}
 }
