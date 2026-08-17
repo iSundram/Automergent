@@ -12,10 +12,10 @@ import (
 
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
+	contextmgr "github.com/iSundram/Automergent/internal/context"
 	"github.com/iSundram/Automergent/internal/coordinator"
 	"github.com/iSundram/Automergent/internal/errors"
 	"github.com/iSundram/Automergent/internal/reasoning"
-	contextmgr "github.com/iSundram/Automergent/internal/context"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
 	subagent "github.com/iSundram/Automergent/internal/tools/agent"
@@ -23,32 +23,32 @@ import (
 
 // Agent is the core AI coding agent.
 type Agent struct {
-	cfg                      *config.Config
-	provider                 ai.Provider
-	sess                     *session.Session
-	tools                    *tools.Registry
-	events                   chan Event
-	closeOnce                sync.Once
-	eventsClosed             bool
-	sessionPersist           func()
-	mu                       sync.RWMutex
-	sessionAllowedTools      map[string]bool
-	approvalSource           string
-	workDir                  string
-	firstMessageHandled      bool
-	decisionRecords          []ToolDecisionRecord
-	reasoningPreAnalyze      func(context.Context, string) (string, error)
-	currentComplexity        reasoning.Complexity
-	currentTaskType          reasoning.TaskType
+	cfg                 *config.Config
+	provider            ai.Provider
+	sess                *session.Session
+	tools               *tools.Registry
+	events              chan Event
+	closeOnce           sync.Once
+	eventsClosed        bool
+	sessionPersist      func()
+	mu                  sync.RWMutex
+	sessionAllowedTools map[string]bool
+	approvalSource      string
+	workDir             string
+	firstMessageHandled bool
+	decisionRecords     []ToolDecisionRecord
+	reasoningPreAnalyze func(context.Context, string) (string, error)
+	currentComplexity   reasoning.Complexity
+	currentTaskType     reasoning.TaskType
 
 	// Persistent components
-	contextManager    *contextmgr.Manager
+	contextManager     *contextmgr.Manager
 	contextManagerRoot string
-	reasoningEngine *reasoning.Engine
-	coordinator    *coordinator.Engine
-	coordinatorOnce sync.Once
-	coordinatorCtx context.Context
-	coordinatorCancel context.CancelFunc
+	reasoningEngine    *reasoning.Engine
+	coordinator        *coordinator.Engine
+	coordinatorOnce    sync.Once
+	coordinatorCtx     context.Context
+	coordinatorCancel  context.CancelFunc
 }
 
 // Execute implements the AgentExecutor interface for sub-agents.
@@ -321,6 +321,30 @@ func (a *Agent) SetProvider(p ai.Provider) {
 
 // Session returns the current session.
 func (a *Agent) Session() *session.Session { return a.sess }
+
+// Approvals returns a copy of the always-allow approvals recorded in the
+// current session.
+func (a *Agent) Approvals() []session.ToolApproval {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	if a.sess == nil {
+		return nil
+	}
+	snap := a.sess.Snapshot()
+	return append([]session.ToolApproval(nil), snap.AllowedTools...)
+}
+
+// RevokeApproval removes an always-allow approval from both the in-memory
+// cache and the persisted session. Returns true if the scope was present.
+func (a *Agent) RevokeApproval(scope string) bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	delete(a.sessionAllowedTools, scope)
+	if a.sess == nil {
+		return false
+	}
+	return a.sess.RemoveApproval(scope)
+}
 
 // SetSession replaces the current session (e.g., when loading a saved session).
 // Always-allow approvals are re-seeded from the incoming session so resumed

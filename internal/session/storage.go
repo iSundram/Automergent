@@ -13,6 +13,8 @@ import (
 // Storage persists sessions to disk.
 type Storage struct {
 	dir string
+	// maxSessionBytes caps the persisted session size; 0 uses the default.
+	maxSessionBytes int64
 }
 
 // NewStorage creates a Storage that uses the given directory.
@@ -24,13 +26,32 @@ func NewStorage(dir string) (*Storage, error) {
 	return &Storage{dir: dir}, nil
 }
 
+// SetMaxSessionBytes overrides the default session file size ceiling.
+func (s *Storage) SetMaxSessionBytes(max int64) { s.maxSessionBytes = max }
+
 // Save writes a session to disk atomically with mode 0600 (owner-only).
 // The session is snapshotted before marshaling so a save racing with
-// concurrent agent mutations can never produce torn JSON.
+// concurrent agent mutations can never produce torn JSON, and oversized
+// histories are compacted in the snapshot (never the live session).
 func (s *Storage) Save(sess *Session) error {
-	data, err := json.MarshalIndent(sess.Snapshot(), "", "  ")
+	snap := sess.Snapshot()
+	maxBytes := s.maxSessionBytes
+	if maxBytes <= 0 {
+		maxBytes = defaultMaxSessionBytes
+	}
+
+	data, err := json.MarshalIndent(snap, "", "  ")
 	if err != nil {
 		return err
+	}
+	// Compact in the snapshot (never the live session) until the final,
+	// pretty-printed file fits the budget.
+	if int64(len(data)) > maxBytes {
+		CompactForSize(snap, maxBytes)
+		data, err = json.MarshalIndent(snap, "", "  ")
+		if err != nil {
+			return err
+		}
 	}
 	path := filepath.Join(s.dir, sess.ID+".json")
 	return atomicWriteFile(path, data, 0o600)

@@ -25,7 +25,6 @@ import (
 	"github.com/iSundram/Automergent/internal/config"
 	automergentErrors "github.com/iSundram/Automergent/internal/errors"
 	"github.com/iSundram/Automergent/internal/git"
-	"github.com/iSundram/Automergent/internal/git"
 	planningPkg "github.com/iSundram/Automergent/internal/planning"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"

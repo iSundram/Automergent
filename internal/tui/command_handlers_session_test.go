@@ -93,3 +93,41 @@ func TestNewSessionSavesCurrentHistory(t *testing.T) {
 		t.Fatalf("old session not saved: %v", err)
 	}
 }
+
+func TestApprovalsCommandListsAndRevokes(t *testing.T) {
+	app := newTestApp(t)
+	storage, err := session.NewStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	app.storage = storage
+
+	app.sess.AddApproval(`project=/p;a;name="run_shell_command";action=write;risk=high`, "tui")
+	app.sess.AddApproval(`name="edit_file";action=write;risk=low`, "tui")
+
+	app.handleSlashCommand("/approvals")
+	view := app.conversation.View()
+	if !strings.Contains(view, "run_shell_command write") || !strings.Contains(view, "edit_file write") {
+		t.Fatalf("approval listing missing entries:\n%s", view)
+	}
+
+	app.handleSlashCommand("/approvals revoke 1")
+	if app.sess.HasApproval(`project=/p;a;name="run_shell_command";action=write;risk=high`) {
+		t.Fatal("expected approval to be revoked")
+	}
+	if !app.sess.HasApproval(`name="edit_file";action=write;risk=low`) {
+		t.Fatal("unrelated approval must be preserved")
+	}
+
+	// Revoked approval survives persistence.
+	loaded, err := storage.Load(app.sess.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.AllowedTools) != 1 {
+		t.Fatalf("expected 1 persisted approval, got %+v", loaded.AllowedTools)
+	}
+
+	app.handleSlashCommand("/approvals revoke 99")
+	app.handleSlashCommand("/approvals revoke nope")
+}

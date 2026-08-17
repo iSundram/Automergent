@@ -1,7 +1,9 @@
 package session
 
 import (
+	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -183,6 +185,83 @@ func TestStoragePruneCleansCheckpointsAndRecovery(t *testing.T) {
 	}
 	if _, err := os.Stat(recent); err != nil {
 		t.Errorf("expected recent checkpoint for alive session to be kept: %v", err)
+	}
+}
+
+func TestCompactForSizeTruncatesOldToolOutputs(t *testing.T) {
+	sess := New()
+	sess.AddMessage(ai.NewTextMessage(ai.RoleUser, "hi"))
+	big := strings.Repeat("x", 100_000)
+	sess.AddMessage(ai.Message{
+		Role: ai.RoleTool,
+		Content: []ai.ContentPart{
+			{Type: ai.ContentTypeToolResult, ToolResult: &ai.ToolResult{Content: big}},
+		},
+	})
+	sess.AddMessage(ai.Message{
+		Role:    ai.RoleTool,
+		Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: big}},
+	})
+	keep := ai.NewTextMessage(ai.RoleAssistant, "done")
+	sess.AddMessage(keep)
+
+	const budget = 50 << 10
+	if !CompactForSize(sess, budget) {
+		t.Fatalf("expected compaction to trigger for oversized session")
+	}
+
+	data, err := json.Marshal(sess)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if int64(len(data)) > budget {
+		t.Fatalf("session still oversized after compaction: %d > %d", len(data), budget)
+	}
+	// User/assistant text preserved verbatim.
+	if sess.Messages[0].TextContent() != "hi" || sess.Messages[len(sess.Messages)-1].TextContent() != "done" {
+		t.Fatalf("user/assistant text must be preserved")
+	}
+}
+
+func TestStorageSaveCompactsOversizedSession(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	if err != nil {
+		t.Fatalf("NewStorage: %v", err)
+	}
+	storage.SetMaxSessionBytes(12 << 10)
+
+	sess := New()
+	sess.AddMessage(ai.NewTextMessage(ai.RoleUser, "hi"))
+	for i := 0; i < 30; i++ {
+		sess.AddMessage(ai.Message{
+			Role:    ai.RoleTool,
+			Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: strings.Repeat("z", 20_000)}},
+		})
+	}
+
+	if err := storage.Save(sess); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	info, err := os.Stat(dir + "/" + sess.ID + ".json")
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Size() > 14<<10 {
+		t.Fatalf("persisted session too large: %d bytes", info.Size())
+	}
+
+	// The live session must be untouched by compaction.
+	if len(sess.Messages) != 31 {
+		t.Fatalf("live session mutated by compaction: %d messages", len(sess.Messages))
+	}
+
+	loaded, err := storage.Load(sess.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(loaded.Messages) != 31 {
+		t.Fatalf("loaded session should retain all messages (truncated): %d", len(loaded.Messages))
 	}
 }
 

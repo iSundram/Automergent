@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/iSundram/Automergent/internal/session"
@@ -84,6 +85,85 @@ func (a *App) searchWorkspace(query string) string {
 		return fmt.Sprintf("No matches found for %q", query)
 	}
 	return b.String()
+}
+
+// handleApprovalsCommand lists or revokes always-allow tool approvals.
+// Usage: /approvals            -> list all approvals with indices
+//
+//	/approvals revoke <i> -> revoke approval at 1-based index
+func (a *App) handleApprovalsCommand(args []string) {
+	approvals := a.ag.Approvals()
+	if len(args) > 0 && args[0] == "revoke" {
+		if len(args) < 2 {
+			a.conversation.AddMessage("system", "Usage: /approvals revoke <index>", false)
+			return
+		}
+		idx, err := strconv.Atoi(args[1])
+		if err != nil || idx < 1 || idx > len(approvals) {
+			a.conversation.AddMessage("system", fmt.Sprintf("Invalid index. Use /approvals to list indices (1-%d).", len(approvals)), false)
+			return
+		}
+		scope := approvals[idx-1].Scope
+		if a.ag.RevokeApproval(scope) {
+			if a.storage != nil {
+				_ = a.storage.Save(a.sess)
+			}
+			a.conversation.AddMessage("system", "Revoked approval: "+formatApprovalScope(scope), false)
+			a.statusBar.SetStatus("Approval revoked")
+		} else {
+			a.conversation.AddMessage("system", "Approval not found.", false)
+		}
+		return
+	}
+
+	if len(approvals) == 0 {
+		a.conversation.AddMessage("system", "No always-allow approvals in this session. Approve a tool with 'a' (always) to grant one.", false)
+		return
+	}
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("Always-allow approvals (%d):\n", len(approvals)))
+	for i, ap := range approvals {
+		fmt.Fprintf(&b, "%d. %s\n", i+1, formatApprovalScope(ap.Scope))
+	}
+	b.WriteString("\nRevoke with: /approvals revoke <index>")
+	a.conversation.AddMessage("system", b.String(), false)
+}
+
+// formatApprovalScope renders a persisted scope key in a readable form,
+// e.g. 'shell write (high risk) — /projects/alpha'.
+func formatApprovalScope(scope string) string {
+	project := ""
+	if strings.HasPrefix(scope, "project=") {
+		if idx := strings.Index(scope, ";name="); idx > 0 {
+			project = strings.TrimPrefix(scope[7:idx], "/")
+		}
+	}
+	name := "tool"
+	if idx := strings.Index(scope, `name="`); idx >= 0 {
+		rest := scope[idx+len(`name="`):]
+		if end := strings.Index(rest, `"`); end > 0 {
+			name = rest[:end]
+		}
+	}
+	action := "read"
+	if idx := strings.Index(scope, "action="); idx >= 0 {
+		rest := scope[idx+len("action="):]
+		if end := strings.Index(rest, ";"); end > 0 {
+			action = rest[:end]
+		}
+	}
+	risk := ""
+	if idx := strings.Index(scope, "risk="); idx >= 0 {
+		risk = scope[idx+len("risk="):]
+	}
+	label := fmt.Sprintf("%s %s", name, action)
+	if risk != "" {
+		label += fmt.Sprintf(" (%s risk)", risk)
+	}
+	if project != "" {
+		label += " — " + project
+	}
+	return label
 }
 
 func (a *App) showSessions() {

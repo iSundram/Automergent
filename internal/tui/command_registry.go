@@ -26,6 +26,7 @@ var slashCommands = []slashCommand{
 	{Name: "sessions", Description: "Browse previous sessions", Category: "Session", Icon: "󰆓", Immediate: true},
 	{Name: "resume", Description: "Browse and resume a session", Category: "Session", Icon: "󰑐", Immediate: true},
 	{Name: "export", Description: "Export conversation as Markdown", Category: "Session", Icon: "󰈇", Usage: "[path]", Immediate: true},
+	{Name: "approvals", Description: "View or revoke always-allow tool approvals", Category: "Session", Icon: "󰌑", Usage: "[revoke <index>]", Immediate: true},
 	{Name: "clear", Description: "Clear the conversation view", Category: "Session", Icon: "󰃢", Immediate: true},
 	{Name: "reset", Description: "Reset current session history", Category: "Session", Icon: "󰑓", Immediate: true},
 

@@ -1307,6 +1307,8 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
 		a.conversation.AddMessage("system", a.stats.View(), false)
+	case "/approvals":
+		a.handleApprovalsCommand(args)
 	case "/quit", "/exit":
 		return tea.Quit
 	default:
