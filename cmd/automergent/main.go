@@ -1167,6 +1167,8 @@ func resolveProvider(cfg *config.Config) (aiPkg.Provider, error) {
 		BaseURL:            pc.BaseURL,
 		DefaultModel:       cfg.Model,
 		OrgID:              pc.OrgID,
+		Project:            pc.Project,
+		Location:           pc.Location,
 		PromptCacheEnabled: &enablePromptCache,
 	}
 

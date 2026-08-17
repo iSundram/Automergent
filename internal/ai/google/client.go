@@ -1,11 +1,11 @@
 package google
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"io"
+	"iter"
 	"net/http"
 	"strings"
 	"sync"
@@ -13,6 +13,7 @@ import (
 
 	"github.com/iSundram/Automergent/internal/ai"
 	automergentErrors "github.com/iSundram/Automergent/internal/errors"
+	"google.golang.org/genai"
 )
 
 const (
@@ -20,13 +21,20 @@ const (
 	defaultModel   = "gemini-3.6-flash"
 )
 
-// Client implements ai.Provider for Google Gemini.
+// Client implements ai.Provider for Google Gemini, backed by the official
+// Google GenAI SDK (google.golang.org/genai).
+//
+// Two backends are supported:
+//   - Gemini API: when only an API key is configured (or nothing at all, in
+//     which case the SDK falls back to environment variables).
+//   - Vertex AI (Google Cloud): when a project and location are configured.
+//     Credentials come from Application Default Credentials or an API key.
 type Client struct {
-	httpClient *http.Client
-	apiKey     string
-	baseURL    string
-	model      string
-	limit      int
+	client  *genai.Client
+	initErr error
+	model   string
+	limit   int
+	baseURL string
 }
 
 func New(cfg ai.ProviderConfig) *Client {
@@ -38,13 +46,31 @@ func New(cfg ai.ProviderConfig) *Client {
 	if model == "" {
 		model = defaultModel
 	}
-	return &Client{
-		httpClient: &http.Client{},
-		apiKey:     cfg.APIKey,
-		baseURL:    base,
-		model:      model,
-		limit:      1000000,
+
+	cc := &genai.ClientConfig{
+		APIKey:     cfg.APIKey,
+		HTTPClient: cfg.HTTPClient,
 	}
+
+	// Vertex AI (Google Cloud) is used when a project and location are set.
+	// This satisfies the Google Cloud infrastructure requirement: requests go
+	// to {location}-aiplatform.googleapis.com instead of the plain Gemini API.
+	if cfg.Project != "" && cfg.Location != "" {
+		cc.Backend = genai.BackendVertexAI
+		cc.Project = cfg.Project
+		cc.Location = cfg.Location
+	} else if base != "" {
+		cc.HTTPOptions = genai.HTTPOptions{BaseURL: base}
+	}
+
+	c := &Client{model: model, limit: 1000000, baseURL: base}
+	client, err := genai.NewClient(context.Background(), cc)
+	if err != nil {
+		c.initErr = err
+		return c
+	}
+	c.client = client
+	return c
 }
 
 func (c *Client) Name() string      { return "google" }
@@ -73,88 +99,6 @@ func (c *Client) TokenCount(messages []ai.Message) (int, error) {
 	return ai.ApproximateTokenCount(messages), nil
 }
 
-type geminiFunctionCall struct {
-	Name string         `json:"name"`
-	Args map[string]any `json:"args,omitempty"`
-	ID   string         `json:"id,omitempty"`
-}
-
-type geminiPart struct {
-	Text             string              `json:"text,omitempty"`
-	Thought          bool                `json:"thought,omitempty"`
-	ThoughtSignature string              `json:"thoughtSignature,omitempty"`
-	FunctionCall     *geminiFunctionCall `json:"functionCall,omitempty"`
-	FunctionResponse *geminiFunctionRes  `json:"functionResponse,omitempty"`
-}
-
-type geminiFunctionRes struct {
-	Name     string         `json:"name"`
-	Response map[string]any `json:"response"`
-	ID       string         `json:"id,omitempty"`
-}
-
-type geminiContent struct {
-	Role  string       `json:"role"`
-	Parts []geminiPart `json:"parts"`
-}
-
-type geminiTool struct {
-	FunctionDeclarations []map[string]any `json:"functionDeclarations,omitempty"`
-	GoogleSearch         *struct{}        `json:"googleSearch,omitempty"`
-}
-
-type geminiToolConfig struct {
-	FunctionCallingConfig *struct {
-		Mode string `json:"mode,omitempty"`
-	} `json:"functionCallingConfig,omitempty"`
-	IncludeServerSideToolInvocations bool `json:"includeServerSideToolInvocations,omitempty"`
-}
-
-type geminiRequest struct {
-	Contents          []geminiContent   `json:"contents"`
-	SystemInstruction *geminiContent    `json:"systemInstruction,omitempty"`
-	Tools             []geminiTool      `json:"tools,omitempty"`
-	ToolConfig        *geminiToolConfig `json:"toolConfig,omitempty"`
-	GenerationConfig  *geminiGenConfig  `json:"generationConfig,omitempty"`
-}
-
-type geminiGenConfig struct {
-	Temperature      *float64 `json:"temperature,omitempty"`
-	MaxOutputTokens  int      `json:"maxOutputTokens,omitempty"`
-	ResponseMimeType string   `json:"responseMimeType,omitempty"`
-	ThinkingConfig   *struct {
-		IncludeThoughts bool   `json:"includeThoughts,omitempty"`
-		ThinkingLevel   string `json:"thinkingLevel,omitempty"`  // "minimal", "low", "medium", "high"
-		ThinkingBudget  int    `json:"thinkingBudget,omitempty"` // Gemini 2.5 models
-	} `json:"thinkingConfig,omitempty"`
-}
-
-type geminiResponsePart struct {
-	Text             string `json:"text,omitempty"`
-	Thought          bool   `json:"thought,omitempty"`
-	ThoughtSignature string `json:"thoughtSignature,omitempty"`
-	FunctionCall     *struct {
-		Name string          `json:"name"`
-		Args json.RawMessage `json:"args"`
-		ID   string          `json:"id,omitempty"`
-	} `json:"functionCall,omitempty"`
-}
-
-type geminiResponse struct {
-	Candidates []struct {
-		Content struct {
-			Role  string               `json:"role"`
-			Parts []geminiResponsePart `json:"parts"`
-		} `json:"content"`
-		FinishReason string `json:"finishReason"`
-	} `json:"candidates"`
-	UsageMetadata struct {
-		PromptTokenCount     int `json:"promptTokenCount"`
-		CandidatesTokenCount int `json:"candidatesTokenCount"`
-		TotalTokenCount      int `json:"totalTokenCount"`
-	} `json:"usageMetadata"`
-}
-
 func toolNameForID(messages []ai.Message, toolIdx int, callID string) string {
 	for j := toolIdx - 1; j >= 0; j-- {
 		if messages[j].Role != ai.RoleAssistant {
@@ -169,8 +113,12 @@ func toolNameForID(messages []ai.Message, toolIdx int, callID string) string {
 	return "tool"
 }
 
-func buildGeminiContents(messages []ai.Message) []geminiContent {
-	var out []geminiContent
+// buildContents converts the conversation into genai contents. Assistant turns
+// first try to restore the original model parts (including thought signatures)
+// from the "google_parts" metadata captured at response time; otherwise they are
+// rebuilt from the normalized message content.
+func buildContents(messages []ai.Message) []*genai.Content {
+	var out []*genai.Content
 	for i, m := range messages {
 		switch m.Role {
 		case ai.RoleUser:
@@ -178,18 +126,17 @@ func buildGeminiContents(messages []ai.Message) []geminiContent {
 			if t == "" {
 				continue
 			}
-			out = append(out, geminiContent{
-				Role:  "user",
-				Parts: []geminiPart{{Text: t}},
-			})
+			out = append(out, genai.NewContentFromText(t, genai.RoleUser))
+
 		case ai.RoleAssistant:
-			// For model messages, we try to find the original parts if we stored them in metadata,
-			// or we rebuild them from the current message content.
-			var parts []geminiPart
+			var parts []*genai.Part
 			if partsRaw, ok := m.Metadata["google_parts"]; ok {
 				if b, err := json.Marshal(partsRaw); err == nil {
+					var stored []*genai.Part
 					// Note: Errors unmarshaling metadata are not fatal - we can rebuild from Content
-					_ = json.Unmarshal(b, &parts)
+					if json.Unmarshal(b, &stored) == nil {
+						parts = stored
+					}
 				}
 			}
 
@@ -198,7 +145,7 @@ func buildGeminiContents(messages []ai.Message) []geminiContent {
 					switch p.Type {
 					case ai.ContentTypeText:
 						if p.Text != "" {
-							parts = append(parts, geminiPart{Text: p.Text})
+							parts = append(parts, genai.NewPartFromText(p.Text))
 						}
 					case ai.ContentTypeToolCall:
 						if p.ToolCall != nil {
@@ -206,8 +153,8 @@ func buildGeminiContents(messages []ai.Message) []geminiContent {
 							if args == nil {
 								args = map[string]any{}
 							}
-							parts = append(parts, geminiPart{
-								FunctionCall: &geminiFunctionCall{
+							parts = append(parts, &genai.Part{
+								FunctionCall: &genai.FunctionCall{
 									Name: p.ToolCall.Name,
 									Args: args,
 									ID:   p.ToolCall.ID,
@@ -221,17 +168,17 @@ func buildGeminiContents(messages []ai.Message) []geminiContent {
 			if len(parts) == 0 {
 				continue
 			}
-			out = append(out, geminiContent{Role: "model", Parts: parts})
+			out = append(out, &genai.Content{Role: string(genai.RoleModel), Parts: parts})
 
 		case ai.RoleTool:
-			var parts []geminiPart
+			var parts []*genai.Part
 			for _, p := range m.Content {
 				if p.Type != ai.ContentTypeToolResult || p.ToolResult == nil {
 					continue
 				}
 				name := toolNameForID(messages, i, p.ToolResult.ToolCallID)
-				parts = append(parts, geminiPart{
-					FunctionResponse: &geminiFunctionRes{
+				parts = append(parts, &genai.Part{
+					FunctionResponse: &genai.FunctionResponse{
 						Name: name,
 						ID:   p.ToolResult.ToolCallID,
 						Response: map[string]any{
@@ -242,358 +189,298 @@ func buildGeminiContents(messages []ai.Message) []geminiContent {
 			}
 			if len(parts) > 0 {
 				// According to Gemini 3 documentation, tool results are provided in 'user' role.
-				out = append(out, geminiContent{Role: "user", Parts: parts})
+				out = append(out, &genai.Content{Role: string(genai.RoleUser), Parts: parts})
 			}
 		}
 	}
 	return out
 }
 
-func functionDeclarations(schemas []ai.ToolSchema) []map[string]any {
+// schemaFromJSON converts a raw JSON schema object (as produced by the tool
+// registry) into a genai.Schema for function declarations.
+func schemaFromJSON(raw map[string]any) *genai.Schema {
+	if raw == nil {
+		return nil
+	}
+	s := &genai.Schema{}
+	if t, ok := raw["type"].(string); ok {
+		s.Type = genai.Type(strings.ToUpper(t))
+	}
+	if d, ok := raw["description"].(string); ok {
+		s.Description = d
+	}
+	if f, ok := raw["format"].(string); ok {
+		s.Format = f
+	}
+	if def, ok := raw["default"]; ok {
+		s.Default = def
+	}
+	switch s.Type {
+	case "OBJECT":
+		if props, ok := raw["properties"].(map[string]any); ok {
+			s.Properties = make(map[string]*genai.Schema, len(props))
+			for name, v := range props {
+				if pm, ok := v.(map[string]any); ok {
+					s.Properties[name] = schemaFromJSON(pm)
+				}
+			}
+		}
+		if req, ok := raw["required"].([]any); ok {
+			for _, r := range req {
+				if rs, ok := r.(string); ok {
+					s.Required = append(s.Required, rs)
+				}
+			}
+		}
+	case "ARRAY":
+		if items, ok := raw["items"].(map[string]any); ok {
+			s.Items = schemaFromJSON(items)
+		}
+		if max, ok := raw["maxItems"].(int); ok {
+			v := int64(max)
+			s.MaxItems = &v
+		}
+	case "STRING":
+		if max, ok := numberValue(raw["maxLength"]); ok {
+			v := int64(max)
+			s.MaxLength = &v
+		}
+	case "INTEGER", "NUMBER":
+		if min, ok := numberValue(raw["minimum"]); ok {
+			v := float64(min)
+			s.Minimum = &v
+		}
+		if max, ok := numberValue(raw["maximum"]); ok {
+			v := float64(max)
+			s.Maximum = &v
+		}
+	}
+	if en, ok := raw["enum"].([]any); ok {
+		for _, e := range en {
+			if es, ok := e.(string); ok {
+				s.Enum = append(s.Enum, es)
+			}
+		}
+	}
+	if anyOf, ok := raw["anyOf"].([]any); ok {
+		for _, a := range anyOf {
+			if am, ok := a.(map[string]any); ok {
+				s.AnyOf = append(s.AnyOf, schemaFromJSON(am))
+			}
+		}
+	}
+	return s
+}
+
+// numberValue extracts a numeric value from a raw JSON schema field, which may
+// arrive as int, int64, float64 (typical after JSON decoding) or json.Number.
+func numberValue(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case float64:
+		return n, true
+	case json.Number:
+		if f, err := n.Float64(); err == nil {
+			return f, true
+		}
+	}
+	return 0, false
+}
+
+func functionDeclarations(schemas []ai.ToolSchema) []*genai.Tool {
 	if len(schemas) == 0 {
 		return nil
 	}
-	decls := make([]map[string]any, 0, len(schemas))
+	decls := make([]*genai.FunctionDeclaration, 0, len(schemas))
 	for _, s := range schemas {
-		decls = append(decls, map[string]any{
-			"name":        s.Name,
-			"description": s.Description,
-			"parameters":  s.Parameters,
+		decls = append(decls, &genai.FunctionDeclaration{
+			Name:        s.Name,
+			Description: s.Description,
+			Parameters:  schemaFromJSON(s.Parameters),
 		})
 	}
-	return decls
+	return []*genai.Tool{{FunctionDeclarations: decls}}
 }
 
-func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.CompletionResponse, error) {
-	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("google: invalid message sequence: %w", err)
-	}
-	contents := buildGeminiContents(req.Messages)
-	if len(contents) == 0 {
-		contents = []geminiContent{{Role: "user", Parts: []geminiPart{{Text: " "}}}}
-	}
-
-	gr := geminiRequest{Contents: contents}
+func buildGenerateContentConfig(c *Client, req ai.CompletionRequest) *genai.GenerateContentConfig {
+	config := &genai.GenerateContentConfig{}
 	if req.System != "" {
-		gr.SystemInstruction = &geminiContent{
-			Parts: []geminiPart{{Text: req.System}},
-		}
+		config.SystemInstruction = &genai.Content{Parts: []*genai.Part{{Text: req.System}}}
 	}
-	if decls := functionDeclarations(req.Tools); len(decls) > 0 {
-		gr.Tools = []geminiTool{{FunctionDeclarations: decls}}
-		gr.ToolConfig = &geminiToolConfig{
-			FunctionCallingConfig: &struct {
-				Mode string `json:"mode,omitempty"`
-			}{Mode: "AUTO"},
-		}
+	if tools := functionDeclarations(req.Tools); len(tools) > 0 {
+		config.Tools = tools
 	}
-
-	// Configure generation settings including thinking
-	genConfig := &geminiGenConfig{}
 	if req.MaxTokens > 0 {
-		genConfig.MaxOutputTokens = req.MaxTokens
+		config.MaxOutputTokens = int32(req.MaxTokens)
 	}
 	if req.Temperature > 0 {
-		temp := req.Temperature
-		genConfig.Temperature = &temp
+		temp := float32(req.Temperature)
+		config.Temperature = &temp
 	}
 	// Enable thinking mode if configured
 	if req.Thinking != nil && req.Thinking.Type == "enabled" {
-		tc := &struct {
-			IncludeThoughts bool   `json:"includeThoughts,omitempty"`
-			ThinkingLevel   string `json:"thinkingLevel,omitempty"`
-			ThinkingBudget  int    `json:"thinkingBudget,omitempty"`
-		}{IncludeThoughts: true}
+		tc := &genai.ThinkingConfig{IncludeThoughts: true}
 
 		// Gemini 2.5 uses thinkingBudget; Gemini 3 uses thinkingLevel.
 		if strings.HasPrefix(c.model, "gemini-2.5") {
 			if req.Thinking.BudgetTokens != 0 {
-				tc.ThinkingBudget = req.Thinking.BudgetTokens
+				budget := int32(req.Thinking.BudgetTokens)
+				tc.ThinkingBudget = &budget
 			} else {
-				tc.ThinkingBudget = -1 // Dynamic thinking budget.
+				budget := int32(-1) // Dynamic thinking budget.
+				tc.ThinkingBudget = &budget
 			}
 		} else {
 			tc.ThinkingLevel = "high"
 		}
 
-		genConfig.ThinkingConfig = tc
+		config.ThinkingConfig = tc
 	}
-	gr.GenerationConfig = genConfig
+	return config
+}
 
-	body, err := json.Marshal(gr)
-	if err != nil {
-		return nil, err
+func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.CompletionResponse, error) {
+	if c.initErr != nil {
+		return nil, fmt.Errorf("google: client initialization failed: %w", c.initErr)
 	}
-
-	method := "generateContent"
-	if req.Stream {
-		method = "streamGenerateContent"
+	if err := req.Validate(); err != nil {
+		return nil, fmt.Errorf("google: invalid message sequence: %w", err)
 	}
-
-	url := fmt.Sprintf("%s/models/%s:%s?key=%s", c.baseURL, c.model, method, c.apiKey)
+	contents := buildContents(req.Messages)
+	if len(contents) == 0 {
+		contents = []*genai.Content{genai.NewContentFromText(" ", genai.RoleUser)}
+	}
+	config := buildGenerateContentConfig(c, req)
 
 	// Wrap the request in a retry loop
 	policy := automergentErrors.AggressiveRetryPolicy()
-	// Customize policy: keep retrying on 503 as requested
 	policy.MaxAttempts = 10
 
-	var resp *http.Response
-	retryResult := automergentErrors.Retry(ctx, policy, func() error {
-		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
-		if err != nil {
-			return err
+	if !req.Stream {
+		resp, retryResult := automergentErrors.RetryWithValue(ctx, policy, func() (*genai.GenerateContentResponse, error) {
+			resp, err := c.client.Models.GenerateContent(ctx, c.model, contents, config)
+			if err != nil {
+				return nil, c.mapError(err)
+			}
+			return resp, nil
+		})
+		if !retryResult.Successful {
+			return nil, retryResult.LastError
 		}
-		httpReq.Header.Set("content-type", "application/json")
+		return c.buildStaticResponse(resp), nil
+	}
 
-		resp, err = c.httpClient.Do(httpReq)
-		if err != nil {
-			return automergentErrors.NewConnectionError(c.baseURL, err)
+	// Streaming: the SDK returns a lazy iterator; the HTTP request is only sent
+	// on the first iteration. Retry only until the first response arrives, so a
+	// mid-stream failure is never retried (avoiding duplicated output).
+	first, retryResult := automergentErrors.RetryWithValue(ctx, policy, func() (firstStreamResult, error) {
+		iter := c.client.Models.GenerateContentStream(ctx, c.model, contents, config)
+		for resp, err := range iter {
+			if err != nil {
+				return firstStreamResult{}, c.mapError(err)
+			}
+			return firstStreamResult{iter: iter, first: resp}, nil
 		}
-
-		if resp.StatusCode == http.StatusOK {
-			return nil
-		}
-
-		// Handle error response
-		defer resp.Body.Close()
-		data, _ := io.ReadAll(resp.Body)
-
-		return c.parseErrorResponse(resp.StatusCode, data, url)
+		return firstStreamResult{iter: iter}, nil
 	})
-
 	if !retryResult.Successful {
 		return nil, retryResult.LastError
 	}
 
-	if !req.Stream {
-		defer resp.Body.Close()
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, err
-		}
-
-		var gr2 geminiResponse
-		if err := json.Unmarshal(data, &gr2); err != nil {
-			return nil, err
-		}
-
-		var text string
-		var thought string
-		var toolCalls []ai.ToolCall
-		var rawParts []geminiPart
-
-		if len(gr2.Candidates) > 0 {
-			for _, part := range gr2.Candidates[0].Content.Parts {
-				// Skip parts that are completely empty to avoid 400 error.
-				// If it only has thoughtSignature, it MUST still have some data field (like text).
-				if part.Text == "" && part.FunctionCall == nil && part.ThoughtSignature != "" {
-					// Add a placeholder space to satisfy "oneof field 'data' must have one initialized field"
-					part.Text = " "
-				}
-				if part.Text == "" && part.FunctionCall == nil && part.ThoughtSignature == "" {
-					continue
-				}
-
-				// Parse function call args if present
-				var parsedArgs map[string]any
-				if part.FunctionCall != nil && len(part.FunctionCall.Args) > 0 {
-					if err := json.Unmarshal(part.FunctionCall.Args, &parsedArgs); err != nil {
-						return nil, fmt.Errorf("google: invalid function call args: %w", err)
-					}
-				}
-
-				// Save for next turn
-				rawParts = append(rawParts, geminiPart{
-					Text:             part.Text,
-					Thought:          part.Thought,
-					ThoughtSignature: part.ThoughtSignature,
-					FunctionCall: func() *geminiFunctionCall {
-						if part.FunctionCall == nil {
-							return nil
-						}
-						argsCopy := parsedArgs
-						if argsCopy == nil {
-							argsCopy = map[string]any{}
-						}
-						return &geminiFunctionCall{Name: part.FunctionCall.Name, Args: argsCopy}
-					}(),
-				})
-				if part.Thought {
-					thought += part.Text
-				} else if part.Text != "" {
-					text += part.Text
-				}
-				if part.FunctionCall != nil {
-					args := parsedArgs
-					if args == nil {
-						args = map[string]any{}
-					}
-					// Use model-provided ID if available
-					id := part.FunctionCall.ID
-					if id == "" {
-						id = fmt.Sprintf("gemini_%d", len(toolCalls))
-					}
-					toolCalls = append(toolCalls, ai.ToolCall{
-						ID:   id,
-						Name: part.FunctionCall.Name,
-						Args: args,
-					})
-				}
-			}
-		}
-
-		usage := ai.Usage{
-			InputTokens:  gr2.UsageMetadata.PromptTokenCount,
-			OutputTokens: gr2.UsageMetadata.CandidatesTokenCount,
-			TotalTokens:  gr2.UsageMetadata.TotalTokenCount,
-		}
-
-		res := ai.NewStaticResponse(text, thought, toolCalls, ai.StopReasonEnd, usage)
-		if len(rawParts) > 0 {
-			res.SetMetadata(map[string]any{"google_parts": rawParts})
-		}
-
-		if len(toolCalls) > 0 {
-			res.SetStopReason(ai.StopReasonTools)
-		} else if len(gr2.Candidates) > 0 {
-			switch gr2.Candidates[0].FinishReason {
-			case "MAX_TOKENS":
-				res.SetStopReason(ai.StopReasonLength)
-			case "STOP", "":
-				res.SetStopReason(ai.StopReasonEnd)
-			}
-		}
-
-		return res, nil
-	}
-
-	// Streaming logic: Gemini returns a JSON array of objects during streamGenerateContent
 	ch := make(chan ai.Chunk, 128)
-
 	// Protect shared state with mutex
 	var mu sync.Mutex
 	toolCalls := []ai.ToolCall{}
 	stopReason := ai.StopReasonEnd
 	usage := ai.Usage{}
-	rawParts := []geminiPart{}
+	rawParts := []*genai.Part{}
 
 	go func() {
-		defer resp.Body.Close()
 		defer close(ch)
 
-		dec := json.NewDecoder(resp.Body)
-		// Read the opening '['
-		t, err := dec.Token()
-		if err != nil {
-			ch <- ai.Chunk{Error: fmt.Errorf("stream start: %w", err)}
-			return
-		}
-		if t != json.Delim('[') {
-			ch <- ai.Chunk{Error: fmt.Errorf("expected '[' at start of stream, got %v", t)}
-			return
-		}
+		emit := func(resp *genai.GenerateContentResponse) {
+			if resp.UsageMetadata != nil && resp.UsageMetadata.TotalTokenCount > 0 {
+				usage = ai.Usage{
+					InputTokens:  int(resp.UsageMetadata.PromptTokenCount),
+					OutputTokens: int(resp.UsageMetadata.CandidatesTokenCount),
+					TotalTokens:  int(resp.UsageMetadata.TotalTokenCount),
+				}
+			}
 
-		for dec.More() {
-			var gr2 geminiResponse
-			if err := dec.Decode(&gr2); err != nil {
-				ch <- ai.Chunk{Error: fmt.Errorf("stream decode: %w", err)}
+			if len(resp.Candidates) == 0 {
 				return
 			}
-
-			if gr2.UsageMetadata.TotalTokenCount > 0 {
-				usage = ai.Usage{
-					InputTokens:  gr2.UsageMetadata.PromptTokenCount,
-					OutputTokens: gr2.UsageMetadata.CandidatesTokenCount,
-					TotalTokens:  gr2.UsageMetadata.TotalTokenCount,
+			cand := resp.Candidates[0]
+			if cand.FinishReason != "" && stopReason != ai.StopReasonTools {
+				switch cand.FinishReason {
+				case genai.FinishReasonMaxTokens:
+					stopReason = ai.StopReasonLength
+				case genai.FinishReasonStop:
+					stopReason = ai.StopReasonEnd
 				}
 			}
 
-			if len(gr2.Candidates) > 0 {
-				cand := gr2.Candidates[0]
-				if cand.FinishReason != "" && stopReason != ai.StopReasonTools {
-					switch cand.FinishReason {
-					case "MAX_TOKENS":
-						stopReason = ai.StopReasonLength
-					case "STOP":
-						stopReason = ai.StopReasonEnd
-					}
+			if cand.Content == nil {
+				return
+			}
+			for _, part := range cand.Content.Parts {
+				if part == nil {
+					continue
 				}
 
-				for _, part := range cand.Content.Parts {
-					// Skip parts that are completely empty to avoid 400 error.
-					if part.Text == "" && part.FunctionCall == nil && part.ThoughtSignature != "" {
-						part.Text = " "
-					}
-					if part.Text == "" && part.FunctionCall == nil && part.ThoughtSignature == "" {
-						continue
+				// Save raw parts for context preservation (protected by mutex)
+				mu.Lock()
+				rawParts = append(rawParts, part)
+				mu.Unlock()
+
+				chunk := ai.Chunk{}
+				if part.Thought {
+					chunk.Thought = part.Text
+				} else if part.Text != "" {
+					chunk.Text = part.Text
+				}
+
+				if part.FunctionCall != nil {
+					args := part.FunctionCall.Args
+					if args == nil {
+						args = map[string]any{}
 					}
 
-					// Save raw parts for context preservation (protected by mutex)
+					id := part.FunctionCall.ID
+					if id == "" {
+						mu.Lock()
+						id = fmt.Sprintf("gemini_%d", len(toolCalls))
+						mu.Unlock()
+					}
+					tc := ai.ToolCall{
+						ID:   id,
+						Name: part.FunctionCall.Name,
+						Args: args,
+					}
+
 					mu.Lock()
-					rawParts = append(rawParts, geminiPart{
-						Text:             part.Text,
-						Thought:          part.Thought,
-						ThoughtSignature: part.ThoughtSignature,
-						FunctionCall: func() *geminiFunctionCall {
-							if part.FunctionCall == nil {
-								return nil
-							}
-							var args map[string]any
-							if err := json.Unmarshal(part.FunctionCall.Args, &args); err != nil {
-								// Send error chunk
-								ch <- ai.Chunk{
-									Error: fmt.Errorf("google: parsing tool args for %s: %w", part.FunctionCall.Name, err),
-									Done:  true,
-								}
-								return nil
-							}
-							return &geminiFunctionCall{Name: part.FunctionCall.Name, Args: args}
-						}(),
-					})
+					toolCalls = append(toolCalls, tc)
+					stopReason = ai.StopReasonTools
 					mu.Unlock()
 
-					chunk := ai.Chunk{}
-					if part.Thought {
-						chunk.Thought = part.Text
-					} else if part.Text != "" {
-						chunk.Text = part.Text
-					}
-
-					if part.FunctionCall != nil {
-						var args map[string]any
-						if len(part.FunctionCall.Args) > 0 {
-							if err := json.Unmarshal(part.FunctionCall.Args, &args); err != nil {
-								ch <- ai.Chunk{
-									Error: fmt.Errorf("google: invalid tool arguments for %s: %w", part.FunctionCall.Name, err),
-									Done:  true,
-								}
-								mu.Unlock()
-								return
-							}
-						}
-						if args == nil {
-							args = map[string]any{}
-						}
-
-						mu.Lock()
-						id := part.FunctionCall.ID
-						if id == "" {
-							id = fmt.Sprintf("gemini_%d", len(toolCalls))
-						}
-						tc := ai.ToolCall{
-							ID:   id,
-							Name: part.FunctionCall.Name,
-							Args: args,
-						}
-						toolCalls = append(toolCalls, tc)
-						stopReason = ai.StopReasonTools
-						mu.Unlock()
-
-						chunk.ToolCalls = append(chunk.ToolCalls, tc)
-					}
-					ch <- chunk
+					chunk.ToolCalls = append(chunk.ToolCalls, tc)
 				}
+				ch <- chunk
 			}
+		}
+
+		if first.first != nil {
+			emit(first.first)
+		}
+		for resp, err := range first.iter {
+			if err != nil {
+				ch <- ai.Chunk{Error: c.mapError(err), Done: true}
+				return
+			}
+			emit(resp)
 		}
 		ch <- ai.Chunk{Done: true}
 	}()
@@ -609,12 +496,82 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 	}, nil
 }
 
+// firstStreamResult carries the first streamed response together with the
+// iterator it came from, so the remaining chunks can be drained without
+// re-sending the request.
+type firstStreamResult struct {
+	iter  iter.Seq2[*genai.GenerateContentResponse, error]
+	first *genai.GenerateContentResponse
+}
+
+func (c *Client) buildStaticResponse(resp *genai.GenerateContentResponse) ai.CompletionResponse {
+	var text, thought string
+	var toolCalls []ai.ToolCall
+	var rawParts []*genai.Part
+
+	if len(resp.Candidates) > 0 && resp.Candidates[0].Content != nil {
+		for _, part := range resp.Candidates[0].Content.Parts {
+			if part == nil {
+				continue
+			}
+			rawParts = append(rawParts, part)
+			if part.Thought {
+				thought += part.Text
+			} else if part.Text != "" {
+				text += part.Text
+			}
+			if part.FunctionCall != nil {
+				args := part.FunctionCall.Args
+				if args == nil {
+					args = map[string]any{}
+				}
+				id := part.FunctionCall.ID
+				if id == "" {
+					id = fmt.Sprintf("gemini_%d", len(toolCalls))
+				}
+				toolCalls = append(toolCalls, ai.ToolCall{
+					ID:   id,
+					Name: part.FunctionCall.Name,
+					Args: args,
+				})
+			}
+		}
+	}
+
+	usage := ai.Usage{}
+	if resp.UsageMetadata != nil {
+		usage = ai.Usage{
+			InputTokens:  int(resp.UsageMetadata.PromptTokenCount),
+			OutputTokens: int(resp.UsageMetadata.CandidatesTokenCount),
+			TotalTokens:  int(resp.UsageMetadata.TotalTokenCount),
+		}
+	}
+
+	stop := ai.StopReasonEnd
+	if len(toolCalls) > 0 {
+		stop = ai.StopReasonTools
+	} else if len(resp.Candidates) > 0 {
+		switch resp.Candidates[0].FinishReason {
+		case genai.FinishReasonMaxTokens:
+			stop = ai.StopReasonLength
+		case genai.FinishReasonStop, "":
+			stop = ai.StopReasonEnd
+		}
+	}
+
+	res := ai.NewStaticResponse(text, thought, toolCalls, stop, usage)
+	if len(rawParts) > 0 {
+		res.SetMetadata(map[string]any{"google_parts": rawParts})
+	}
+	return res
+}
+
 type geminiStreamResponse struct {
 	res        *ai.ChannelResponse
 	toolCalls  *[]ai.ToolCall
 	stopReason *ai.StopReason
 	usage      *ai.Usage
-	rawParts   *[]geminiPart
+	rawParts   *[]*genai.Part
 	mu         *sync.Mutex
 }
 
@@ -640,64 +597,53 @@ func (r *geminiStreamResponse) GetMetadata() map[string]any {
 	return map[string]any{"google_parts": *r.rawParts}
 }
 
-type geminiErrorResponse struct {
-	Error struct {
-		Code    int    `json:"code"`
-		Message string `json:"message"`
-		Status  string `json:"status"`
-		Details []struct {
-			Reason string `json:"reason"`
-			Domain string `json:"domain"`
-		} `json:"details"`
-	} `json:"error"`
-}
-
-func (c *Client) parseErrorResponse(status int, data []byte, url string) error {
-	var errRes geminiErrorResponse
-	if err := json.Unmarshal(data, &errRes); err != nil {
-		// Fallback to generic HTTP error
-		return automergentErrors.NewHTTPError(status, string(data), url)
+// mapError converts SDK errors into the project's error taxonomy.
+func (c *Client) mapError(err error) error {
+	if err == nil {
+		return nil
 	}
 
-	msg := errRes.Error.Message
-	if msg == "" {
-		msg = fmt.Sprintf("Google API error (status %d)", status)
-	}
+	var apiErr genai.APIError
+	if errors.As(err, &apiErr) || func() bool {
+		var ptrErr *genai.APIError
+		if errors.As(err, &ptrErr) && ptrErr != nil {
+			apiErr = *ptrErr
+			return true
+		}
+		return false
+	}() {
+		msg := apiErr.Message
+		if msg == "" {
+			msg = fmt.Sprintf("Google API error (status %d)", apiErr.Code)
+		}
 
-	// Default mapping based on HTTP status
-	code := automergentErrors.CodeHTTPError
-	switch status {
-	case 429:
-		code = automergentErrors.CodeRateLimited
-		// Check for quota vs rate limit
-		for _, detail := range errRes.Error.Details {
-			if detail.Reason == "QUOTA_EXCEEDED" {
+		code := automergentErrors.CodeHTTPError
+		switch apiErr.Code {
+		case http.StatusTooManyRequests:
+			code = automergentErrors.CodeRateLimited
+			if strings.Contains(strings.ToLower(msg), "quota") {
 				code = automergentErrors.CodeQuotaExceeded
-				break
 			}
+		case http.StatusUnauthorized:
+			code = automergentErrors.CodeUnauthorized
+		case http.StatusForbidden:
+			code = automergentErrors.CodeForbidden
+		case http.StatusServiceUnavailable:
+			code = automergentErrors.CodeServiceUnavailable
+		case http.StatusInternalServerError:
+			code = automergentErrors.CodeServerError
 		}
-		// If message contains "quota", treat as quota exceeded
-		if code == automergentErrors.CodeRateLimited && strings.Contains(strings.ToLower(msg), "quota") {
-			code = automergentErrors.CodeQuotaExceeded
+
+		oce := automergentErrors.New(code, msg).
+			WithResource(c.baseURL).
+			WithContext("status_code", apiErr.Code).
+			WithContext("google_status", apiErr.Status)
+
+		if apiErr.Code == http.StatusTooManyRequests || apiErr.Code >= http.StatusInternalServerError {
+			oce.WithRetry(30 * time.Second)
 		}
-	case 401:
-		code = automergentErrors.CodeUnauthorized
-	case 403:
-		code = automergentErrors.CodeForbidden
-	case 503:
-		code = automergentErrors.CodeServiceUnavailable
-	case 500:
-		code = automergentErrors.CodeServerError
+		return oce
 	}
 
-	oce := automergentErrors.New(code, msg).
-		WithResource(url).
-		WithContext("status_code", status).
-		WithContext("google_status", errRes.Error.Status)
-
-	if status == 429 || status >= 500 {
-		oce.WithRetry(30 * time.Second)
-	}
-
-	return oce
+	return automergentErrors.NewConnectionError(c.baseURL, err)
 }
