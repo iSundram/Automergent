@@ -19,7 +19,6 @@ import (
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
 	subagent "github.com/iSundram/Automergent/internal/tools/agent"
-	"github.com/iSundram/Automergent/internal/verification"
 )
 
 // Agent is the core AI coding agent.
@@ -39,7 +38,6 @@ type Agent struct {
 	reasoningPreAnalyze      func(context.Context, string) (string, error)
 	currentComplexity        reasoning.Complexity
 	currentTaskType          reasoning.TaskType
-	consecutiveVerifications int
 
 	// Persistent components
 	contextManager    *contextmgr.Manager
@@ -499,31 +497,12 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			isFirstMessage = false // Only prune once
 		}
 
-		// 3. Handle Stop Condition (Verification Gate)
+		// 3. Handle Stop Condition
 		if stop != ai.StopReasonTools || len(toolCalls) == 0 {
-			// Even if the model says it's done, we run a verification gate
-			if a.consecutiveVerifications < 2 && a.shouldVerify(a.sess.Messages) {
-				a.consecutiveVerifications++
-				a.Emit(EventStatus, "Verification Gate: Confirming task integrity...")
-				vResult, err := a.verifyTaskCompletion(ctx)
-				if err != nil || (vResult != nil && vResult.TotalIssues > 0) {
-					// Verification failed! Force a recovery turn.
-					a.Emit(EventStatus, "Verification Gate: Failures detected. Triggering recovery turn.")
-					recoveryMsg := a.triggerRecoveryTurn(vResult, err)
-					a.sess.AddMessage(recoveryMsg)
-					a.recordToTranscript(recoveryMsg)
-					continue // Back into the loop
-				}
-				a.Emit(EventStatus, "Verification Gate: Integrity confirmed.")
-			}
-
 			a.Emit(EventDone, text)
 			a.tryPersist()
 			return nil
 		}
-
-		// If we are executing tools, reset the verification counter
-		a.consecutiveVerifications = 0
 
 		for _, executed := range a.executeToolCallsParallel(ctx, toolCalls) {
 			a.Emit(EventToolDone, ToolDoneEvent{
@@ -1169,102 +1148,4 @@ func (a *Agent) ReasoningEngine() *reasoning.Engine {
 	cfg.DefaultTimeout = 5 * time.Minute
 	a.reasoningEngine = reasoning.NewEngine(cfg)
 	return a.reasoningEngine
-}
-
-// shouldVerify determines if the current session state warrants a verification gate.
-func (a *Agent) shouldVerify(messages []ai.Message) bool {
-	// Only verify in edit or plan mode
-	if a.cfg.Mode != "edit" && a.cfg.Mode != "plan" {
-		return false
-	}
-
-	// Only verify if there was a tool call that likely modified state
-	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == ai.RoleAssistant {
-			for _, tc := range messages[i].ToolCallParts() {
-				name := strings.ToLower(tc.Name)
-				if strings.Contains(name, "edit") || strings.Contains(name, "write") ||
-					strings.Contains(name, "create") || strings.Contains(name, "delete") ||
-					strings.Contains(name, "apply") || strings.Contains(name, "test") {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
-// verifyTaskCompletion runs the full verification suite against the current workspace.
-func (a *Agent) verifyTaskCompletion(ctx context.Context) (*verification.Result, error) {
-	engine := verification.NewDefaultEngine()
-	cwd, _ := os.Getwd()
-
-	// Identify changed files from session history for targeted verification
-	changedFiles := make([]string, 0)
-	for _, m := range a.sess.Messages {
-		if m.Role == ai.RoleAssistant {
-			for _, tc := range m.ToolCallParts() {
-				if path, ok := tc.Args["path"].(string); ok {
-					changedFiles = append(changedFiles, path)
-				} else if path, ok := tc.Args["file_path"].(string); ok {
-					changedFiles = append(changedFiles, path)
-				}
-			}
-		}
-	}
-
-	vCtx := &verification.Context{
-		WorkingDir:   cwd,
-		ChangedFiles: changedFiles,
-		OnProgress: func(layer verification.Layer, status verification.Status, _ string) {
-			a.Emit(EventStatus, fmt.Sprintf("Verification Gate: [%s] %s", layer, status))
-		},
-	}
-
-	return engine.Verify(ctx, vCtx)
-}
-
-// triggerRecoveryTurn creates a system message explaining the verification failures.
-func (a *Agent) triggerRecoveryTurn(result *verification.Result, err error) ai.Message {
-	var sb strings.Builder
-	sb.WriteString("# Verification Failed\n\n")
-	sb.WriteString("I've analyzed your latest response and the state of the workspace. The task is NOT complete because the following issues were detected:\n\n")
-
-	if err != nil {
-		sb.WriteString(fmt.Sprintf("## System Error\n%v\n\n", err))
-	}
-
-	if result != nil {
-		for _, layer := range result.Layers {
-			if len(layer.Issues) > 0 {
-				sb.WriteString(fmt.Sprintf("## %s Issues\n", layer.Layer))
-				for _, issue := range layer.Issues {
-					sb.WriteString(fmt.Sprintf("- [%s] %s", issue.Severity, issue.Message))
-					if issue.File != "" {
-						sb.WriteString(fmt.Sprintf(" (in %s", issue.File))
-						if issue.Line > 0 {
-							sb.WriteString(fmt.Sprintf(":%d", issue.Line))
-						}
-						sb.WriteString(")")
-					}
-					if issue.FixSuggestion != "" {
-						sb.WriteString(fmt.Sprintf("\n  *Suggestion:* %s", issue.FixSuggestion))
-					}
-					sb.WriteString("\n")
-				}
-				sb.WriteString("\n")
-			}
-		}
-	}
-
-	sb.WriteString("## Requirement\n")
-	sb.WriteString("Please analyze these failures, identify the root cause, and continue until all verification layers pass. Do not report completion until the workspace is in a healthy state.")
-
-	return ai.Message{
-		Role: ai.RoleSystem,
-		Content: []ai.ContentPart{{
-			Type: ai.ContentTypeText,
-			Text: sb.String(),
-		}},
-	}
 }

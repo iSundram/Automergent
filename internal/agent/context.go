@@ -125,7 +125,6 @@ func buildSystemPrompt(cfg *config.Config, reg *tools.Registry, messages []ai.Me
 		{name: "task-protocol", content: renderTaskProtocol(), classifyAs: cache.ClassificationStatic},
 		{name: "safety", content: renderSafetyProtocols(), classifyAs: cache.ClassificationStatic},
 		{name: "collaboration", content: renderCollaborativeJudgment(), classifyAs: cache.ClassificationStatic},
-		{name: "verification", content: renderVerificationGate(), classifyAs: cache.ClassificationStatic},
 		{name: "efficiency", content: renderEfficiencyProtocols(reg), classifyAs: cache.ClassificationSemiStatic},
 		{name: "cache-break", isCacheBreak: true},
 		{name: "project-context", content: renderProjectContext(cfg, messages, cm), classifyAs: cache.ClassificationDynamic},
@@ -156,16 +155,10 @@ You are a full-system autonomous engineer operating in large-scale codebases. Yo
      ### 🎯 Objective: [System-level summary]
      ### 🔍 Findings: [Key definitions, usages, and integration points discovered]
      ### 🛠️ Proposed Changes: [Comprehensive list of all affected files to be updated]
-     ### ✅ System Verification Strategy: [Post-execution scan & test plan]
 
 4. **System Integration Guarantee (Execution):**
    - **No Partial Edits:** You MUST update ALL affected files across the codebase. Treat a single-file update as INCOMPLETE if multiple integration points, imports, or usages exist.
    - Maintain strict correctness and idiomatic consistency across all modified layers.
-
-5. **Post-Execution Validation Phase:**
-   - **Re-Scan the Codebase:** You MUST re-scan the codebase using search tools to confirm the feature is fully wired, reachable in runtime flow, and free of missing references or partial implementations.
-   - **Forbidden:** Do NOT mark tasks as complete without this explicit tool-based verification.
-   - A task is NOT complete until all syntax, logic, system references, and tests pass.
 `
 }
 
@@ -189,16 +182,6 @@ You are a collaborator, not a submissive executor.
 - **Challenge Assumptions:** If a user's request is based on a misconception or would introduce a bug/security flaw, you MUST point it out and suggest a better approach.
 - **Adjacent Awareness:** If you spot a bug or a better way to refactor code *adjacent* to your current task, surface it to the user.
 - **Architecture First:** Prioritize clean, idiomatic abstractions over "quick fixes." Don't design for hypothetical futures, but don't leave technical debt behind.
-`
-}
-
-func renderVerificationGate() string {
-	return `
-# Verification Gate (The Contract)
-A task is NOT complete until it is verified.
-- **Multi-File Changes:** Any change affecting 3 or more files, or critical backend logic, requires a formal verification run (tests, linter, or manual execution script).
-- **Faithful Reporting:** Never claim "all tests pass" if the output shows failures. If you couldn't verify (e.g., no environment), say so explicitly.
-- **Adversarial Mindset:** When verifying, try to break your own fix. Check for edge cases, performance regressions, and security vulnerabilities.
 `
 }
 

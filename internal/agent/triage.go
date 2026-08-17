@@ -20,12 +20,9 @@ const TriageInstruction = `AUTONOMOUS RESEARCH & PLANNING PROTOCOL:
   (Summary of the current state and identified issues)
   ### 🛠️ Proposed Changes
   (Step-by-step list of file modifications and tool calls)
-  ### ✅ Verification Strategy
-  (How will we prove the fix/feature works?)
 
 4. **Execution & Self-Correction**
 - Only proceed with edits AFTER the Strategic Plan is presented.
-- Every edit must be immediately followed by a verification step.
 - If an edit fails or introduces a regression, stop and re-plan.
 
 Rules:
