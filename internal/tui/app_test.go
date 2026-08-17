@@ -142,6 +142,9 @@ func TestProjectApprovalUpdatesAllowedPaths(t *testing.T) {
 func TestRememberedProjectApprovalPersistsConfig(t *testing.T) {
 	app := newTestApp(t)
 	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(configPath, []byte("mode: edit\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
 	app.cfg.ConfigFile = configPath
 	app.pendingProjectPath = filepath.Join(t.TempDir(), "project")
 	_, _ = app.Update(projectApprovalMsg{response: agent.ConfirmationResponse{Allow: true, Always: true}})
@@ -251,7 +254,7 @@ func TestCtrlRTogglesReviewMode(t *testing.T) {
 	}
 }
 
-func TestPersistProjectConfigWritesHomeAutomergentConfig(t *testing.T) {
+func TestPersistProjectConfigDoesNotCreateHomeConfig(t *testing.T) {
 	app := newTestApp(t)
 	home := t.TempDir()
 
@@ -278,12 +281,8 @@ func TestPersistProjectConfigWritesHomeAutomergentConfig(t *testing.T) {
 	}
 
 	path := filepath.Join(home, ".automergent", "config.yaml")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatalf("read persisted config: %v", err)
-	}
-	if len(data) == 0 {
-		t.Fatalf("persisted config is empty")
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("missing config was created, stat error: %v", err)
 	}
 }
 

@@ -158,6 +158,12 @@ func (c *Config) SaveIfLoaded() error {
 	if c.ConfigFile == "" {
 		return nil
 	}
+	if _, err := os.Stat(c.ConfigFile); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("config save: stat: %w", err)
+	}
 	return c.Save()
 }
 
@@ -272,14 +278,14 @@ type NotificationConfig struct {
 
 // CoordinatorConfig holds multi-agent coordination settings.
 type CoordinatorConfig struct {
-	Enabled         bool              `mapstructure:"enabled" yaml:"enabled"`
-	WorkersPerRole  map[string]int    `mapstructure:"workersPerRole" yaml:"workersPerRole,omitempty"`
-	ModelOverrides  map[string]string `mapstructure:"modelOverrides" yaml:"modelOverrides,omitempty"` // role → model
-	DefaultTimeout  string            `mapstructure:"defaultTimeout" yaml:"defaultTimeout,omitempty"`
-	MaxRetries      int               `mapstructure:"maxRetries" yaml:"maxRetries,omitempty"`
-	QualityThreshold float64          `mapstructure:"qualityThreshold" yaml:"qualityThreshold,omitempty"`
-	ConsensusThreshold int            `mapstructure:"consensusThreshold" yaml:"consensusThreshold,omitempty"`
-	ResourceLimits  CoordinatorResourceLimits `mapstructure:"resourceLimits" yaml:"resourceLimits,omitempty"`
+	Enabled            bool                      `mapstructure:"enabled" yaml:"enabled"`
+	WorkersPerRole     map[string]int            `mapstructure:"workersPerRole" yaml:"workersPerRole,omitempty"`
+	ModelOverrides     map[string]string         `mapstructure:"modelOverrides" yaml:"modelOverrides,omitempty"` // role → model
+	DefaultTimeout     string                    `mapstructure:"defaultTimeout" yaml:"defaultTimeout,omitempty"`
+	MaxRetries         int                       `mapstructure:"maxRetries" yaml:"maxRetries,omitempty"`
+	QualityThreshold   float64                   `mapstructure:"qualityThreshold" yaml:"qualityThreshold,omitempty"`
+	ConsensusThreshold int                       `mapstructure:"consensusThreshold" yaml:"consensusThreshold,omitempty"`
+	ResourceLimits     CoordinatorResourceLimits `mapstructure:"resourceLimits" yaml:"resourceLimits,omitempty"`
 }
 
 // CoordinatorResourceLimits defines resource constraints for the coordinator.

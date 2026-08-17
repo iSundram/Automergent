@@ -192,7 +192,7 @@ func (a *App) startCoordinatorListener() tea.Cmd {
 	if coord == nil {
 		return nil
 	}
-	
+
 	return a.waitForCoordinatorEvent()
 }
 
@@ -1670,7 +1670,7 @@ done:
 }
 
 func (a *App) persistProjectConfig() error {
-	return a.cfg.Save()
+	return a.cfg.SaveIfLoaded()
 }
 
 func appendUniquePath(paths []string, path string) []string {
@@ -1899,7 +1899,6 @@ func (a *App) updateActiveTokens() {
 	}
 	writeDebugLog("updateActiveTokens: msgs=%d active=%d pending_tokens=%d\n", msgCount, active, pendingTokens)
 }
-
 
 func (a *App) showContextDetail() {
 	var b strings.Builder
