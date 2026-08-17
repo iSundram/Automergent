@@ -394,7 +394,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.response.Allow {
 			a.cfg.Security.AllowedWritePaths = appendUniquePath(a.cfg.Security.AllowedWritePaths, projectPath)
 			if m.response.Always {
-				if err := a.cfg.Save(); err != nil {
+				if err := a.cfg.SaveIfLoaded(); err != nil {
 					a.statusBar.SetStatus("Folder trusted (config save failed)")
 				} else {
 					a.statusBar.SetStatus("Folder trusted and remembered")
@@ -959,7 +959,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 								}
 								if res.Save != "" {
 									a.cfg.Git.CoAuthor = res.Save
-									_ = a.cfg.Save()
+									_ = a.cfg.SaveIfLoaded()
 								}
 								if a.pendingCommitToolCall != nil {
 									a.pendingCommitToolCall.Args["co_author"] = res.Include

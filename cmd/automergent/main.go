@@ -211,7 +211,7 @@ func run(cmd *cobra.Command, args []string) error {
 	// Only save if a config file was actually loaded (avoid creating fresh config.yaml).
 	configFileWasLoaded := viper.ConfigFileUsed() != ""
 	if configFileWasLoaded && (flags.Provider != "" || flags.Model != "" || flags.APIKey != "" || flags.BaseURL != "") {
-		_ = cfg.Save()
+		_ = cfg.SaveIfLoaded()
 	}
 
 	// Resolve API keys from environment if not set
