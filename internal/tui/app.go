@@ -72,7 +72,11 @@ type App struct {
 	thinking          bool
 	showSessionPicker bool
 	workDir           string
-	statusMsg         string
+	// swallowNextKey drops the next key event delivered to overlays (session
+	// browser, confirm dialogs) so the key that triggered a command cannot be
+	// misinterpreted as a selection inside the overlay it just opened.
+	swallowNextKey bool
+	statusMsg      string
 
 	showFileTree  bool
 	showHelp      bool
@@ -436,11 +440,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if a.sessionBrowser.Visible() {
-		sb, cmd := a.sessionBrowser.Update(msg)
-		a.sessionBrowser = sb
-		cmds = append(cmds, cmd)
-		if !a.sessionBrowser.Visible() {
-			a.layout()
+		if a.swallowNextKey {
+			a.swallowNextKey = false
+		} else {
+			sb, cmd := a.sessionBrowser.Update(msg)
+			a.sessionBrowser = sb
+			cmds = append(cmds, cmd)
+			if !a.sessionBrowser.Visible() {
+				a.layout()
+			}
 		}
 	}
 	if a.confirm.Visible() {
@@ -492,6 +500,7 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 				if trigger == "command" || trigger == "help" {
 					definition, known := lookupSlashCommand(sel.Value)
 					if known && definition.Immediate {
+						a.input.Reset()
 						a.palette.Hide()
 						a.layout()
 						return a.handleSlashCommand("/" + sel.Value)
@@ -566,6 +575,8 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 			a.sessionBrowser.SetSessions([]*session.Session{a.sess})
 		}
 		a.sessionBrowser.Show()
+		a.swallowNextKey = true
+		a.layout()
 		return nil
 	case "ctrl+r":
 		a.conversation.SetReviewMode(!a.conversation.ReviewMode())

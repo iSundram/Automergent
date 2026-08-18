@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"charm.land/bubbles/v2/list"
@@ -21,20 +22,41 @@ type sessionItem struct {
 	sess *session.Session
 }
 
-func (s sessionItem) Title() string { return s.sess.Title }
+func (s sessionItem) Title() string {
+	if s.sess.Title != "" {
+		return s.sess.Title
+	}
+	return "Untitled session"
+}
+
 func (s sessionItem) Description() string {
-	desc := fmt.Sprintf("%d messages", len(s.sess.Messages))
-	if s.sess.Provider != "" {
-		desc += fmt.Sprintf(" | %s", s.sess.Provider)
-		if s.sess.Model != "" {
-			desc += fmt.Sprintf("/%s", s.sess.Model)
-		}
+	parts := []string{}
+	if !s.sess.CreatedAt.IsZero() {
+		parts = append(parts, "created "+s.sess.CreatedAt.Format("Jan 2, 2006"))
 	}
 	if !s.sess.UpdatedAt.IsZero() {
-		desc += fmt.Sprintf(" | %s", formatRelativeTime(s.sess.UpdatedAt))
+		parts = append(parts, "modified "+formatRelativeTime(s.sess.UpdatedAt))
 	}
-	return desc
+	parts = append(parts, fmt.Sprintf("%d msgs", len(s.sess.Messages)))
+	if s.sess.Provider != "" {
+		if s.sess.Model != "" {
+			parts = append(parts, s.sess.Provider+"/"+s.sess.Model)
+		} else {
+			parts = append(parts, s.sess.Provider)
+		}
+	} else if s.sess.Model != "" {
+		parts = append(parts, s.sess.Model)
+	}
+	if s.sess.TotalInputTokens > 0 || s.sess.TotalOutputTokens > 0 {
+		parts = append(parts,
+			fmt.Sprintf("%s in/%s out", formatTokens(s.sess.TotalInputTokens), formatTokens(s.sess.TotalOutputTokens)))
+	}
+	if s.sess.WorkDir != "" {
+		parts = append(parts, s.sess.WorkDir)
+	}
+	return strings.Join(parts, " · ")
 }
+
 func (s sessionItem) FilterValue() string { return s.sess.Title }
 
 // formatRelativeTime returns a human-friendly relative time string.

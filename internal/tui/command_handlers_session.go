@@ -194,6 +194,10 @@ func (a *App) showSessions() {
 		a.sessionBrowser.SetSessions([]*session.Session{a.sess})
 	}
 	a.sessionBrowser.Show()
+	// The key event that triggered this command must not also be delivered to
+	// the freshly shown browser (it would be interpreted as "select" and the
+	// picker would close instantly, resuming the first session).
+	a.swallowNextKey = true
 	a.layout()
 }
 
