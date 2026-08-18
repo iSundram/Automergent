@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/iSundram/Automergent/internal/prompt"
 )
 
 // rateLimiter implements a simple token-bucket rate limiter.
@@ -70,14 +71,15 @@ func (rl *rateLimiter) stop_() {
 
 // Engine is the main coordinator implementation.
 type Engine struct {
-	config    *CoordinatorConfig
-	executor  AgentExecutor
-	workers   map[string]*Worker
-	tasks     map[string]*Task
-	queues    *roleQueues
-	events    chan CoordinatorEvent
-	metrics   *CoordinatorMetrics
-	rateLimit *rateLimiter
+	config       *CoordinatorConfig
+	executor     AgentExecutor
+	workers      map[string]*Worker
+	tasks        map[string]*Task
+	queues       *roleQueues
+	events       chan CoordinatorEvent
+	metrics      *CoordinatorMetrics
+	rateLimit    *rateLimiter
+	promptManager *prompt.PromptManager
 
 	workerWG sync.WaitGroup
 	taskWG   sync.WaitGroup
@@ -90,19 +92,25 @@ type Engine struct {
 
 // NewEngine creates a new coordinator engine.
 func NewEngine(config *CoordinatorConfig, executor AgentExecutor) *Engine {
+	return NewEngineWithPromptManager(config, executor, nil)
+}
+
+// NewEngineWithPromptManager creates a new coordinator engine with an optional prompt manager.
+func NewEngineWithPromptManager(config *CoordinatorConfig, executor AgentExecutor, pm *prompt.PromptManager) *Engine {
 	if config == nil {
 		config = DefaultConfig()
 	}
 
 	return &Engine{
-		config:    config,
-		executor:  executor,
-		workers:   make(map[string]*Worker),
-		tasks:     make(map[string]*Task),
-		queues:    newRoleQueues(),
-		events:    make(chan CoordinatorEvent, 1024),
-		metrics:   &CoordinatorMetrics{},
-		rateLimit: newRateLimiter(config.ResourceLimits.RateLimitPerMinute),
+		config:        config,
+		executor:      executor,
+		workers:       make(map[string]*Worker),
+		tasks:         make(map[string]*Task),
+		queues:        newRoleQueues(),
+		events:        make(chan CoordinatorEvent, 1024),
+		metrics:       &CoordinatorMetrics{},
+		rateLimit:     newRateLimiter(config.ResourceLimits.RateLimitPerMinute),
+		promptManager: pm,
 	}
 }
 
@@ -871,7 +879,14 @@ func (e *Engine) executeTask(ctx context.Context, worker *Worker, task *Task) *T
 		}
 	}
 
-	result, err := e.executor.Execute(ctx, worker.Role, task.Prompt, task.Context, worker.Model)
+	// Build prompt using new prompt system if available
+	promptStr := task.Prompt
+	if e.promptManager != nil {
+		adapter := NewPromptAdapter(e.promptManager)
+		promptStr = adapter.BuildRolePrompt(worker.Role, task)
+	}
+
+	result, err := e.executor.Execute(ctx, worker.Role, promptStr, task.Context, worker.Model)
 	if err != nil {
 		return &TaskResult{
 			TaskID:   task.ID,

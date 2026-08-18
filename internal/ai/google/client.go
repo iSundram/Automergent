@@ -36,6 +36,7 @@ type Client struct {
 	model   string
 	limit   int
 	baseURL string
+	effort  string
 }
 
 func New(cfg ai.ProviderConfig) *Client {
@@ -68,7 +69,7 @@ func New(cfg ai.ProviderConfig) *Client {
 		cc.HTTPOptions = genai.HTTPOptions{BaseURL: stripAPIVersion(base)}
 	}
 
-	c := &Client{model: model, limit: 1000000, baseURL: base}
+	c := &Client{model: model, limit: 1000000, baseURL: base, effort: cfg.Effort}
 	client, err := genai.NewClient(context.Background(), cc)
 	if err != nil {
 		c.initErr = err
@@ -404,7 +405,22 @@ func buildGenerateContentConfig(c *Client, req ai.CompletionRequest) *genai.Gene
 				tc.ThinkingBudget = &budget
 			}
 		} else {
-			tc.ThinkingLevel = "high"
+			effort := req.Thinking.Effort
+			if effort == "" {
+				effort = c.effort
+			}
+			switch strings.ToLower(effort) {
+			case "minimal":
+				tc.ThinkingLevel = genai.ThinkingLevelMinimal
+			case "low":
+				tc.ThinkingLevel = genai.ThinkingLevelLow
+			case "medium":
+				tc.ThinkingLevel = genai.ThinkingLevelMedium
+			case "high":
+				tc.ThinkingLevel = genai.ThinkingLevelHigh
+			default:
+				tc.ThinkingLevel = genai.ThinkingLevelHigh
+			}
 		}
 
 		config.ThinkingConfig = tc

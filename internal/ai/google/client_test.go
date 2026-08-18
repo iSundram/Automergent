@@ -346,3 +346,57 @@ func TestNewMissingAuth(t *testing.T) {
 		t.Fatal("expected error from Complete with uninitialized client")
 	}
 }
+
+func TestBuildGenerateContentConfigThinkingEffort(t *testing.T) {
+	tests := []struct {
+		name          string
+		clientEffort  string
+		reqEffort     string
+		model         string
+		expectedLevel genai.ThinkingLevel
+	}{
+		{
+			name:          "default high for gemini 3",
+			model:         "gemini-3.6-flash",
+			expectedLevel: genai.ThinkingLevelHigh,
+		},
+		{
+			name:          "request minimal effort",
+			model:         "gemini-3.6-flash",
+			reqEffort:     "minimal",
+			expectedLevel: genai.ThinkingLevelMinimal,
+		},
+		{
+			name:          "request low effort",
+			model:         "gemini-3.6-flash",
+			reqEffort:     "low",
+			expectedLevel: genai.ThinkingLevelLow,
+		},
+		{
+			name:          "client default medium effort",
+			model:         "gemini-3.6-flash",
+			clientEffort:  "medium",
+			expectedLevel: genai.ThinkingLevelMedium,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := &Client{model: tt.model, effort: tt.clientEffort}
+			req := ai.CompletionRequest{
+				Messages: []ai.Message{ai.NewTextMessage(ai.RoleUser, "test")},
+				Thinking: &ai.ThinkingConfig{
+					Type:   "enabled",
+					Effort: tt.reqEffort,
+				},
+			}
+			cfg := buildGenerateContentConfig(c, req)
+			if cfg.ThinkingConfig == nil {
+				t.Fatal("expected ThinkingConfig to be set")
+			}
+			if cfg.ThinkingConfig.ThinkingLevel != tt.expectedLevel {
+				t.Errorf("expected ThinkingLevel %v, got %v", tt.expectedLevel, cfg.ThinkingConfig.ThinkingLevel)
+			}
+		})
+	}
+}

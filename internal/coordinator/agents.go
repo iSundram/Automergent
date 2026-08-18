@@ -6,54 +6,67 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/iSundram/Automergent/internal/prompt"
 )
 
 // researcherAgent implements the Researcher agent type.
 type researcherAgent struct {
-	id       string
-	model    string
-	executor AgentExecutor
+	id           string
+	model        string
+	executor     AgentExecutor
+	promptManager *prompt.PromptManager
 }
 
 // coderAgent implements the Coder agent type.
 type coderAgent struct {
-	id       string
-	model    string
-	executor AgentExecutor
+	id           string
+	model        string
+	executor     AgentExecutor
+	promptManager *prompt.PromptManager
 }
 
 // reviewerAgent implements the Reviewer agent type.
 type reviewerAgent struct {
-	id       string
-	model    string
-	executor AgentExecutor
+	id           string
+	model        string
+	executor     AgentExecutor
+	promptManager *prompt.PromptManager
 }
 
 // testerAgent implements the Tester agent type.
 type testerAgent struct {
-	id       string
-	model    string
-	executor AgentExecutor
+	id           string
+	model        string
+	executor     AgentExecutor
+	promptManager *prompt.PromptManager
 }
 
 // documenterAgent implements the Documenter agent type.
 type documenterAgent struct {
-	id       string
-	model    string
-	executor AgentExecutor
+	id           string
+	model        string
+	executor     AgentExecutor
+	promptManager *prompt.PromptManager
 }
 
 // AgentFactory creates specialized agents.
 type AgentFactory struct {
-	executor AgentExecutor
-	config   *CoordinatorConfig
+	executor      AgentExecutor
+	config        *CoordinatorConfig
+	promptManager *prompt.PromptManager
 }
 
 // NewAgentFactory creates a new agent factory.
 func NewAgentFactory(executor AgentExecutor, config *CoordinatorConfig) *AgentFactory {
+	return NewAgentFactoryWithPromptManager(executor, config, nil)
+}
+
+// NewAgentFactoryWithPromptManager creates a new agent factory with an optional prompt manager.
+func NewAgentFactoryWithPromptManager(executor AgentExecutor, config *CoordinatorConfig, pm *prompt.PromptManager) *AgentFactory {
 	return &AgentFactory{
-		executor: executor,
-		config:   config,
+		executor:      executor,
+		config:        config,
+		promptManager: pm,
 	}
 }
 
@@ -64,17 +77,17 @@ func (f *AgentFactory) CreateAgent(role AgentRole) Agent {
 
 	switch role {
 	case RoleResearcher:
-		return &researcherAgent{id: id, model: model, executor: f.executor}
+		return &researcherAgent{id: id, model: model, executor: f.executor, promptManager: f.promptManager}
 	case RoleCoder:
-		return &coderAgent{id: id, model: model, executor: f.executor}
+		return &coderAgent{id: id, model: model, executor: f.executor, promptManager: f.promptManager}
 	case RoleReviewer:
-		return &reviewerAgent{id: id, model: model, executor: f.executor}
+		return &reviewerAgent{id: id, model: model, executor: f.executor, promptManager: f.promptManager}
 	case RoleTester:
-		return &testerAgent{id: id, model: model, executor: f.executor}
+		return &testerAgent{id: id, model: model, executor: f.executor, promptManager: f.promptManager}
 	case RoleDocumenter:
-		return &documenterAgent{id: id, model: model, executor: f.executor}
+		return &documenterAgent{id: id, model: model, executor: f.executor, promptManager: f.promptManager}
 	default:
-		return &researcherAgent{id: id, model: model, executor: f.executor}
+		return &researcherAgent{id: id, model: model, executor: f.executor, promptManager: f.promptManager}
 	}
 }
 
@@ -115,8 +128,8 @@ func (a *researcherAgent) Model() string   { return a.model }
 func (a *researcherAgent) Execute(ctx context.Context, task *Task) (*TaskResult, error) {
 	startTime := time.Now()
 
-	// Build researcher-specific prompt
-	prompt := buildResearcherPrompt(task)
+	// Use new prompt system if available
+	promptStr := a.buildPrompt(task, RoleResearcher)
 
 	if a.executor == nil {
 		return &TaskResult{
@@ -130,7 +143,7 @@ func (a *researcherAgent) Execute(ctx context.Context, task *Task) (*TaskResult,
 		}, nil
 	}
 
-	result, err := a.executor.Execute(ctx, RoleResearcher, prompt, task.Context, a.model)
+	result, err := a.executor.Execute(ctx, RoleResearcher, promptStr, task.Context, a.model)
 	if err != nil {
 		return &TaskResult{
 			TaskID:   task.ID,
@@ -148,6 +161,14 @@ func (a *researcherAgent) Execute(ctx context.Context, task *Task) (*TaskResult,
 	return result, nil
 }
 
+func (a *researcherAgent) buildPrompt(task *Task, role AgentRole) string {
+	if a.promptManager != nil {
+		adapter := NewPromptAdapter(a.promptManager)
+		return adapter.BuildRolePrompt(role, task)
+	}
+	return buildResearcherPrompt(task)
+}
+
 // Coder Agent Implementation
 
 func (a *coderAgent) ID() string      { return a.id }
@@ -157,7 +178,7 @@ func (a *coderAgent) Model() string   { return a.model }
 func (a *coderAgent) Execute(ctx context.Context, task *Task) (*TaskResult, error) {
 	startTime := time.Now()
 
-	prompt := buildCoderPrompt(task)
+	promptStr := a.buildPrompt(task, RoleCoder)
 
 	if a.executor == nil {
 		return &TaskResult{
@@ -174,7 +195,7 @@ func (a *coderAgent) Execute(ctx context.Context, task *Task) (*TaskResult, erro
 		}, nil
 	}
 
-	result, err := a.executor.Execute(ctx, RoleCoder, prompt, task.Context, a.model)
+	result, err := a.executor.Execute(ctx, RoleCoder, promptStr, task.Context, a.model)
 	if err != nil {
 		return &TaskResult{
 			TaskID:   task.ID,
@@ -192,6 +213,14 @@ func (a *coderAgent) Execute(ctx context.Context, task *Task) (*TaskResult, erro
 	return result, nil
 }
 
+func (a *coderAgent) buildPrompt(task *Task, role AgentRole) string {
+	if a.promptManager != nil {
+		adapter := NewPromptAdapter(a.promptManager)
+		return adapter.BuildRolePrompt(role, task)
+	}
+	return buildCoderPrompt(task)
+}
+
 // Reviewer Agent Implementation
 
 func (a *reviewerAgent) ID() string      { return a.id }
@@ -201,7 +230,7 @@ func (a *reviewerAgent) Model() string   { return a.model }
 func (a *reviewerAgent) Execute(ctx context.Context, task *Task) (*TaskResult, error) {
 	startTime := time.Now()
 
-	prompt := buildReviewerPrompt(task)
+	promptStr := a.buildPrompt(task, RoleReviewer)
 
 	if a.executor == nil {
 		return &TaskResult{
@@ -219,7 +248,7 @@ func (a *reviewerAgent) Execute(ctx context.Context, task *Task) (*TaskResult, e
 		}, nil
 	}
 
-	result, err := a.executor.Execute(ctx, RoleReviewer, prompt, task.Context, a.model)
+	result, err := a.executor.Execute(ctx, RoleReviewer, promptStr, task.Context, a.model)
 	if err != nil {
 		return &TaskResult{
 			TaskID:   task.ID,
@@ -237,6 +266,14 @@ func (a *reviewerAgent) Execute(ctx context.Context, task *Task) (*TaskResult, e
 	return result, nil
 }
 
+func (a *reviewerAgent) buildPrompt(task *Task, role AgentRole) string {
+	if a.promptManager != nil {
+		adapter := NewPromptAdapter(a.promptManager)
+		return adapter.BuildRolePrompt(role, task)
+	}
+	return buildReviewerPrompt(task)
+}
+
 // Tester Agent Implementation
 
 func (a *testerAgent) ID() string      { return a.id }
@@ -246,7 +283,7 @@ func (a *testerAgent) Model() string   { return a.model }
 func (a *testerAgent) Execute(ctx context.Context, task *Task) (*TaskResult, error) {
 	startTime := time.Now()
 
-	prompt := buildTesterPrompt(task)
+	promptStr := a.buildPrompt(task, RoleTester)
 
 	if a.executor == nil {
 		return &TaskResult{
@@ -263,7 +300,7 @@ func (a *testerAgent) Execute(ctx context.Context, task *Task) (*TaskResult, err
 		}, nil
 	}
 
-	result, err := a.executor.Execute(ctx, RoleTester, prompt, task.Context, a.model)
+	result, err := a.executor.Execute(ctx, RoleTester, promptStr, task.Context, a.model)
 	if err != nil {
 		return &TaskResult{
 			TaskID:   task.ID,
@@ -281,6 +318,14 @@ func (a *testerAgent) Execute(ctx context.Context, task *Task) (*TaskResult, err
 	return result, nil
 }
 
+func (a *testerAgent) buildPrompt(task *Task, role AgentRole) string {
+	if a.promptManager != nil {
+		adapter := NewPromptAdapter(a.promptManager)
+		return adapter.BuildRolePrompt(role, task)
+	}
+	return buildTesterPrompt(task)
+}
+
 // Documenter Agent Implementation
 
 func (a *documenterAgent) ID() string      { return a.id }
@@ -290,7 +335,19 @@ func (a *documenterAgent) Model() string   { return a.model }
 func (a *documenterAgent) Execute(ctx context.Context, task *Task) (*TaskResult, error) {
 	startTime := time.Now()
 
-	result, err := a.executor.Execute(ctx, RoleDocumenter, BuildRolePrompt(RoleDocumenter, task), task.Context, a.model)
+	promptStr := a.buildPrompt(task, RoleDocumenter)
+
+	if a.executor == nil {
+		return &TaskResult{
+			TaskID:   task.ID,
+			WorkerID: a.id,
+			Success:  false,
+			Errors:   []string{"no executor configured"},
+			Duration: time.Since(startTime),
+		}, nil
+	}
+
+	result, err := a.executor.Execute(ctx, RoleDocumenter, promptStr, task.Context, a.model)
 	if err != nil {
 		return &TaskResult{
 			TaskID:   task.ID,
@@ -306,4 +363,12 @@ func (a *documenterAgent) Execute(ctx context.Context, task *Task) (*TaskResult,
 	result.Duration = time.Since(startTime)
 
 	return result, nil
+}
+
+func (a *documenterAgent) buildPrompt(task *Task, role AgentRole) string {
+	if a.promptManager != nil {
+		adapter := NewPromptAdapter(a.promptManager)
+		return adapter.BuildRolePrompt(role, task)
+	}
+	return BuildRolePrompt(RoleDocumenter, task)
 }

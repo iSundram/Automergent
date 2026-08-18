@@ -7,6 +7,7 @@ import (
 
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
+	promptpkg "github.com/iSundram/Automergent/internal/prompt"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
 )
@@ -50,6 +51,7 @@ func newFirstMessageTestAgent(provider ai.Provider) *Agent {
 		tools:               tools.NewRegistry(),
 		events:              make(chan Event, 128),
 		sessionAllowedTools: map[string]bool{},
+		promptSystem:        promptpkg.NewPromptSystem(),
 	}
 }
 

@@ -43,6 +43,7 @@ var slashCommands = []slashCommand{
 
 	{Name: "api-key", Description: "Set active provider API key", Category: "Configuration", Icon: "󰌆", Usage: "<value>"},
 	{Name: "base-url", Description: "Set active provider base URL", Category: "Configuration", Icon: "󰖟", Usage: "<url>"},
+	{Name: "effort", Description: "Set or show provider thinking effort", Category: "Configuration", Icon: "󰓅", Usage: "<minimal|low|medium|high>"},
 	{Name: "provider-api-key", Description: "Set an AI provider API key", Category: "Configuration", Icon: "󰌋", Usage: "<provider> <value>"},
 	{Name: "provider-base-url", Description: "Set an AI provider base URL", Category: "Configuration", Icon: "󰌷", Usage: "<provider> <url>"},
 

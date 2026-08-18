@@ -34,7 +34,8 @@ func (s *Storage) SetMaxSessionBytes(max int64) { s.maxSessionBytes = max }
 // concurrent agent mutations can never produce torn JSON, and oversized
 // histories are compacted in the snapshot (never the live session).
 func (s *Storage) Save(sess *Session) error {
-	snap := sess.Snapshot()
+	redacted := RedactSession(sess)
+	snap := redacted.Snapshot()
 	maxBytes := s.maxSessionBytes
 	if maxBytes <= 0 {
 		maxBytes = defaultMaxSessionBytes
@@ -98,7 +99,7 @@ func (s *Storage) Load(id string) (*Session, error) {
 	if err := json.Unmarshal(data, &sess); err != nil {
 		return nil, err
 	}
-	return &sess, nil
+	return MigrateSession(&sess)
 }
 
 // List returns all sessions sorted by updated time descending.
@@ -124,7 +125,11 @@ func (s *Storage) List() ([]*Session, error) {
 		if err := json.Unmarshal(data, &sess); err != nil {
 			continue
 		}
-		sessions = append(sessions, &sess)
+		if migrated, err := MigrateSession(&sess); err == nil {
+			sessions = append(sessions, migrated)
+		} else {
+			sessions = append(sessions, &sess)
+		}
 	}
 	sort.Slice(sessions, func(i, j int) bool {
 		return sessions[i].UpdatedAt.After(sessions[j].UpdatedAt)

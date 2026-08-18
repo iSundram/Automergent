@@ -43,7 +43,8 @@ func Default() *Config {
 		NoTUI:                false,
 		Quiet:                false,
 		Verbose:              false,
-		ReasoningPreAnalysis: false,
+ReasoningPreAnalysis: false,
+	PromptSystemEnabled:  true,
 
 		Security: SecurityConfig{
 			Sandbox:                "auto",

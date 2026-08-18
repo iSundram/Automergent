@@ -21,6 +21,7 @@ type Session struct {
 	mu sync.RWMutex `json:"-"`
 
 	ID        string            `json:"id"`
+	Version   int               `json:"version,omitempty"`
 	Title     string            `json:"title"`
 	WorkDir   string            `json:"work_dir,omitempty"`
 	CreatedAt time.Time         `json:"created_at"`

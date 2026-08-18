@@ -71,6 +71,8 @@ type ThinkingConfig struct {
 	BudgetTokens int
 	// Stream enables streaming thought chunks when supported by the provider.
 	Stream bool
+	// Effort specifies the reasoning/thinking effort level (minimal, low, medium, high).
+	Effort string
 }
 
 // CompletionResponse is returned by a provider.
@@ -162,6 +164,7 @@ type ProviderConfig struct {
 	OrgID              string
 	Project            string
 	Location           string
+	Effort             string
 	PromptCacheEnabled *bool
 	HTTPClient         *http.Client
 }

@@ -1278,6 +1278,32 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		a.conversation.AddMessage("system", fmt.Sprintf("Base URL updated for %s", a.cfg.Provider), false)
 		a.statusBar.SetStatus("Base URL updated")
 		_ = a.persistProjectConfig()
+	case "/effort":
+		a.ensureProviderConfig(a.cfg.Provider)
+		pc := a.cfg.Providers[a.cfg.Provider]
+		if len(args) == 0 {
+			current := pc.Effort
+			if current == "" {
+				current = "high (default)"
+			}
+			a.conversation.AddMessage("system", fmt.Sprintf("Current effort for %s: %s\nUsage: /effort <minimal|low|medium|high>", a.cfg.Provider, current), false)
+			return nil
+		}
+		effort := strings.ToLower(args[0])
+		switch effort {
+		case "minimal", "low", "medium", "high":
+			pc.Effort = effort
+			a.cfg.Providers[a.cfg.Provider] = pc
+			if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
+				a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
+				return nil
+			}
+			a.conversation.AddMessage("system", fmt.Sprintf("Effort for %s set to %s", a.cfg.Provider, effort), false)
+			a.statusBar.SetStatus("Effort updated")
+			_ = a.persistProjectConfig()
+		default:
+			a.conversation.AddMessage("assistant", "Error: usage /effort <minimal|low|medium|high>", true)
+		}
 	case "/provider-api-key":
 		if len(args) < 2 {
 			a.conversation.AddMessage("assistant", "Error: usage /provider-api-key <provider> <value>", true)
@@ -2052,6 +2078,7 @@ func buildProviderFromConfig(cfg *config.Config) (ai.Provider, error) {
 		BaseURL:            pc.BaseURL,
 		DefaultModel:       cfg.Model,
 		OrgID:              pc.OrgID,
+		Effort:             pc.Effort,
 		PromptCacheEnabled: &enablePromptCache,
 	}
 

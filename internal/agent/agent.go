@@ -15,9 +15,11 @@ import (
 	contextmgr "github.com/iSundram/Automergent/internal/context"
 	"github.com/iSundram/Automergent/internal/coordinator"
 	"github.com/iSundram/Automergent/internal/errors"
+	promptpkg "github.com/iSundram/Automergent/internal/prompt"
 	"github.com/iSundram/Automergent/internal/reasoning"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
+	"github.com/iSundram/Automergent/internal/version"
 	subagent "github.com/iSundram/Automergent/internal/tools/agent"
 )
 
@@ -49,6 +51,10 @@ type Agent struct {
 	coordinatorOnce    sync.Once
 	coordinatorCtx     context.Context
 	coordinatorCancel  context.CancelFunc
+
+	// New prompt system for staged prompt delivery
+	promptSystem       *promptpkg.PromptSystem
+	promptSystemOnce   sync.Once
 }
 
 // Execute implements the AgentExecutor interface for sub-agents.
@@ -193,6 +199,7 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 		events:              make(chan Event, 8192),
 		sessionAllowedTools: make(map[string]bool),
 		approvalSource:      "tui",
+		promptSystem:        promptpkg.NewPromptSystem(),
 	}
 
 	if cfg != nil && cfg.NoTUI {
@@ -374,6 +381,26 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		prompt = TriageInstruction + "\n\nUser Request: " + prompt
 	}
 
+	// 1. Process first message through new prompt system (categorization, planning)
+	var categorized *promptpkg.CategorizedRequest
+	var promptParts []promptpkg.PromptPart
+	var err error
+	if isFirstMessage && a.cfg != nil && a.cfg.PromptSystemEnabled {
+		a.Emit(EventStatus, "analyzing request with prompt system...")
+		categorized, promptParts, err = a.processFirstMessageWithPromptSystem(ctx, originalUserPrompt)
+		if err != nil {
+			a.Emit(EventStatus, fmt.Sprintf("prompt system: %v, falling back", err))
+		} else {
+			a.Emit(EventStatus, fmt.Sprintf("categorized as: %s (complexity: %s)", categorized.Category, categorized.Complexity))
+
+			// If needs coder, initialize coordinator with prompt system
+			if categorized.RequiresCoder {
+				a.Emit(EventStatus, "initializing coordinator with prompt system...")
+				a.initializeCoordinatorWithPromptSystem()
+			}
+		}
+	}
+
 	// 2. Coordinator: run in background with a short timeout.
 	//    If it doesn't produce a result quickly, fall through to the standard loop.
 	coordCh := make(chan string, 1)
@@ -434,6 +461,60 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	a.sess.AddMessage(userMsg)
 	a.recordToTranscript(userMsg)
 
+	// 3. If we have prompt parts from the new system, send them first
+	if len(promptParts) > 0 && isFirstMessage && a.cfg != nil && a.cfg.PromptSystemEnabled {
+		a.Emit(EventStatus, "delivering staged prompts...")
+		for i, part := range promptParts {
+			a.Emit(EventStatus, fmt.Sprintf("prompt stage %d/%d: %s", i+1, len(promptParts), part.Stage))
+			// Build request with the prompt part as system prompt
+			toolSchemas := buildToolSchemas(a.tools)
+			thinkingBudget := a.getThinkingBudget()
+
+			req := ai.CompletionRequest{
+				Messages:    a.sess.Messages,
+				Tools:       toolSchemas,
+				System:      part.Content,
+				Temperature: 0.0,
+				MaxTokens:   8192,
+				Stream:      true,
+				Thinking: &ai.ThinkingConfig{
+					Type:         "enabled",
+					BudgetTokens: thinkingBudget,
+					Stream:       true,
+				},
+			}
+
+			resp, err := a.Provider().Complete(ctx, req)
+			if err != nil {
+				a.Emit(EventError, err)
+				break
+			}
+
+			text, thought, usage, err := a.drainStream(resp)
+			if err != nil {
+				a.Emit(EventError, err)
+				break
+			}
+
+			// Add assistant response to session
+			msg := ai.Message{
+				Role:     ai.RoleAssistant,
+				Metadata: resp.GetMetadata(),
+			}
+			if thought != "" {
+				msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeThought, Thought: thought})
+			}
+			if text != "" {
+				msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeText, Text: text})
+			}
+			if len(msg.Content) > 0 {
+				a.sess.AddMessage(msg)
+				a.recordToTranscript(msg)
+			}
+			a.sess.AddUsage(usage)
+		}
+	}
+
 	for {
 		provider := a.Provider()
 
@@ -460,7 +541,9 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 
 		a.checkContextLimit(provider, a.sess.Messages)
 
-		systemPrompt := buildSystemPrompt(a.cfg, a.tools, a.sess.Messages, a.ContextManager())
+		// Get system prompt from new prompt system (staged prompts, todo-aware, context-aware)
+		// Falls back to legacy buildSystemPrompt if prompt system not available or exhausted
+		systemPrompt := a.getSystemPrompt(ctx, provider)
 		toolSchemas := buildToolSchemas(a.tools)
 
 		// Dynamically adjust thinking budget based on complexity
@@ -1160,6 +1243,222 @@ func (a *Agent) runCoordinatorIfNeeded(ctx context.Context, prompt string) (stri
 	}
 
 	return "Coordinator completed task", nil
+}
+
+// processFirstMessageWithPromptSystem processes the first user message through the new prompt system.
+// Returns the categorized request, initial prompt parts to send to the provider, and any error.
+func (a *Agent) processFirstMessageWithPromptSystem(ctx context.Context, userPrompt string) (*promptpkg.CategorizedRequest, []promptpkg.PromptPart, error) {
+	// Get available files from context manager
+	mgr := a.ContextManager()
+	var availableFiles []string
+	if mgr != nil {
+		availableFiles = mgr.RecentFiles(20)
+	}
+
+	// Process through the new prompt system
+	parts, err := a.promptSystem.ProcessUserMessage(ctx, userPrompt, a.workDir, availableFiles)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Get the categorized request
+	categorized := a.promptSystem.Manager.GetCurrentRequest()
+	return categorized, parts, nil
+}
+
+// initializeCoordinatorWithPromptSystem initializes the coordinator with the prompt system.
+func (a *Agent) initializeCoordinatorWithPromptSystem() error {
+	a.coordinatorOnce.Do(func() {
+		if a.cfg == nil || !a.cfg.Coordinator.Enabled {
+			return
+		}
+
+		exec := coordinator.NewAgentExecutorAdapterWithModel(a, a.cfg.Model)
+		a.coordinatorCtx, a.coordinatorCancel = context.WithCancel(context.Background())
+
+		// Convert config.CoordinatorConfig to coordinator.CoordinatorConfig
+		coordCfg := a.convertCoordinatorConfig(a.cfg.Coordinator)
+
+		// Use NewEngineWithPromptManager to wire the new prompt system
+		a.coordinator = coordinator.NewEngineWithPromptManager(&coordCfg, exec, a.promptSystem.Manager)
+
+		if err := a.coordinator.Start(a.coordinatorCtx); err != nil {
+			a.Emit(EventError, fmt.Errorf("coordinator start: %w", err))
+			a.coordinator = nil
+		}
+	})
+	return nil
+}
+
+// getSystemPrompt returns the system prompt using the new prompt system.
+// Falls back to legacy buildSystemPrompt if prompt system is not available or exhausted.
+func (a *Agent) getSystemPrompt(ctx context.Context, provider ai.Provider) string {
+	// If prompt system is enabled and has pending staged prompts, use them
+	if a.cfg != nil && a.cfg.PromptSystemEnabled && a.promptSystem != nil {
+		// Check for next staged prompt from first message processing
+		if nextPrompt := a.promptSystem.GetNextAction(); nextPrompt != nil {
+			a.Emit(EventStatus, fmt.Sprintf("using staged prompt: %s", nextPrompt.Stage))
+			return nextPrompt.Content
+		}
+
+		// If we have a categorized request with todo items, build a todo-aware prompt
+		if categorized := a.promptSystem.GetCurrentRequest(); categorized != nil && len(categorized.TodoItems) > 0 {
+			// Build context-aware prompt for current todo
+			if nextTodo := a.getNextTodoPrompt(); nextTodo != nil {
+				return nextTodo.Content
+			}
+		}
+
+		// Build standard prompt using prompt system (todo-aware, context-aware)
+		return a.buildPromptSystemPrompt(ctx, provider)
+	}
+
+	// Fallback to legacy buildSystemPrompt
+	return buildSystemPrompt(a.cfg, a.tools, a.sess.Messages, a.ContextManager())
+}
+
+// getNextTodoPrompt gets the next todo execution prompt from the prompt system
+func (a *Agent) getNextTodoPrompt() *promptpkg.PromptPart {
+	coderCtx := a.promptSystem.GetCoderContext()
+	if coderCtx == nil || len(coderCtx.TodoItems) == 0 {
+		return nil
+	}
+
+	for i, todo := range coderCtx.TodoItems {
+		if todo.Status == promptpkg.TodoStatusPending {
+			// Check dependencies
+			depsMet := true
+			for _, depID := range todo.Dependencies {
+				found := false
+				for _, t := range coderCtx.TodoItems {
+					if t.ID == depID && t.Status == promptpkg.TodoStatusCompleted {
+						found = true
+						break
+					}
+				}
+				if !found {
+					depsMet = false
+					break
+				}
+			}
+			if depsMet {
+				// Mark as in progress
+				coderCtx.TodoItems[i].Status = promptpkg.TodoStatusInProgress
+				return a.promptSystem.Manager.CoderPrompts().BuildExecutionPrompt(coderCtx, &coderCtx.TodoItems[i], a.promptSystem.GetCurrentRequest())
+			}
+		}
+	}
+	return nil
+}
+
+// buildPromptSystemPrompt builds a system prompt using the new prompt system
+func (a *Agent) buildPromptSystemPrompt(ctx context.Context, provider ai.Provider) string {
+	var sb strings.Builder
+
+	// Identity
+	sb.WriteString("# Identity\n")
+	sb.WriteString(fmt.Sprintf("You are Automergent %s, a senior lead software engineer and autonomous agent.\n\n", version.Version))
+
+	// Current task context
+	if categorized := a.promptSystem.GetCurrentRequest(); categorized != nil {
+		sb.WriteString(fmt.Sprintf("## Current Task: %s\n", categorized.OriginalPrompt))
+		sb.WriteString(fmt.Sprintf("Category: %s | Complexity: %s | Strategy: %s\n\n",
+			categorized.Category, categorized.Complexity, categorized.Strategy))
+
+		// Todo progress
+		if len(categorized.TodoItems) > 0 {
+			sb.WriteString("## Todo Progress\n")
+			for _, todo := range categorized.TodoItems {
+				status := "⏳"
+				switch todo.Status {
+				case promptpkg.TodoStatusCompleted:
+					status = "✅"
+				case promptpkg.TodoStatusInProgress:
+					status = "🔄"
+				case promptpkg.TodoStatusBlocked:
+					status = "⚠️"
+				}
+				sb.WriteString(fmt.Sprintf("%s %s (priority: %d)\n", status, todo.Description, todo.Priority))
+			}
+			sb.WriteString("\n")
+		}
+
+		// Working areas
+		if len(categorized.WorkingAreas) > 0 {
+			sb.WriteString("## Working Areas\n")
+			for _, f := range categorized.WorkingAreas {
+				sb.WriteString(fmt.Sprintf("- %s\n", f))
+			}
+			sb.WriteString("\n")
+		}
+
+		// Constraints
+		if len(categorized.ContextNeeds) > 0 {
+			sb.WriteString("## Context Requirements\n")
+			for _, need := range categorized.ContextNeeds {
+				if need.InjectTiming != promptpkg.InjectTimingDeferred {
+					sb.WriteString(fmt.Sprintf("- %s: %s\n", need.Key, need.Description))
+				}
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	// Tools
+	sb.WriteString("## Available Tools\n")
+	for _, tool := range a.tools.All() {
+		sb.WriteString(fmt.Sprintf("- %s: %s\n", tool.Name(), tool.Description()))
+	}
+	sb.WriteString("\n")
+
+	// Safety protocols (abbreviated)
+	sb.WriteString("## Safety & Blast Radius\n")
+	sb.WriteString("- **Safe:** Reading, searching, local tests\n")
+	sb.WriteString("- **Moderate:** Creating/editing files, adding deps\n")
+	sb.WriteString("- **Destructive:** Deleting, force push, rm -rf, drop tables\n")
+	sb.WriteString("  - MUST describe risk and wait for confirmation\n\n")
+
+	// Project context
+	if mgr := a.ContextManager(); mgr != nil {
+		cwd, _ := os.Getwd()
+		sb.WriteString(fmt.Sprintf("## Project Context\n- Working Directory: %s\n", cwd))
+
+		// Recent files
+		if files := mgr.RecentFiles(10); len(files) > 0 {
+			sb.WriteString("- Recent Files:\n")
+			for _, f := range files {
+				sb.WriteString(fmt.Sprintf("  - %s\n", f))
+			}
+		}
+		sb.WriteString("\n")
+	}
+
+	// Conversation summary if long
+	if len(a.sess.Messages) > 15 {
+		sb.WriteString("[Note: Conversation history is long. Focus on recent state and established plan.]\n\n")
+	}
+
+	return sb.String()
+}
+
+func (a *Agent) convertCoordinatorConfig(cfg config.CoordinatorConfig) coordinator.CoordinatorConfig {
+	return coordinator.CoordinatorConfig{
+		MaxWorkers:         10,
+		WorkersPerRole:     map[coordinator.AgentRole]int{},
+		ModelOverrides:     map[coordinator.AgentRole]string{},
+		DefaultTimeout:     5 * time.Minute,
+		MaxRetries:         3,
+		EnableWorkStealing: true,
+		QualityThreshold:   0.7,
+		ConsensusThreshold: 2,
+		ResourceLimits: coordinator.ResourceLimits{
+			MaxTokensPerTask:   100000,
+			MaxConcurrentTasks: 5,
+			MaxMemoryMB:        512,
+			RateLimitPerMinute: 60,
+		},
+		EventsBufferSize: 1024,
+	}
 }
 
 // ContextManager returns the persistent context manager, initializing it on first use.
