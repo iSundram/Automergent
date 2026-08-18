@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -60,7 +61,11 @@ func New(cfg ai.ProviderConfig) *Client {
 		cc.Project = cfg.Project
 		cc.Location = cfg.Location
 	} else if base != "" {
-		cc.HTTPOptions = genai.HTTPOptions{BaseURL: base}
+		// The genai SDK appends its own API version (v1beta) to the base URL,
+		// so a config base URL that already ends in /v1beta must have that
+		// segment stripped, otherwise requests go to .../v1beta/v1beta/... and
+		// fail forever.
+		cc.HTTPOptions = genai.HTTPOptions{BaseURL: stripAPIVersion(base)}
 	}
 
 	c := &Client{model: model, limit: 1000000, baseURL: base}
@@ -75,6 +80,71 @@ func New(cfg ai.ProviderConfig) *Client {
 
 func (c *Client) Name() string      { return "google" }
 func (c *Client) ContextLimit() int { return c.limit }
+
+// stripAPIVersion removes a trailing API version segment (e.g. /v1beta) from a
+// base URL, because the genai SDK always appends its own API version to the
+// base URL it is given.
+func stripAPIVersion(base string) string {
+	for _, v := range []string{"/v1beta1", "/v1alpha1", "/v1beta", "/v1alpha", "/v1"} {
+		if strings.HasSuffix(base, v) {
+			return strings.TrimSuffix(base, v)
+		}
+	}
+	return base
+}
+
+// isEmptyPart reports whether a genai.Part carries no meaningful content.
+// The Gemini SSE stream sometimes includes a final event with an empty text
+// part (text:"") and finishReason=STOP; such parts must not be added to
+// rawParts because they cause the next request to fail with a 400 error.
+func isEmptyPart(p *genai.Part) bool {
+	if p.Text != "" {
+		return false
+	}
+	if p.Thought {
+		return false
+	}
+	if p.FunctionCall != nil {
+		return false
+	}
+	if p.FunctionResponse != nil {
+		return false
+	}
+	if p.FileData != nil {
+		return false
+	}
+	if p.InlineData != nil {
+		return false
+	}
+	if p.CodeExecutionResult != nil {
+		return false
+	}
+	if p.ExecutableCode != nil {
+		return false
+	}
+	if p.VideoMetadata != nil {
+		return false
+	}
+	if p.AudioTranscription != nil {
+		return false
+	}
+	if len(p.ThoughtSignature) > 0 {
+		return false
+	}
+	if p.ToolCall != nil {
+		return false
+	}
+	if p.ToolResponse != nil {
+		return false
+	}
+	if p.PartMetadata != nil {
+		return false
+	}
+	if p.MediaResolution != nil {
+		return false
+	}
+	return true
+}
 
 func (c *Client) Models(_ context.Context) ([]ai.Model, error) {
 	return []ai.Model{
@@ -363,6 +433,7 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		resp, retryResult := automergentErrors.RetryWithValue(ctx, policy, func() (*genai.GenerateContentResponse, error) {
 			resp, err := c.client.Models.GenerateContent(ctx, c.model, contents, config)
 			if err != nil {
+				log.Printf("google: attempt error: %v", err)
 				return nil, c.mapError(err)
 			}
 			return resp, nil
@@ -375,16 +446,25 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 
 	// Streaming: the SDK returns a lazy iterator; the HTTP request is only sent
 	// on the first iteration. Retry only until the first response arrives, so a
-	// mid-stream failure is never retried (avoiding duplicated output).
+	// mid-stream failure is never retried (avoiding duplicated output). The
+	// iterator is consumed through iter.Pull2 so that a failed attempt can be
+	// retried with a fresh request, while a successful attempt is drained
+	// exactly once (re-ranging a push iterator re-runs its body over the
+	// already-consumed stream, which can yield garbage responses).
 	first, retryResult := automergentErrors.RetryWithValue(ctx, policy, func() (firstStreamResult, error) {
-		iter := c.client.Models.GenerateContentStream(ctx, c.model, contents, config)
-		for resp, err := range iter {
-			if err != nil {
-				return firstStreamResult{}, c.mapError(err)
-			}
-			return firstStreamResult{iter: iter, first: resp}, nil
+		stream := c.client.Models.GenerateContentStream(ctx, c.model, contents, config)
+		pull, stop := iter.Pull2(stream)
+		resp, err, ok := pull()
+		if err != nil {
+			stop()
+			log.Printf("google: stream attempt error: %v", err)
+			return firstStreamResult{}, c.mapError(err)
 		}
-		return firstStreamResult{iter: iter}, nil
+		if !ok {
+			stop()
+			return firstStreamResult{}, nil
+		}
+		return firstStreamResult{pull: pull, stop: stop, first: resp}, nil
 	})
 	if !retryResult.Successful {
 		return nil, retryResult.LastError
@@ -397,12 +477,19 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 	stopReason := ai.StopReasonEnd
 	usage := ai.Usage{}
 	rawParts := []*genai.Part{}
+	// receivedFinish tracks whether the model already delivered its final
+	// response (finish reason or usage accounting). A transport error after
+	// that point is just the server closing the SSE connection cleanly and
+	// must not be reported as a failure.
+	receivedFinish := false
 
 	go func() {
 		defer close(ch)
+		defer first.stop()
 
 		emit := func(resp *genai.GenerateContentResponse) {
 			if resp.UsageMetadata != nil && resp.UsageMetadata.TotalTokenCount > 0 {
+				receivedFinish = true
 				usage = ai.Usage{
 					InputTokens:  int(resp.UsageMetadata.PromptTokenCount),
 					OutputTokens: int(resp.UsageMetadata.CandidatesTokenCount),
@@ -415,6 +502,7 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 			}
 			cand := resp.Candidates[0]
 			if cand.FinishReason != "" && stopReason != ai.StopReasonTools {
+				receivedFinish = true
 				switch cand.FinishReason {
 				case genai.FinishReasonMaxTokens:
 					stopReason = ai.StopReasonLength
@@ -428,6 +516,9 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 			}
 			for _, part := range cand.Content.Parts {
 				if part == nil {
+					continue
+				}
+				if isEmptyPart(part) {
 					continue
 				}
 
@@ -475,10 +566,17 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		if first.first != nil {
 			emit(first.first)
 		}
-		for resp, err := range first.iter {
+		for {
+			resp, err, ok := first.pull()
 			if err != nil {
+				if receivedFinish {
+					break
+				}
 				ch <- ai.Chunk{Error: c.mapError(err), Done: true}
 				return
+			}
+			if !ok {
+				break
 			}
 			emit(resp)
 		}
@@ -496,11 +594,12 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 	}, nil
 }
 
-// firstStreamResult carries the first streamed response together with the
-// iterator it came from, so the remaining chunks can be drained without
-// re-sending the request.
+// firstStreamResult carries the first streamed response together with a pull
+// function over the same iterator, so the remaining chunks can be drained
+// without re-sending the request or re-running the iterator body.
 type firstStreamResult struct {
-	iter  iter.Seq2[*genai.GenerateContentResponse, error]
+	pull  func() (*genai.GenerateContentResponse, error, bool)
+	stop  func()
 	first *genai.GenerateContentResponse
 }
 
