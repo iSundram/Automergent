@@ -128,12 +128,20 @@ func (c *Conversation) SetBrowsing(enabled bool) {
 }
 
 func (c *Conversation) AddMessage(role, content string, isError bool) {
+	c.AddMessageFull(role, content, "", isError)
+}
+
+// AddMessageFull appends a message including an optional thought (thinking
+// box). Used when restoring a session so resuming shows the conversation
+// exactly as it did while running.
+func (c *Conversation) AddMessageFull(role, content, thought string, isError bool) {
 	c.FinalizeStreaming()
 	c.ensureViewport()
 	shouldFollow := c.viewport.AtBottom()
 	c.messages = append(c.messages, ConversationMsg{
 		Role:      role,
 		Content:   content,
+		Thought:   thought,
 		IsError:   isError,
 		Timestamp: time.Now(),
 	})

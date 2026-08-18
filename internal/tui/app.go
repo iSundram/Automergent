@@ -372,7 +372,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			a.conversation.Clear()
 			for _, sm := range m.Session.Messages {
-				a.conversation.AddMessage(string(sm.Role), sm.TextContent(), false)
+				a.replayMessage(sm)
 			}
 			a.stats.InputTokens = m.Session.TotalInputTokens
 			a.stats.OutputTokens = m.Session.TotalOutputTokens
@@ -798,6 +798,54 @@ func (a *App) fuzzyFilter(items []components.PaletteItem, filter string) []compo
 		filtered = append(filtered, items[match.Index])
 	}
 	return filtered
+}
+
+// replayMessage rebuilds the conversation view for one stored message so a
+// resumed session looks exactly like it did while running (thoughts, tool
+// calls, results and text are all restored, not just plain text).
+func (a *App) replayMessage(sm ai.Message) {
+	switch sm.Role {
+	case ai.RoleTool:
+		for _, p := range sm.Content {
+			if p.Type == ai.ContentTypeToolResult && p.ToolResult != nil {
+				a.conversation.AddToolLifecycleDone(
+					p.ToolResult.ToolCallID, "", "", "", 0,
+					tools.Result{Content: p.ToolResult.Content, IsError: p.ToolResult.IsError},
+					a.conversation.ReviewMode(),
+				)
+			}
+		}
+	case ai.RoleUser, ai.RoleSystem:
+		a.conversation.AddMessage(string(sm.Role), sm.TextContent(), false)
+	case ai.RoleAssistant:
+		thought := ""
+		for _, p := range sm.Content {
+			if p.Type == ai.ContentTypeThought {
+				thought = p.Thought
+				break
+			}
+		}
+		if thought != "" {
+			// Keep the same message layout as the live stream: an assistant
+			// message holding the thought, tool call boxes, then the text.
+			a.conversation.AddMessageFull(string(sm.Role), "", thought, false)
+			for _, p := range sm.Content {
+				if p.Type == ai.ContentTypeToolCall && p.ToolCall != nil {
+					argText := ""
+					if len(p.ToolCall.Args) > 0 {
+						if b, err := json.Marshal(p.ToolCall.Args); err == nil {
+							argText = string(b)
+						}
+					}
+					ctx := extractToolContext(p.ToolCall.Name, p.ToolCall.Args)
+					a.conversation.AddToolLifecycleStart(p.ToolCall.ID, p.ToolCall.Name, argText, ctx)
+				}
+			}
+		}
+		if text := sm.TextContent(); text != "" {
+			a.conversation.AddMessage(string(sm.Role), text, false)
+		}
+	}
 }
 
 func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
@@ -1370,6 +1418,10 @@ func (a *App) layout() {
 	if a.palette.Visible() && !a.confirm.Visible() && !a.browsing {
 		footerH += a.palette.Height()
 	}
+	// Session browser also renders inline below the input.
+	if a.sessionBrowser.Visible() && !a.confirm.Visible() && !a.browsing {
+		footerH += a.sessionBrowser.Height()
+	}
 	if a.coAuthorConfirm.Visible() {
 		footerH += lipgloss.Height(a.coAuthorConfirm.View())
 	}
@@ -1427,23 +1479,19 @@ func (a *App) View() tea.View {
 	}
 
 	var mainRow string
-	if a.sessionBrowser.Visible() {
-		mainRow = a.sessionBrowser.View()
+	convView := a.conversation.View()
+	// Only wrap in ActivePane border if we have multiple panes (FileTree or LSP)
+	hasOtherPanes := a.showFileTree || a.lspPanel.Visible()
+	if a.focus == "conversation" && hasOtherPanes {
+		convView = a.styles.ActivePane.Width(lipgloss.Width(convView)).Render(convView)
+	}
+	if a.showFileTree {
+		mainRow = lipgloss.JoinHorizontal(lipgloss.Top, a.fileTree.View(), " ", convView)
 	} else {
-		convView := a.conversation.View()
-		// Only wrap in ActivePane border if we have multiple panes (FileTree or LSP)
-		hasOtherPanes := a.showFileTree || a.lspPanel.Visible()
-		if a.focus == "conversation" && hasOtherPanes {
-			convView = a.styles.ActivePane.Width(lipgloss.Width(convView)).Render(convView)
-		}
-		if a.showFileTree {
-			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, a.fileTree.View(), " ", convView)
-		} else {
-			mainRow = convView
-		}
-		if a.lspPanel.Visible() {
-			mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", a.lspPanel.View())
-		}
+		mainRow = convView
+	}
+	if a.lspPanel.Visible() {
+		mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", a.lspPanel.View())
 	}
 
 	sections = append(sections, mainRow)
@@ -1460,6 +1508,11 @@ func (a *App) View() tea.View {
 	}
 	if a.palette.Visible() && !a.confirm.Visible() && !a.browsing {
 		footer = append(footer, a.palette.View())
+	}
+	// Session browser renders inline (like the palette) so it never leaves a
+	// large empty area where the conversation used to be.
+	if a.sessionBrowser.Visible() && !a.confirm.Visible() && !a.browsing {
+		footer = append(footer, a.sessionBrowser.View())
 	}
 	if a.coAuthorConfirm.Visible() {
 		footer = append(footer, a.coAuthorConfirm.View())
