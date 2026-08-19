@@ -685,6 +685,8 @@ func setSecurityField(sec *SecurityConfig, key string, value any) error {
 		sec.Sandbox = toString(value)
 	case "requireGitForAutoModes":
 		sec.RequireGitForAutoModes = toBool(value)
+	case "rootRiskAcknowledged":
+		sec.RootRiskAcknowledged = toBool(value)
 	default:
 		return fmt.Errorf("unknown security field: %s", key)
 	}

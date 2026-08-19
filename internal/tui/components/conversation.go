@@ -41,7 +41,6 @@ type Conversation struct {
 	streaming  bool
 	reviewMode bool
 	emptyState string
-	welcome    bool
 	browsing   bool
 	// Builders used during streaming to avoid quadratic concatenation
 	currentBuilder        *strings.Builder
@@ -99,15 +98,6 @@ func (c *Conversation) SetSize(w, h int) {
 // SetEmptyState sets content shown only while the conversation has no messages.
 func (c *Conversation) SetEmptyState(content string) {
 	c.emptyState = content
-	c.welcome = false
-	c.refresh()
-}
-
-// SetWelcomeState shows the structured new-session welcome until the first
-// conversation message arrives.
-func (c *Conversation) SetWelcomeState() {
-	c.emptyState = "Automergent is ready"
-	c.welcome = true
 	c.refresh()
 }
 
@@ -366,15 +356,19 @@ func (c *Conversation) refresh() {
 	if w <= 0 {
 		w = 80
 	}
+	// Reserve one column for the scrollbar track when browsing so content is
+	// wrapped to the same width the viewport actually displays.
+	if c.browsing {
+		w--
+		if w < 1 {
+			w = 1
+		}
+	}
 	msgW := w - 10
 	if msgW < 20 {
 		msgW = 20
 	}
 	if len(c.messages) == 0 && c.emptyState != "" {
-		if c.welcome {
-			c.viewport.SetContent(c.renderWelcome(w))
-			return
-		}
 		empty := lipgloss.NewStyle().
 			Width(w).
 			Align(lipgloss.Center).
@@ -477,50 +471,6 @@ func (c *Conversation) refresh() {
 		}
 	}
 	c.viewport.SetContent(sb.String())
-}
-
-func (c *Conversation) renderWelcome(width int) string {
-	contentW := min(64, width-8)
-	if contentW < 28 {
-		contentW = max(1, width-2)
-	}
-
-	brand := lipgloss.NewStyle().
-		Foreground(c.styles.T.Accent).
-		Bold(true).
-		Render("⟡  AUTOMERGENT")
-	title := lipgloss.NewStyle().
-		Foreground(c.styles.T.Text).
-		Bold(true).
-		Render("Your workspace is ready")
-	description := lipgloss.NewStyle().
-		Foreground(c.styles.T.Subtext).
-		Render("Describe what you want to build, fix, or explore.")
-
-	shortcutKey := lipgloss.NewStyle().Foreground(c.styles.T.Accent).Bold(true)
-	shortcutText := lipgloss.NewStyle().Foreground(c.styles.T.Muted)
-	shortcuts := shortcutKey.Render("/ ") + shortcutText.Render("commands") +
-		shortcutText.Render("   ·   ") + shortcutKey.Render("@ ") + shortcutText.Render("files") +
-		shortcutText.Render("   ·   ") + shortcutKey.Render("? ") + shortcutText.Render("help")
-	if contentW < 43 {
-		shortcuts = shortcutKey.Render("/ ") + shortcutText.Render("commands") + "   " +
-			shortcutKey.Render("@ ") + shortcutText.Render("files") + "   " +
-			shortcutKey.Render("? ") + shortcutText.Render("help")
-	}
-
-	block := lipgloss.JoinVertical(lipgloss.Center,
-		brand,
-		"",
-		title,
-		description,
-		"",
-		shortcuts,
-	)
-	return lipgloss.NewStyle().
-		Width(width).
-		Align(lipgloss.Center).
-		PaddingTop(2).
-		Render(lipgloss.NewStyle().Width(contentW).Align(lipgloss.Center).Render(block))
 }
 
 func indentLines(content string, spaces int) string {
@@ -865,9 +815,13 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 }
 
 func (c Conversation) Update(msg tea.Msg) (Conversation, tea.Cmd) {
-	switch msg.(type) {
-	case tea.MouseMsg:
-		return c, nil
+	// Forward mouse messages (including the mouse wheel) to the viewport so
+	// scroll mode supports mouse scrolling. The viewport ignores them unless
+	// MouseWheelEnabled is set, which browsing mode toggles on.
+	if _, ok := msg.(tea.MouseMsg); ok {
+		vp, cmd := c.viewport.Update(msg)
+		c.viewport = vp
+		return c, cmd
 	}
 	vp, cmd := c.viewport.Update(msg)
 	c.viewport = vp

@@ -5,18 +5,21 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	contextpkg "github.com/iSundram/Automergent/internal/context"
 )
 
 // PromptManager is the main entry point for the prompt system.
 // It orchestrates all prompt generators and manages the prompt lifecycle.
 type PromptManager struct {
-	config         *PromptConfig
-	categorizer    *Categorizer
+	config          *PromptConfig
+	categorizer     *Categorizer
 	assistantPrompts *AssistantPrompts
-	coderPrompts   *CoderPrompts
-	contextPrompts *ContextPrompts
+	coderPrompts    *CoderPrompts
+	contextPrompts  *ContextPrompts
 	workflowPrompts *WorkflowPrompts
-	toolPrompts    *ToolPrompts
+	toolPrompts     *ToolPrompts
+	contextSelector *ContextSelector
 
 	// State
 	assistantContext *AssistantContext
@@ -24,23 +27,24 @@ type PromptManager struct {
 	currentRequest   *CategorizedRequest
 	promptHistory    []PromptPart
 	stashedContexts  []ContextStash
+	workingDir       string
 	mu               sync.RWMutex
 }
 
 // NewPromptManager creates a new prompt manager.
-func NewPromptManager(config *PromptConfig) *PromptManager {
+func NewPromptManager(config *PromptConfig, contextManager *contextpkg.Manager, workingDir string) *PromptManager {
 	if config == nil {
 		config = DefaultPromptConfig()
 	}
 
 	pm := &PromptManager{
-		config:          config,
-		categorizer:     NewCategorizer(config),
+		config:           config,
+		categorizer:      NewCategorizer(config),
 		assistantPrompts: NewAssistantPrompts(config),
-		coderPrompts:    NewCoderPrompts(config),
-		contextPrompts:  NewContextPrompts(config),
-		workflowPrompts: NewWorkflowPrompts(config),
-		toolPrompts:     NewToolPrompts(config),
+		coderPrompts:     NewCoderPrompts(config),
+		contextPrompts:   NewContextPrompts(config),
+		workflowPrompts:  NewWorkflowPrompts(config),
+		toolPrompts:      NewToolPrompts(config),
 		assistantContext: &AssistantContext{
 			ConversationHistory: []Message{},
 			UserPreferences:     make(map[string]string),
@@ -48,6 +52,12 @@ func NewPromptManager(config *PromptConfig) *PromptManager {
 		},
 		promptHistory:   []PromptPart{},
 		stashedContexts: []ContextStash{},
+		workingDir:      workingDir,
+	}
+
+	// Initialize context selector if context manager is provided
+	if contextManager != nil {
+		pm.contextSelector = NewContextSelector(contextManager, workingDir, config)
 	}
 
 	return pm
@@ -548,4 +558,16 @@ func (pm *PromptManager) GetUserPreference(key string) (string, bool) {
 func (pm *PromptManager) serializeContext() string {
 	// In a real implementation, this would serialize to JSON
 	return fmt.Sprintf("Context with %d messages, task: %v", len(pm.assistantContext.ConversationHistory), pm.currentRequest)
+}
+
+// GetSelectedContext returns the context selected for the current request using the context selector.
+func (pm *PromptManager) GetSelectedContext(ctx context.Context) (string, error) {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+
+	if pm.currentRequest == nil || pm.contextSelector == nil {
+		return "", nil
+	}
+
+	return pm.contextSelector.SelectContext(ctx, pm.currentRequest)
 }

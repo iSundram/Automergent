@@ -191,24 +191,164 @@ const (
 	StageCompletion       PromptStage = "completion"
 )
 
+// ContextProfile defines what context to include for a specific category.
+type ContextProfile struct {
+	Category              RequestCategory
+	MaxFiles              int
+	IncludeSymbols        bool
+	IncludeDependencies   bool
+	IncludeRecentFiles    bool
+	IncludeFrequentFiles  bool
+	IncludeStashedContext bool
+	IncludeProjectContext bool
+	TokenBudget           int
+	MinRelevanceScore     float64
+}
+
+// GetContextProfile returns the context profile for a category.
+func GetContextProfile(category RequestCategory) ContextProfile {
+	profiles := map[RequestCategory]ContextProfile{
+		CategoryNewFeature: {
+			Category:              CategoryNewFeature,
+			MaxFiles:              15,
+			IncludeSymbols:        true,
+			IncludeDependencies:   true,
+			IncludeRecentFiles:    true,
+			IncludeFrequentFiles:  true,
+			IncludeStashedContext: true,
+			IncludeProjectContext: true,
+			TokenBudget:           30000,
+			MinRelevanceScore:     0.3,
+		},
+		CategoryDebug: {
+			Category:              CategoryDebug,
+			MaxFiles:              10,
+			IncludeSymbols:        true,
+			IncludeDependencies:   true,
+			IncludeRecentFiles:    true,
+			IncludeFrequentFiles:  false,
+			IncludeStashedContext: true,
+			IncludeProjectContext: false,
+			TokenBudget:           25000,
+			MinRelevanceScore:     0.4,
+		},
+		CategoryIssueSuspect: {
+			Category:              CategoryIssueSuspect,
+			MaxFiles:              12,
+			IncludeSymbols:        true,
+			IncludeDependencies:   true,
+			IncludeRecentFiles:    true,
+			IncludeFrequentFiles:  false,
+			IncludeStashedContext: true,
+			IncludeProjectContext: false,
+			TokenBudget:           20000,
+			MinRelevanceScore:     0.35,
+		},
+		CategoryUserAsking: {
+			Category:              CategoryUserAsking,
+			MaxFiles:              5,
+			IncludeSymbols:        false,
+			IncludeDependencies:   false,
+			IncludeRecentFiles:    true,
+			IncludeFrequentFiles:  false,
+			IncludeStashedContext: false,
+			IncludeProjectContext: true,
+			TokenBudget:           10000,
+			MinRelevanceScore:     0.2,
+		},
+		CategoryPlan: {
+			Category:              CategoryPlan,
+			MaxFiles:              20,
+			IncludeSymbols:        true,
+			IncludeDependencies:   true,
+			IncludeRecentFiles:    true,
+			IncludeFrequentFiles:  true,
+			IncludeStashedContext: true,
+			IncludeProjectContext: true,
+			TokenBudget:           35000,
+			MinRelevanceScore:     0.25,
+		},
+		CategoryVerifyWork: {
+			Category:              CategoryVerifyWork,
+			MaxFiles:              15,
+			IncludeSymbols:        true,
+			IncludeDependencies:   false,
+			IncludeRecentFiles:    false,
+			IncludeFrequentFiles:  false,
+			IncludeStashedContext: true,
+			IncludeProjectContext: false,
+			TokenBudget:           20000,
+			MinRelevanceScore:     0.4,
+		},
+		CategoryDirect: {
+			Category:              CategoryDirect,
+			MaxFiles:              3,
+			IncludeSymbols:        false,
+			IncludeDependencies:   false,
+			IncludeRecentFiles:    false,
+			IncludeFrequentFiles:  false,
+			IncludeStashedContext: false,
+			IncludeProjectContext: false,
+			TokenBudget:           5000,
+			MinRelevanceScore:     0.5,
+		},
+		CategorySimple: {
+			Category:              CategorySimple,
+			MaxFiles:              2,
+			IncludeSymbols:        false,
+			IncludeDependencies:   false,
+			IncludeRecentFiles:    false,
+			IncludeFrequentFiles:  false,
+			IncludeStashedContext: false,
+			IncludeProjectContext: false,
+			TokenBudget:           3000,
+			MinRelevanceScore:     0.6,
+		},
+	}
+	
+	if profile, ok := profiles[category]; ok {
+		return profile
+	}
+	
+	// Default profile for unknown categories
+	return ContextProfile{
+		Category:              CategoryUnknown,
+		MaxFiles:              10,
+		IncludeSymbols:        true,
+		IncludeDependencies:   true,
+		IncludeRecentFiles:    true,
+		IncludeFrequentFiles:  true,
+		IncludeStashedContext: true,
+		IncludeProjectContext: true,
+		TokenBudget:           20000,
+		MinRelevanceScore:     0.3,
+	}
+}
+
 // PromptConfig holds configuration for prompt generation.
 type PromptConfig struct {
-	AssistantModel string
-	CoderModel     string
-	MaxContextSize int
-	EnableStashing bool
-	EnableSharing  bool
-	Verbose        bool
+	AssistantModel     string
+	CoderModel         string
+	MaxContextSize     int
+	EnableStashing     bool
+	EnableSharing      bool
+	Verbose            bool
+	TokenBudgetEnabled bool
+	MaxTotalTokens     int
+	ReserveTokens      int
 }
 
 // DefaultPromptConfig returns default configuration.
 func DefaultPromptConfig() *PromptConfig {
 	return &PromptConfig{
-		AssistantModel: "default",
-		CoderModel:     "default",
-		MaxContextSize: 100000,
-		EnableStashing: true,
-		EnableSharing:  true,
-		Verbose:        false,
+		AssistantModel:     "default",
+		CoderModel:         "default",
+		MaxContextSize:     100000,
+		EnableStashing:     true,
+		EnableSharing:      true,
+		Verbose:            false,
+		TokenBudgetEnabled: true,
+		MaxTotalTokens:     80000,
+		ReserveTokens:      10000,
 	}
 }

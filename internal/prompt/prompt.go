@@ -2,29 +2,43 @@ package prompt
 
 import (
 	"context"
+
+	contextpkg "github.com/iSundram/Automergent/internal/context"
 )
 
 // PromptSystem provides a unified interface for all prompt operations.
 // This is the main entry point for the prompt system.
 type PromptSystem struct {
-	Manager *PromptManager
-	Config  *PromptConfig
+	Manager    *PromptManager
+	Config     *PromptConfig
+	workingDir string
 }
 
 // NewPromptSystem creates a new prompt system with default configuration.
 func NewPromptSystem() *PromptSystem {
 	config := DefaultPromptConfig()
 	return &PromptSystem{
-		Manager: NewPromptManager(config),
-		Config:  config,
+		Manager:    NewPromptManager(config, nil, ""),
+		Config:     config,
+		workingDir: "",
 	}
 }
 
 // NewPromptSystemWithConfig creates a new prompt system with custom configuration.
 func NewPromptSystemWithConfig(config *PromptConfig) *PromptSystem {
 	return &PromptSystem{
-		Manager: NewPromptManager(config),
-		Config:  config,
+		Manager:    NewPromptManager(config, nil, ""),
+		Config:     config,
+		workingDir: "",
+	}
+}
+
+// NewPromptSystemWithContextManager creates a new prompt system with a context manager.
+func NewPromptSystemWithContextManager(config *PromptConfig, mgr *contextpkg.Manager, workingDir string) *PromptSystem {
+	return &PromptSystem{
+		Manager:    NewPromptManager(config, mgr, workingDir),
+		Config:     config,
+		workingDir: workingDir,
 	}
 }
 
@@ -80,4 +94,9 @@ func (ps *PromptSystem) GetCurrentRequest() *CategorizedRequest {
 // GetStashedContexts returns all stashed contexts.
 func (ps *PromptSystem) GetStashedContexts() []ContextStash {
 	return ps.Manager.GetStashedContexts()
+}
+
+// GetSelectedContext returns the selected context for the current request.
+func (ps *PromptSystem) GetSelectedContext(ctx context.Context) (string, error) {
+	return ps.Manager.GetSelectedContext(ctx)
 }

@@ -206,6 +206,7 @@ type SecurityConfig struct {
 	AllowedWritePaths      []string `mapstructure:"allowedWritePaths" yaml:"allowedWritePaths,omitempty"`
 	StripEnvVarPatterns    []string `mapstructure:"stripEnvVarPatterns" yaml:"stripEnvVarPatterns,omitempty"`
 	RequireGitForAutoModes bool     `mapstructure:"requireGitForAutoModes" yaml:"requireGitForAutoModes"`
+	RootRiskAcknowledged   bool     `mapstructure:"rootRiskAcknowledged" yaml:"rootRiskAcknowledged,omitempty"`
 }
 
 // ToolConfig holds per-tool settings.

@@ -246,6 +246,23 @@ func run(cmd *cobra.Command, args []string) error {
 		projectApprovalPath = ""
 	} else if cfg.NoTUI {
 		projectApprovalPath = ""
+	} else {
+		// Interactive mode: gate workspace access before the TUI starts.
+		approved, remember, err := tui.RunProjectApproval(cfg, projectApprovalPath)
+		if err != nil {
+			return fmt.Errorf("project approval: %w", err)
+		}
+		if !approved {
+			if !flags.Quiet {
+				fmt.Fprintln(os.Stderr, "Access to this folder was not approved.")
+			}
+			return nil
+		}
+		cfg.Security.AllowedWritePaths = appendUniquePath(cfg.Security.AllowedWritePaths, projectApprovalPath)
+		if remember {
+			_ = cfg.SaveIfLoaded()
+		}
+		projectApprovalPath = ""
 	}
 
 	// Setup session
@@ -1310,6 +1327,16 @@ func formatComprehensiveExitMessage(sess *session.Session) string {
 		" " + success.Render("󰄬 Session saved") + "  " + dim.Render("See you next time."),
 		"",
 	}, "\n")
+}
+
+// appendUniquePath appends path to paths unless already present.
+func appendUniquePath(paths []string, path string) []string {
+	for _, existing := range paths {
+		if existing == path {
+			return paths
+		}
+	}
+	return append(paths, path)
 }
 
 func projectApprovalRequired(cfg *config.Config) (string, bool) {

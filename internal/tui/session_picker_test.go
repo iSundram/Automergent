@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tui/components"
@@ -124,6 +125,17 @@ func TestSessionPickerRowContent(t *testing.T) {
 		if !strings.Contains(view, want) {
 			t.Fatalf("picker view missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestSessionPickerUsesFullTerminalWidth(t *testing.T) {
+	app := newTestApp(t)
+	app.width, app.height = 120, 40
+	app.sessionBrowser.SetSessions([]*session.Session{app.sess})
+	app.sessionBrowser.Show()
+	app.layout()
+	if got := lipgloss.Width(app.sessionBrowser.View()); got != app.width {
+		t.Fatalf("session browser width = %d, want full terminal width %d", got, app.width)
 	}
 }
 

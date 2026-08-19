@@ -6,7 +6,7 @@ import (
 )
 
 func TestPromptManager_NewPromptManager(t *testing.T) {
-	pm := NewPromptManager(nil)
+	pm := NewPromptManager(nil, nil, "")
 	if pm == nil {
 		t.Fatal("expected PromptManager, got nil")
 	}
@@ -34,7 +34,7 @@ func TestPromptManager_NewPromptManager(t *testing.T) {
 }
 
 func TestPromptManager_ProcessUserMessage_NewFeature(t *testing.T) {
-	pm := NewPromptManager(nil)
+	pm := NewPromptManager(nil, nil, "")
 	
 	parts, err := pm.ProcessUserMessage(
 		nil,
@@ -93,7 +93,7 @@ func TestPromptManager_ProcessUserMessage_NewFeature(t *testing.T) {
 }
 
 func TestPromptManager_ProcessUserMessage_Debug(t *testing.T) {
-	pm := NewPromptManager(nil)
+	pm := NewPromptManager(nil, nil, "")
 	
 	_, err := pm.ProcessUserMessage(
 		nil,
@@ -116,7 +116,7 @@ func TestPromptManager_ProcessUserMessage_Debug(t *testing.T) {
 }
 
 func TestPromptManager_ProcessUserMessage_Simple(t *testing.T) {
-	pm := NewPromptManager(nil)
+	pm := NewPromptManager(nil, nil, "")
 	
 	_, err := pm.ProcessUserMessage(
 		nil,
@@ -139,7 +139,7 @@ func TestPromptManager_ProcessUserMessage_Simple(t *testing.T) {
 }
 
 func TestPromptManager_GetNextTodoPrompt(t *testing.T) {
-	pm := NewPromptManager(nil)
+	pm := NewPromptManager(nil, nil, "")
 	
 	// Process a request first
 	_, err := pm.ProcessUserMessage(
@@ -163,7 +163,7 @@ func TestPromptManager_GetNextTodoPrompt(t *testing.T) {
 }
 
 func TestPromptManager_CompleteTodo(t *testing.T) {
-	pm := NewPromptManager(nil)
+	pm := NewPromptManager(nil, nil, "")
 	
 	_, err := pm.ProcessUserMessage(
 		nil,
@@ -198,7 +198,7 @@ func TestPromptManager_CompleteTodo(t *testing.T) {
 }
 
 func TestPromptManager_StashContext(t *testing.T) {
-	pm := NewPromptManager(nil)
+	pm := NewPromptManager(nil, nil, "")
 	
 	_, err := pm.ProcessUserMessage(
 		nil,
@@ -220,7 +220,7 @@ func TestPromptManager_StashContext(t *testing.T) {
 }
 
 func TestPromptManager_SaveAndResumeStash(t *testing.T) {
-	pm := NewPromptManager(nil)
+	pm := NewPromptManager(nil, nil, "")
 	
 	_, err := pm.ProcessUserMessage(
 		nil,
@@ -252,7 +252,7 @@ func TestPromptManager_SaveAndResumeStash(t *testing.T) {
 }
 
 func TestPromptManager_CreateNewContext(t *testing.T) {
-	pm := NewPromptManager(nil)
+	pm := NewPromptManager(nil, nil, "")
 	
 	_, err := pm.ProcessUserMessage(
 		nil,
@@ -280,7 +280,7 @@ func TestPromptManager_CreateNewContext(t *testing.T) {
 }
 
 func TestPromptManager_ShareContextWithCoder(t *testing.T) {
-	pm := NewPromptManager(nil)
+	pm := NewPromptManager(nil, nil, "")
 	
 	_, err := pm.ProcessUserMessage(
 		nil,

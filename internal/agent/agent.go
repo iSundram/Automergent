@@ -2,25 +2,29 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
 	contextmgr "github.com/iSundram/Automergent/internal/context"
 	"github.com/iSundram/Automergent/internal/coordinator"
+	"github.com/iSundram/Automergent/internal/engine"
 	"github.com/iSundram/Automergent/internal/errors"
+	"github.com/iSundram/Automergent/internal/graph/analysis"
+	"github.com/iSundram/Automergent/internal/graph/continuity"
 	promptpkg "github.com/iSundram/Automergent/internal/prompt"
 	"github.com/iSundram/Automergent/internal/reasoning"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
-	"github.com/iSundram/Automergent/internal/version"
 	subagent "github.com/iSundram/Automergent/internal/tools/agent"
+	"github.com/iSundram/Automergent/internal/version"
 )
 
 // Agent is the core AI coding agent.
@@ -52,9 +56,13 @@ type Agent struct {
 	coordinatorCtx     context.Context
 	coordinatorCancel  context.CancelFunc
 
+	// Graph-based intelligence engine
+	graphEngine *engine.GraphEngine
+	graphOnce   sync.Once
+
 	// New prompt system for staged prompt delivery
-	promptSystem       *promptpkg.PromptSystem
-	promptSystemOnce   sync.Once
+	promptSystem     *promptpkg.PromptSystem
+	promptSystemOnce sync.Once
 }
 
 // Execute implements the AgentExecutor interface for sub-agents.
@@ -199,7 +207,6 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 		events:              make(chan Event, 8192),
 		sessionAllowedTools: make(map[string]bool),
 		approvalSource:      "tui",
-		promptSystem:        promptpkg.NewPromptSystem(),
 	}
 
 	if cfg != nil && cfg.NoTUI {
@@ -211,6 +218,9 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 	if wd, err := os.Getwd(); err == nil {
 		agent.workDir = wd
 	}
+
+	// Initialize prompt system with context manager
+	agent.promptSystem = promptpkg.NewPromptSystemWithContextManager(promptpkg.DefaultPromptConfig(), agent.ContextManager(), agent.workDir)
 
 	// Seed always-allow approvals persisted in the session so resumed runs
 	// do not re-prompt for tools the user already approved.
@@ -380,73 +390,36 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		a.Emit(EventStatus, "initiating project triage")
 	}
 
+	// Apply triage wrapper for first message if using legacy mode
+	firstUserPrompt := originalUserPrompt
+	if isFirstMessage {
+		firstUserPrompt = TriageInstruction + "\n\nUser Request: " + originalUserPrompt
+	}
+
 	// Persist the user-authored message before any optional coordinator path
 	// can return. The triage wrapper exists only in the request copy below.
-	userMsg := ai.NewTextMessage(ai.RoleUser, originalUserPrompt)
+	userMsg := ai.NewTextMessage(ai.RoleUser, firstUserPrompt)
+	if isFirstMessage {
+		userMsg.Metadata = map[string]any{
+			triageInjectedMetadataKey:     true,
+			originalUserPromptMetadataKey: originalUserPrompt,
+		}
+	}
 	a.sess.AddMessage(userMsg)
 	a.recordToTranscript(userMsg)
 
-	// 1. Process first message through new prompt system (categorization, planning)
-	var categorized *promptpkg.CategorizedRequest
-	var promptParts []promptpkg.PromptPart
-	var err error
-	if isFirstMessage && a.cfg != nil && a.cfg.PromptSystemEnabled {
-		a.Emit(EventStatus, "analyzing request with prompt system...")
-		categorized, promptParts, err = a.processFirstMessageWithPromptSystem(ctx, originalUserPrompt)
-		if err != nil {
-			a.Emit(EventStatus, fmt.Sprintf("prompt system: %v, falling back", err))
-		} else {
-			a.Emit(EventStatus, fmt.Sprintf("categorized as: %s (complexity: %s)", categorized.Category, categorized.Complexity))
-
-			// If needs coder, initialize coordinator with prompt system
-			if categorized.RequiresCoder {
-				a.Emit(EventStatus, "initializing coordinator with prompt system...")
-				a.initializeCoordinatorWithPromptSystem()
-			}
+	// Use new PromptSystem for full intelligent pipeline if available
+	if a.cfg != nil && a.cfg.PromptSystemEnabled {
+		err := a.runPromptSystemPipeline(ctx, originalUserPrompt, isFirstMessage)
+		if err == nil {
+			return nil // Prompt system pipeline completed the task
 		}
+		// Log error but continue to standard loop as fallback
+		a.Emit(EventStatus, fmt.Sprintf("prompt system: %v, falling back to standard loop", err))
 	}
 
-	// 2. Coordinator: run in background with a short timeout.
-	//    If it doesn't produce a result quickly, fall through to the standard loop.
-	coordCh := make(chan string, 1)
-	coordErrCh := make(chan error, 1)
-	go func() {
-		result, err := a.runCoordinatorIfNeeded(ctx, originalUserPrompt)
-		if err != nil {
-			coordErrCh <- err
-		} else {
-			coordCh <- result
-		}
-	}()
-
-	// Wait briefly for coordinator — if it's fast (simple analysis), use it.
-	// Otherwise fall through to standard agent loop immediately.
-	select {
-	case result := <-coordCh:
-		if result != "" {
-			msg := ai.NewTextMessage(ai.RoleAssistant, result)
-			a.sess.AddMessage(msg)
-			a.recordToTranscript(msg)
-			a.Emit(EventStatus, "Coordinator: task completed")
-			return nil
-		}
-	case err := <-coordErrCh:
-		a.Emit(EventStatus, fmt.Sprintf("Coordinator: %v, using standard loop", err))
-	case <-time.After(30 * time.Second):
-		// Coordinator too slow — proceed with standard loop.
-		a.Emit(EventStatus, "Coordinator: taking too long, using standard loop")
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-
-	if a.cfg != nil && a.cfg.ReasoningPreAnalysis {
-		a.Emit(EventStatus, "reasoning: pre-analyzing prompt")
-		if summary, err := a.runReasoningPreAnalysis(ctx, originalUserPrompt); err != nil {
-			a.Emit(EventStatus, "reasoning: unavailable, continuing")
-		} else if summary != "" {
-			a.Emit(EventStatus, fmt.Sprintf("reasoning: %s", summary))
-		}
-	}
+	// If prompt system not enabled or failed, use legacy standard loop
+	a.Emit(EventStatus, "using standard agent loop (legacy)")
 
 	// In edit mode, check that we are inside a git repository when required.
 	if a.cfg.Mode == "edit" && a.cfg.Security.RequireGitForAutoModes {
@@ -456,73 +429,22 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		}
 	}
 
-	// 3. If we have prompt parts from the new system, send them first
-	if len(promptParts) > 0 && isFirstMessage && a.cfg != nil && a.cfg.PromptSystemEnabled {
-		a.Emit(EventStatus, "delivering staged prompts...")
-		for i, part := range promptParts {
-			a.Emit(EventStatus, fmt.Sprintf("prompt stage %d/%d: %s", i+1, len(promptParts), part.Stage))
-			// Build request with the prompt part as system prompt
-			toolSchemas := buildToolSchemas(a.tools)
-			thinkingBudget := a.getThinkingBudget()
-
-			stageMessages := a.sess.Messages
-			if isFirstMessage && len(stageMessages) > 0 {
-				stageMessages = append([]ai.Message(nil), stageMessages...)
-				last := len(stageMessages) - 1
-				if stageMessages[last].Role == ai.RoleUser {
-					stageMessages[last] = ai.NewTextMessage(ai.RoleUser, TriageInstruction+"\n\nUser Request: "+originalUserPrompt)
-				}
-			}
-			req := ai.CompletionRequest{
-				Messages:    stageMessages,
-				Tools:       toolSchemas,
-				System:      part.Content,
-				Temperature: 0.0,
-				MaxTokens:   8192,
-				Stream:      true,
-				Thinking: &ai.ThinkingConfig{
-					Type:         "enabled",
-					BudgetTokens: thinkingBudget,
-					Stream:       true,
-				},
-			}
-
-			resp, err := a.Provider().Complete(ctx, req)
-			if err != nil {
-				a.Emit(EventError, err)
-				break
-			}
-
-			text, thought, usage, err := a.drainStream(resp)
-			if err != nil {
-				a.Emit(EventError, err)
-				break
-			}
-
-			// Add assistant response to session
-			msg := ai.Message{
-				Role:     ai.RoleAssistant,
-				Metadata: resp.GetMetadata(),
-			}
-			if thought != "" {
-				msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeThought, Thought: thought})
-			}
-			if text != "" {
-				msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeText, Text: text})
-			}
-			if len(msg.Content) > 0 {
-				a.sess.AddMessage(msg)
-				a.recordToTranscript(msg)
-			}
-			a.sess.AddUsage(usage)
+	// Reasoning pre-analysis (if enabled)
+	if a.cfg != nil && a.cfg.ReasoningPreAnalysis {
+		a.Emit(EventStatus, "reasoning: pre-analyzing prompt")
+		if summary, err := a.runReasoningPreAnalysis(ctx, originalUserPrompt); err != nil {
+			a.Emit(EventStatus, "reasoning: unavailable, continuing")
+		} else if summary != "" {
+			a.Emit(EventStatus, fmt.Sprintf("reasoning: %s", summary))
 		}
 	}
 
+	// Standard agent loop with legacy system prompt
+	firstStandardTurn := isFirstMessage
 	for {
 		provider := a.Provider()
 
-		// Check context window usage and emit warnings.
-		// If usage is high (e.g., > 80% or autoCompressAt), perform intelligent compaction.
+		// Check context window usage
 		tokens, _ := provider.TokenCount(a.sess.Messages)
 		limit := a.cfg.MaxContextTokens
 		if limit <= 0 {
@@ -538,30 +460,20 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			a.Emit(EventStatus, "Neural Compaction: Freeing up context window...")
 			a.sess.SetMessages(a.CompactSessionMessages(ctx, a.sess.Messages))
 		} else {
-			// Even if not compacting, ghost large tool outputs to keep context lean
 			a.sess.SetMessages(a.GhostLargeOutputs(a.sess.Messages))
 		}
 
 		a.checkContextLimit(provider, a.sess.Messages)
 
-		// Get system prompt from new prompt system (staged prompts, todo-aware, context-aware)
-		// Falls back to legacy buildSystemPrompt if prompt system not available or exhausted
+		// Use new prompt system for system prompt (categorized, todo-aware, context-aware)
+		// Falls back to legacy buildSystemPrompt if prompt system not available
 		systemPrompt := a.getSystemPrompt(ctx, provider)
 		toolSchemas := buildToolSchemas(a.tools)
 
-		// Dynamically adjust thinking budget based on complexity
 		thinkingBudget := a.getThinkingBudget()
-		messages := a.sess.Messages
-		if isFirstMessage && len(messages) > 0 {
-			messages = append([]ai.Message(nil), messages...)
-			last := len(messages) - 1
-			if messages[last].Role == ai.RoleUser {
-				messages[last] = ai.NewTextMessage(ai.RoleUser, TriageInstruction+"\n\nUser Request: "+originalUserPrompt)
-			}
-		}
 
 		req := ai.CompletionRequest{
-			Messages:    messages,
+			Messages:    a.sess.Messages,
 			Tools:       toolSchemas,
 			System:      systemPrompt,
 			Temperature: 0.0,
@@ -597,24 +509,6 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		stop := resp.StopReason()
 		a.sess.AddUsage(usage)
 
-		// Record ground truth for adaptive token estimation
-		if mgr := a.ContextManager(); mgr != nil && usage.InputTokens > 0 {
-			// Build the prompt text that was sent to the model
-			systemPrompt := buildSystemPrompt(a.cfg, a.tools, a.sess.Messages, mgr)
-			toolSchemas := buildToolSchemas(a.tools)
-			// Approximate the prompt text
-			promptText := systemPrompt
-			for _, m := range a.sess.Messages {
-				promptText += m.PlaintextForHistory()
-			}
-			for _, tc := range toolSchemas {
-				if b, err := json.Marshal(tc); err == nil {
-					promptText += string(b)
-				}
-			}
-			mgr.RecordGroundTruth(promptText, usage.InputTokens)
-		}
-
 		msg := ai.Message{
 			Role:     ai.RoleAssistant,
 			Metadata: resp.GetMetadata(),
@@ -637,17 +531,13 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			a.recordToTranscript(msg)
 		}
 
-		// Pruning Logic: If we just finished the first turn which had the triage instruction,
-		// restore the original user message from metadata.
-		if isFirstMessage {
-			a.pruneFirstMessageTriage()
-			isFirstMessage = false // Only prune once
-		}
-
-		// 3. Handle Stop Condition
 		if stop != ai.StopReasonTools || len(toolCalls) == 0 {
 			a.Emit(EventDone, text)
 			a.tryPersist()
+			if firstStandardTurn {
+				a.pruneFirstMessageTriage()
+				firstStandardTurn = false
+			}
 			return nil
 		}
 
@@ -666,22 +556,9 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 				TaskID:      executed.call.ID,
 				Phase:       executed.call.Name,
 				ProgressPct: 100,
-				Log:         executed.result.Summary,
+				Log:         fmt.Sprintf("Completed %s", executed.call.Name),
 			})
-
-			toolMsg := ai.Message{Role: ai.RoleTool}
-			toolMsg.Content = append(toolMsg.Content, ai.ContentPart{
-				Type: ai.ContentTypeToolResult,
-				ToolResult: &ai.ToolResult{
-					ToolCallID: executed.call.ID,
-					Content:    executed.result.Content,
-					IsError:    executed.result.IsError,
-				},
-			})
-			a.sess.AddMessage(toolMsg)
-			a.recordToTranscript(toolMsg)
 		}
-		a.tryPersist()
 	}
 }
 
@@ -1175,6 +1052,27 @@ func (a *Agent) Coordinator() *coordinator.Engine {
 	return a.coordinator
 }
 
+// GraphEngine returns the graph-based intelligence engine, initializing it on first use.
+func (a *Agent) GraphEngine() *engine.GraphEngine {
+	a.graphOnce.Do(func() {
+		if a.cfg != nil && a.cfg.PromptSystemEnabled {
+			cfg := engine.DefaultGraphConfig()
+			cfg.DatabasePath = filepath.Join(a.workDir, ".automergent", "graph.db")
+			simConfig := analysis.DefaultSimilarityConfig()
+			cfg.SimilarityConfig = simConfig
+			contConfig := continuity.DefaultContinuityConfig()
+			cfg.ContinuityConfig = &contConfig
+
+			var err error
+			a.graphEngine, err = engine.NewGraphEngine(context.Background(), cfg)
+			if err != nil {
+				a.Emit(EventStatus, fmt.Sprintf("Graph engine initialization failed: %v", err))
+			}
+		}
+	})
+	return a.graphEngine
+}
+
 // runCoordinatorIfNeeded runs the coordinator for complex tasks that benefit from multi-agent execution.
 // Returns (result string, error). If result is non-nil and error is nil, the task is complete.
 func (a *Agent) runCoordinatorIfNeeded(ctx context.Context, prompt string) (string, error) {
@@ -1364,6 +1262,33 @@ func (a *Agent) getNextTodoPrompt() *promptpkg.PromptPart {
 
 // buildPromptSystemPrompt builds a system prompt using the new prompt system
 func (a *Agent) buildPromptSystemPrompt(ctx context.Context, provider ai.Provider) string {
+	// Try to get selected context from the prompt system's context selector
+	selectedContext, err := a.promptSystem.GetSelectedContext(ctx)
+	if err == nil && selectedContext != "" {
+		var sb strings.Builder
+		sb.WriteString("# Identity\n")
+		sb.WriteString(fmt.Sprintf("You are Automergent %s, a senior lead software engineer and autonomous agent.\n\n", version.Version))
+		sb.WriteString(selectedContext)
+		sb.WriteString("\n")
+
+		// Tools
+		sb.WriteString("## Available Tools\n")
+		for _, tool := range a.tools.All() {
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", tool.Name(), tool.Description()))
+		}
+		sb.WriteString("\n")
+
+		// Safety protocols (abbreviated)
+		sb.WriteString("## Safety & Blast Radius\n")
+		sb.WriteString("- **Safe:** Reading, searching, local tests\n")
+		sb.WriteString("- **Moderate:** Creating/editing files, adding deps\n")
+		sb.WriteString("- **Destructive:** Deleting, force push, rm -rf, drop tables\n")
+		sb.WriteString("  - MUST describe risk and wait for confirmation\n\n")
+
+		return sb.String()
+	}
+
+	// Fallback to manual construction if context selector not available
 	var sb strings.Builder
 
 	// Identity
@@ -1527,4 +1452,304 @@ func (a *Agent) ReasoningEngine() *reasoning.Engine {
 	cfg.DefaultTimeout = 5 * time.Minute
 	a.reasoningEngine = reasoning.NewEngine(cfg)
 	return a.reasoningEngine
+}
+
+// runGraphPipeline runs the full graph-based intelligence pipeline for a user request.
+// Returns nil if the pipeline completed the task, error if it failed (fallback to standard loop).
+func (a *Agent) runGraphPipeline(ctx context.Context, prompt string, isFirstMessage bool) error {
+	graphEngine := a.GraphEngine()
+	if graphEngine == nil {
+		return fmt.Errorf("graph engine not available")
+	}
+
+	a.Emit(EventStatus, "🧠 Running graph-based intelligence pipeline...")
+
+	// Use the unified ProcessUserRequest which handles the full pipeline
+	result, err := graphEngine.ProcessUserRequest(ctx, prompt)
+	if err != nil {
+		return fmt.Errorf("graph pipeline failed: %w", err)
+	}
+
+	// Emit results
+	a.Emit(EventStatus, fmt.Sprintf("✅ Graph pipeline completed: %s (route: %s)", result.TaskID, result.RouteType))
+
+	// Emit feature matches
+	if len(result.FeatureMatches) > 0 {
+		a.Emit(EventStatus, fmt.Sprintf("🔍 Found %d similar features", len(result.FeatureMatches)))
+		for _, fm := range result.FeatureMatches {
+			a.Emit(EventStatus, fmt.Sprintf("   • %s (similarity: %.2f)", fm.FeatureName, fm.Similarity))
+		}
+	}
+
+	// Emit entry points
+	if len(result.EntryPoints) > 0 {
+		a.Emit(EventStatus, fmt.Sprintf("🎯 Detected %d entry points", len(result.EntryPoints)))
+		for _, ep := range result.EntryPoints {
+			a.Emit(EventStatus, fmt.Sprintf("   • %s: %s", ep.EntryType, ep.Description))
+		}
+	}
+
+	// Emit wiring
+	if result.WiringPattern != nil {
+		a.Emit(EventStatus, fmt.Sprintf("🔗 Wiring pattern: %s", result.WiringPattern.Name))
+	}
+
+	// Emit entry points wiring
+	if len(result.EntryPoints) > 0 {
+		a.Emit(EventStatus, "🔗 Wiring to entry points...")
+		for _, ep := range result.EntryPoints {
+			a.Emit(EventStatus, fmt.Sprintf("   • %s → %s", ep.EntryType, ep.Location))
+		}
+	}
+
+	// Emit integration result
+	if result.IntegrationResult != nil {
+		a.Emit(EventStatus, fmt.Sprintf("⚙️ Integration: %d files generated", len(result.IntegrationResult.GeneratedFiles)))
+	}
+
+	// Emit appearance validation
+	if result.Appearance != nil {
+		a.Emit(EventStatus, fmt.Sprintf("✅ Appearance validated: %d entry points verified", len(result.Appearance.EntryPoints)))
+	}
+
+	// Emit usage examples
+	if len(result.UsageExamples) > 0 {
+		a.Emit(EventStatus, "📚 Usage examples generated:")
+		for _, example := range result.UsageExamples {
+			a.Emit(EventStatus, fmt.Sprintf("   %s: %s", example.EntryPoint, example.Description[:min(80, len(example.Description))]))
+		}
+	}
+
+	// Add result to session
+	if result.IntegrationResult != nil && len(result.IntegrationResult.GeneratedFiles) > 0 {
+		// Combine generated file contents as output
+		var output strings.Builder
+		for _, f := range result.IntegrationResult.GeneratedFiles {
+			if f.Content != "" {
+				output.WriteString(fmt.Sprintf("=== %s ===\n%s\n\n", f.Path, f.Content))
+			}
+		}
+		if output.Len() > 0 {
+			msg := ai.NewTextMessage(ai.RoleAssistant, output.String())
+			a.sess.AddMessage(msg)
+			a.recordToTranscript(msg)
+			a.Emit(EventDone, output.String())
+			return nil
+		}
+	}
+
+	return nil
+}
+
+// runPromptSystemPipeline runs the new internal/prompt system pipeline for a user request.
+// Returns nil if the pipeline completed the task, error if it failed (fallback to standard loop).
+func (a *Agent) runPromptSystemPipeline(ctx context.Context, prompt string, isFirstMessage bool) error {
+	a.Emit(EventStatus, "🧠 Running prompt system pipeline...")
+
+	// Process the user message through the new prompt system
+	parts, err := a.promptSystem.ProcessUserMessage(ctx, prompt, a.workDir, nil)
+	if err != nil {
+		return fmt.Errorf("prompt system processing failed: %w", err)
+	}
+
+	// Get the categorized request
+	categorized := a.promptSystem.GetCurrentRequest()
+	if categorized == nil {
+		return fmt.Errorf("no categorized request")
+	}
+
+	a.Emit(EventStatus, fmt.Sprintf("📋 Categorized as: %s (complexity: %s, strategy: %s)",
+		categorized.Category, categorized.Complexity, categorized.Strategy))
+
+	// If requires coder, initialize coordinator with prompt system
+	if categorized.RequiresCoder {
+		a.Emit(EventStatus, "🔧 Initializing coordinator with prompt system...")
+		a.initializeCoordinatorWithPromptSystem()
+	}
+
+	// Send staged prompts
+	for i, part := range parts {
+		a.Emit(EventStatus, fmt.Sprintf("📤 Prompt stage %d/%d: %s", i+1, len(parts), part.Stage))
+
+		// Build request with the prompt part as system prompt
+		toolSchemas := buildToolSchemas(a.tools)
+		thinkingBudget := a.getThinkingBudget()
+
+		req := ai.CompletionRequest{
+			Messages:    a.sess.Messages,
+			Tools:       toolSchemas,
+			System:      part.Content,
+			Temperature: 0.0,
+			MaxTokens:   8192,
+			Stream:      true,
+			Thinking: &ai.ThinkingConfig{
+				Type:         "enabled",
+				BudgetTokens: thinkingBudget,
+				Stream:       true,
+			},
+		}
+
+		resp, err := a.Provider().Complete(ctx, req)
+		if err != nil {
+			return fmt.Errorf("prompt stage %d failed: %w", i, err)
+		}
+
+		text, thought, usage, err := a.drainStream(resp)
+		if err != nil {
+			return fmt.Errorf("prompt stage %d stream failed: %w", i, err)
+		}
+
+		// Add assistant response to session
+		msg := ai.Message{
+			Role:     ai.RoleAssistant,
+			Metadata: resp.GetMetadata(),
+		}
+		if thought != "" {
+			msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeThought, Thought: thought})
+		}
+		if text != "" {
+			msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeText, Text: text})
+		}
+		if len(msg.Content) > 0 {
+			a.sess.AddMessage(msg)
+			a.recordToTranscript(msg)
+		}
+		a.sess.AddUsage(usage)
+	}
+
+	// After staged prompts, check if we have a todo workflow to execute
+	if categorized != nil && len(categorized.TodoItems) > 0 {
+		a.Emit(EventStatus, "📋 Executing todo workflow...")
+
+		// Get coder context and execute todos
+		coderCtx := a.promptSystem.GetCoderContext()
+		if coderCtx != nil {
+			for _, todo := range categorized.TodoItems {
+				if todo.Status == promptpkg.TodoStatusPending {
+					// Check dependencies
+					depsMet := true
+					for _, depID := range todo.Dependencies {
+						found := false
+						for _, t := range categorized.TodoItems {
+							if t.ID == depID && t.Status == promptpkg.TodoStatusCompleted {
+								found = true
+								break
+							}
+						}
+						if !found {
+							depsMet = false
+							break
+						}
+					}
+					if !depsMet {
+						continue
+					}
+
+					// Mark as in progress
+					for i := range categorized.TodoItems {
+						if categorized.TodoItems[i].ID == todo.ID {
+							categorized.TodoItems[i].Status = promptpkg.TodoStatusInProgress
+							break
+						}
+					}
+
+					a.Emit(EventStatus, fmt.Sprintf("⚙️ Executing todo: %s", todo.Description))
+
+					// Build execution prompt for this todo
+					execPrompt := a.promptSystem.Manager.CoderPrompts().BuildExecutionPrompt(
+						coderCtx, &todo, categorized)
+
+					toolSchemas := buildToolSchemas(a.tools)
+					thinkingBudget := a.getThinkingBudget()
+
+					req := ai.CompletionRequest{
+						Messages:    a.sess.Messages,
+						Tools:       toolSchemas,
+						System:      execPrompt.Content,
+						Temperature: 0.0,
+						MaxTokens:   8192,
+						Stream:      true,
+						Thinking: &ai.ThinkingConfig{
+							Type:         "enabled",
+							BudgetTokens: thinkingBudget,
+							Stream:       true,
+						},
+					}
+
+					resp, err := a.Provider().Complete(ctx, req)
+					if err != nil {
+						a.Emit(EventStatus, fmt.Sprintf("Todo failed: %v", err))
+						continue
+					}
+
+					text, thought, usage, err := a.drainStream(resp)
+					if err != nil {
+						continue
+					}
+
+					// Add response to session
+					msg := ai.Message{
+						Role:     ai.RoleAssistant,
+						Metadata: resp.GetMetadata(),
+					}
+					if thought != "" {
+						msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeThought, Thought: thought})
+					}
+					if text != "" {
+						msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeText, Text: text})
+					}
+					if len(msg.Content) > 0 {
+						a.sess.AddMessage(msg)
+						a.recordToTranscript(msg)
+					}
+					a.sess.AddUsage(usage)
+
+					// Mark todo as completed
+					for i := range categorized.TodoItems {
+						if categorized.TodoItems[i].ID == todo.ID {
+							categorized.TodoItems[i].Status = promptpkg.TodoStatusCompleted
+							break
+						}
+					}
+
+					a.Emit(EventStatus, fmt.Sprintf("✅ Todo completed: %s", todo.Description))
+				}
+			}
+		}
+	}
+
+	// Final response
+	a.Emit(EventStatus, "✅ Prompt system pipeline completed")
+
+	// If we have a result, add to session
+	if categorized != nil && categorized.OriginalPrompt != "" {
+		msg := ai.NewTextMessage(ai.RoleAssistant, "Task completed via prompt system pipeline")
+		a.sess.AddMessage(msg)
+		a.recordToTranscript(msg)
+		a.Emit(EventDone, "Task completed")
+		return nil
+	}
+
+	return nil
+}
+
+func (a *Agent) resumeGraphTask(ctx context.Context, taskID string, relation continuity.TaskRelation) error {
+	taskUUID, err := uuid.Parse(taskID)
+	if err != nil {
+		return err
+	}
+	// Use ResumeFullContext which handles the full context resumption based on relation
+	_, err = a.graphEngine.ContextResumer.ResumeFullContext(ctx, taskUUID, relation)
+	return err
+}
+
+func generateID() string {
+	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

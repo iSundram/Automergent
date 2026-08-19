@@ -57,6 +57,7 @@ type App struct {
 	diffPane          components.Diff
 	input             components.Input
 	header            components.Header
+	logo              components.Logo
 	statusBar         components.StatusBar
 	spin              components.Spinner
 	confirm           components.Confirm
@@ -123,6 +124,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		diffPane:           components.NewDiff(styles),
 		input:              components.NewInput(styles),
 		header:             components.NewHeader(styles),
+		logo:               components.NewLogo(styles),
 		statusBar:          components.NewStatusBar(styles),
 		spin:               components.NewSpinner(styles),
 		confirm:            components.NewConfirm(styles),
@@ -158,8 +160,6 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		for _, message := range sess.Messages {
 			app.replayMessage(message)
 		}
-	} else if initialPrompt == "" {
-		app.conversation.SetWelcomeState()
 	}
 	// Initialize active token estimate
 	app.updateActiveTokens()
@@ -401,7 +401,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.statusBar.SetStatus("Folder trusted for this session")
 			}
 		} else {
-			a.statusBar.SetStatus("Read-only project")
+			// Rejecting the trust warning quits instead of continuing
+			// read-only: an untrusted folder must not be worked on at all.
+			a.statusBar.ClearPermission()
+			a.layout()
+			return a, tea.Quit
 		}
 		a.statusBar.ClearPermission()
 		a.layout()
@@ -1452,7 +1456,26 @@ func (a *App) layout() {
 	a.confirm.SetSize(a.width, a.height)
 	a.coAuthorConfirm.SetSize(a.width, a.height)
 
-	headerH := lipgloss.Height(a.header.View())
+	// Logo mode replaces the header: the wordmark is shown left-aligned
+	// on a fresh conversation (or while a project trust warning is
+	// visible) instead of the usual HUD bar.
+	logoH := 0
+	if a.showLogo() {
+		logoW := a.width - 6
+		if logoW > 100 {
+			logoW = 100
+		}
+		if logoW < 20 {
+			logoW = 20
+		}
+		a.logo.SetWidth(logoW)
+		logoH = lipgloss.Height(a.logoView())
+	}
+
+	headerH := 0
+	if !a.showLogo() {
+		headerH = lipgloss.Height(a.header.View())
+	}
 	statusH := lipgloss.Height(a.statusBar.View())
 	footerH := 0
 	if !a.browsing {
@@ -1480,6 +1503,14 @@ func (a *App) layout() {
 	if mainH < 1 {
 		mainH = 1
 	}
+	// In logo mode the wordmark consumes part of the main area before
+	// the (empty) conversation begins.
+	if a.showLogo() {
+		mainH -= logoH
+		if mainH < 1 {
+			mainH = 1
+		}
+	}
 
 	// Diff is now fullscreen overlay - always set to full dimensions
 	a.diffPane.SetSize(a.width, a.height)
@@ -1502,7 +1533,30 @@ func (a *App) layout() {
 	} else {
 		a.conversation.SetSize(mainW, mainH)
 	}
-	a.sessionBrowser.SetSize(a.width*3/4, a.height*3/4)
+	a.sessionBrowser.SetSize(a.width, a.height*3/4)
+}
+
+// showLogo reports whether the terminal logo should replace the header:
+// on a brand new conversation (no messages yet) or while a project trust
+// (untrusted folder) warning is visible.
+func (a *App) showLogo() bool {
+	if a.confirm.Visible() && a.confirm.IsTrust() {
+		return true
+	}
+	return a.conversation.MessageCount() == 0
+}
+
+// logoView renders the ASCII logo left-aligned with a small gap from the top
+// edge, replacing the header bar in logo mode.
+func (a *App) logoView() string {
+	art := a.logo.View()
+	if art == "" {
+		return ""
+	}
+	return lipgloss.NewStyle().
+		MarginLeft(2).
+		MarginTop(2).
+		Render(art)
 }
 
 func (a *App) View() tea.View {
@@ -1521,7 +1575,12 @@ func (a *App) View() tea.View {
 		return makeView(a.helpOverlay.View())
 	}
 
-	headerView := a.header.View()
+	headerView := ""
+	if a.showLogo() {
+		headerView = a.logoView()
+	} else {
+		headerView = a.header.View()
+	}
 	statusView := a.statusBar.View()
 	var sections []string
 	if headerView != "" {

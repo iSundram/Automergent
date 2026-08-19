@@ -115,6 +115,10 @@ func (c *Confirm) Hide() { c.visible = false }
 // Visible reports whether the prompt is visible.
 func (c Confirm) Visible() bool { return c.visible }
 
+// IsTrust reports whether the visible prompt is a project trust
+// (untrusted folder) warning.
+func (c Confirm) IsTrust() bool { return c.trust }
+
 // SetSize updates dimensions.
 func (c *Confirm) SetSize(w, h int) {
 	c.width = w
@@ -296,7 +300,7 @@ func (c Confirm) renderOptions() string {
 		options = []string{
 			makeOption("y", "trust this session", c.styles.T.Green),
 			makeOption("a", "trust and remember", c.styles.T.Accent),
-			makeOption("n", "continue read-only", c.styles.T.Red),
+			makeOption("n", "exit", c.styles.T.Red),
 		}
 	} else if !c.simple {
 		options = []string{

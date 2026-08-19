@@ -96,19 +96,15 @@ func TestConversationEmptyStateDisappearsAfterMessage(t *testing.T) {
 	}
 }
 
-func TestConversationWelcomeStateHasActionsAndNoCardBackground(t *testing.T) {
+func TestConversationNoWelcomeCard(t *testing.T) {
 	conversation := NewConversation(testStyles())
 	conversation.SetSize(80, 14)
-	conversation.SetWelcomeState()
 	view := conversation.View()
 	plain := ansi.Strip(view)
-	for _, expected := range []string{"AUTOMERGENT", "workspace is ready", "/ commands", "@ files", "? help"} {
-		if !strings.Contains(plain, expected) {
-			t.Fatalf("welcome is missing %q: %q", expected, plain)
+	for _, expected := range []string{"AUTOMERGENT", "workspace is ready"} {
+		if strings.Contains(plain, expected) {
+			t.Fatalf("welcome card must be removed, found %q: %q", expected, plain)
 		}
-	}
-	if strings.Contains(view, "48;2;") {
-		t.Fatalf("welcome must use the default terminal background: %q", view)
 	}
 }
 
@@ -130,7 +126,7 @@ func TestTrustConfirmShowsSessionAndRememberChoices(t *testing.T) {
 	confirm.SetSize(90, 24)
 	confirm.ShowTrust("Trust this project folder?\n/root/Automergent")
 	view := confirm.View()
-	for _, expected := range []string{"trust this session", "trust and remember", "continue read-only"} {
+	for _, expected := range []string{"trust this session", "trust and remember", "exit"} {
 		if !strings.Contains(view, expected) {
 			t.Fatalf("trust confirmation missing %q: %q", expected, view)
 		}
