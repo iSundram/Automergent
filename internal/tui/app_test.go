@@ -41,6 +41,15 @@ func TestSwitchProviderRejectsUnknown(t *testing.T) {
 	}
 }
 
+func TestNewAppReplaysLoadedSession(t *testing.T) {
+	app := newTestApp(t)
+	app.sess.AddMessage(ai.NewTextMessage(ai.RoleUser, "loaded before TUI"))
+	app = NewApp(app.cfg, app.ag, app.sess, nil, nil, "", false)
+	if !strings.Contains(ansi.Strip(app.conversation.View()), "loaded before TUI") {
+		t.Fatal("directly loaded session should be visible when TUI starts")
+	}
+}
+
 func TestSlashProviderSwitchesProviderAndDefaultModel(t *testing.T) {
 	app := newTestApp(t)
 	app.handleSlashCommand("/provider google")

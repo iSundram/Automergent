@@ -360,6 +360,7 @@ func (a *Agent) SetSession(sess *session.Session) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.sess = sess
+	a.firstMessageHandled = sess != nil && len(sess.Messages) > 0
 	a.sessionAllowedTools = make(map[string]bool)
 	if sess != nil {
 		for _, scope := range sess.ApprovalScopes() {
@@ -377,9 +378,13 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	isFirstMessage := a.checkAndMarkFirstMessage()
 	if isFirstMessage {
 		a.Emit(EventStatus, "initiating project triage")
-		// Use externalized instruction from triage.go
-		prompt = TriageInstruction + "\n\nUser Request: " + prompt
 	}
+
+	// Persist the user-authored message before any optional coordinator path
+	// can return. The triage wrapper exists only in the request copy below.
+	userMsg := ai.NewTextMessage(ai.RoleUser, originalUserPrompt)
+	a.sess.AddMessage(userMsg)
+	a.recordToTranscript(userMsg)
 
 	// 1. Process first message through new prompt system (categorization, planning)
 	var categorized *promptpkg.CategorizedRequest
@@ -451,16 +456,6 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		}
 	}
 
-	userMsg := ai.NewTextMessage(ai.RoleUser, prompt)
-	if isFirstMessage {
-		userMsg.Metadata = map[string]any{
-			triageInjectedMetadataKey:     true,
-			originalUserPromptMetadataKey: originalUserPrompt,
-		}
-	}
-	a.sess.AddMessage(userMsg)
-	a.recordToTranscript(userMsg)
-
 	// 3. If we have prompt parts from the new system, send them first
 	if len(promptParts) > 0 && isFirstMessage && a.cfg != nil && a.cfg.PromptSystemEnabled {
 		a.Emit(EventStatus, "delivering staged prompts...")
@@ -470,8 +465,16 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			toolSchemas := buildToolSchemas(a.tools)
 			thinkingBudget := a.getThinkingBudget()
 
+			stageMessages := a.sess.Messages
+			if isFirstMessage && len(stageMessages) > 0 {
+				stageMessages = append([]ai.Message(nil), stageMessages...)
+				last := len(stageMessages) - 1
+				if stageMessages[last].Role == ai.RoleUser {
+					stageMessages[last] = ai.NewTextMessage(ai.RoleUser, TriageInstruction+"\n\nUser Request: "+originalUserPrompt)
+				}
+			}
 			req := ai.CompletionRequest{
-				Messages:    a.sess.Messages,
+				Messages:    stageMessages,
 				Tools:       toolSchemas,
 				System:      part.Content,
 				Temperature: 0.0,
@@ -548,9 +551,17 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 
 		// Dynamically adjust thinking budget based on complexity
 		thinkingBudget := a.getThinkingBudget()
+		messages := a.sess.Messages
+		if isFirstMessage && len(messages) > 0 {
+			messages = append([]ai.Message(nil), messages...)
+			last := len(messages) - 1
+			if messages[last].Role == ai.RoleUser {
+				messages[last] = ai.NewTextMessage(ai.RoleUser, TriageInstruction+"\n\nUser Request: "+originalUserPrompt)
+			}
+		}
 
 		req := ai.CompletionRequest{
-			Messages:    a.sess.Messages,
+			Messages:    messages,
 			Tools:       toolSchemas,
 			System:      systemPrompt,
 			Temperature: 0.0,

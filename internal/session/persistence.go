@@ -328,33 +328,65 @@ func (pm *PersistenceManager) IsDirty() bool {
 
 // ResumeSession attempts to resume a previous session.
 func (pm *PersistenceManager) ResumeSession(sessionID string, storage *Storage) (*Session, error) {
-	// Check for crash recovery first
-	if pm.HasRecoveryState() {
-		state, err := pm.LoadRecoveryPoint()
-		if err == nil && state.Session != nil && state.Session.ID == sessionID {
-			pm.mu.Lock()
-			pm.state = state
-			pm.mu.Unlock()
-			_ = pm.ClearRecoveryPoint()
-			return state.Session, nil
+	// A recovery point is not automatically newer than the clean session file.
+	// Autosave can leave a short/stale recovery snapshot behind, so compare all
+	// available copies and keep the richest history for an explicit resume.
+	var candidates []*Session
+	var storageErr error
+	if storage != nil {
+		if sess, err := storage.Load(sessionID); err == nil {
+			candidates = append(candidates, sess)
+		} else {
+			storageErr = err
 		}
 	}
 
-	// Try normal load
-	if err := pm.Load(); err != nil {
+	var recovery *PersistenceState
+	if pm.HasRecoveryState() {
+		if state, err := pm.LoadRecoveryPoint(); err == nil && state.Session != nil && state.Session.ID == sessionID {
+			recovery = state
+			candidates = append(candidates, state.Session)
+		}
+	}
+
+	if err := pm.Load(); err != nil && len(candidates) == 0 {
 		return nil, err
 	}
-
-	if pm.state.Session != nil && pm.state.Session.ID == sessionID {
-		return pm.state.Session, nil
+	pm.mu.RLock()
+	stateSession := pm.state.Session
+	pm.mu.RUnlock()
+	if stateSession != nil && stateSession.ID == sessionID {
+		candidates = append(candidates, stateSession)
+	}
+	if len(candidates) == 0 {
+		if storageErr != nil {
+			return nil, storageErr
+		}
+		return nil, os.ErrNotExist
 	}
 
-	// Fall back to storage
-	sess, err := storage.Load(sessionID)
-	if err != nil {
-		return nil, err
+	best := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if richerSession(candidate, best) {
+			best = candidate
+		}
 	}
+	if recovery != nil && best == recovery.Session {
+		pm.mu.Lock()
+		pm.state = recovery
+		pm.mu.Unlock()
+	} else {
+		pm.SetSession(best)
+	}
+	// The selected snapshot is now represented by the active state; stale
+	// recovery data should not be reconsidered on the next launch.
+	_ = pm.ClearRecoveryPoint()
+	return best, nil
+}
 
-	pm.SetSession(sess)
-	return sess, nil
+func richerSession(candidate, current *Session) bool {
+	if len(candidate.Messages) != len(current.Messages) {
+		return len(candidate.Messages) > len(current.Messages)
+	}
+	return candidate.UpdatedAt.After(current.UpdatedAt)
 }

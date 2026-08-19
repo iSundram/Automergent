@@ -23,7 +23,7 @@ var slashCommands = []slashCommand{
 	{Name: "context", Aliases: []string{"tokens"}, Description: "Show model and context usage", Category: "AI & Model", Icon: "󰚩", Immediate: true},
 
 	{Name: "new", Description: "Start a fresh session", Category: "Session", Icon: "󰐕", Immediate: true},
-	{Name: "sessions", Description: "Browse previous sessions", Category: "Session", Icon: "󰆓", Immediate: true},
+	{Name: "sessions", Aliases: []string{"session"}, Description: "Browse previous sessions", Category: "Session", Icon: "󰆓", Immediate: true},
 	{Name: "resume", Description: "Browse and resume a session", Category: "Session", Icon: "󰑐", Immediate: true},
 	{Name: "export", Description: "Export conversation as Markdown", Category: "Session", Icon: "󰈇", Usage: "[path]", Immediate: true},
 	{Name: "approvals", Description: "View or revoke always-allow tool approvals", Category: "Session", Icon: "󰌑", Usage: "[revoke <index>]", Immediate: true},

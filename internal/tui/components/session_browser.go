@@ -98,6 +98,7 @@ type SessionBrowser struct {
 	scrollOffset int
 	items        []sessionItem
 	visible      bool
+	currentID    string
 }
 
 // NewSessionBrowser creates a new SessionBrowser.
@@ -117,6 +118,9 @@ func (sb *SessionBrowser) SetSessions(sessions []*session.Session) {
 	}
 	sb.updateScroll()
 }
+
+// SetCurrent marks the active session in the browser.
+func (sb *SessionBrowser) SetCurrent(id string) { sb.currentID = id }
 
 // ItemCount reports the number of sessions currently in the list.
 func (sb *SessionBrowser) ItemCount() int {
@@ -149,10 +153,8 @@ func (sb *SessionBrowser) updateScroll() {
 
 // Update handles list events.
 func (sb SessionBrowser) Update(msg tea.Msg) (SessionBrowser, tea.Cmd) {
-	if !sb.visible || len(sb.items) == 0 {
-		if !sb.visible {
-			return sb, nil
-		}
+	if !sb.visible {
+		return sb, nil
 	}
 	if m, ok := msg.(tea.KeyMsg); ok {
 		switch m.String() {
@@ -160,25 +162,41 @@ func (sb SessionBrowser) Update(msg tea.Msg) (SessionBrowser, tea.Cmd) {
 			sb.visible = false
 			return sb, nil
 		case "enter":
-			if item := sb.items[sb.cursor].sess; item != nil {
+			if len(sb.items) > 0 && sb.cursor >= 0 && sb.cursor < len(sb.items) {
+				item := sb.items[sb.cursor].sess
+				if item == nil {
+					return sb, nil
+				}
 				sb.visible = false
 				return sb, func() tea.Msg { return SessionSelectedMsg{Session: item} }
 			}
 		case "up", "ctrl+p":
+			if len(sb.items) == 0 {
+				break
+			}
 			if sb.cursor > 0 {
 				sb.cursor--
 			} else {
 				sb.cursor = len(sb.items) - 1
 			}
 		case "down", "ctrl+n", "tab":
+			if len(sb.items) == 0 {
+				break
+			}
 			if sb.cursor < len(sb.items)-1 {
 				sb.cursor++
 			} else {
 				sb.cursor = 0
 			}
 		case "pgup":
+			if len(sb.items) == 0 {
+				break
+			}
 			sb.cursor = max(0, sb.cursor-sb.MaxVisibleItems())
 		case "pgdown":
+			if len(sb.items) == 0 {
+				break
+			}
 			sb.cursor = min(len(sb.items)-1, sb.cursor+sb.MaxVisibleItems())
 		}
 		sb.updateScroll()
@@ -203,8 +221,11 @@ func (sb SessionBrowser) View() string {
 	w := max(12, sb.width)
 	rule := lipgloss.NewStyle().Foreground(sb.styles.T.BorderNormal).Render(strings.Repeat("─", w))
 	headerLeft := lipgloss.NewStyle().Foreground(sb.styles.T.Accent).Bold(true).Render("  󰆓  ") +
-		lipgloss.NewStyle().Foreground(sb.styles.T.Text).Bold(true).Render("SESSIONS")
+		lipgloss.NewStyle().Foreground(sb.styles.T.Text).Bold(true).Render("SESSION HISTORY")
 	count := fmt.Sprintf("%d of %d", min(sb.cursor+1, len(sb.items)), len(sb.items))
+	if len(sb.items) == 0 {
+		count = "0 of 0"
+	}
 	header := joinEnds(headerLeft, lipgloss.NewStyle().Foreground(sb.styles.T.Muted).Render(count)+"  ", w)
 
 	maxItems := sb.MaxVisibleItems()
@@ -215,7 +236,7 @@ func (sb SessionBrowser) View() string {
 		lines = append(lines, sb.renderDescription(i, w-2))
 	}
 	if len(lines) == 0 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(sb.styles.T.Muted).Italic(true).PaddingLeft(4).Width(w-2).Render("No sessions yet"))
+		lines = append(lines, lipgloss.NewStyle().Foreground(sb.styles.T.Muted).Italic(true).PaddingLeft(4).Width(w-2).Render("No sessions in this workspace"))
 	}
 	lines = sb.addScrollbar(lines, maxItems)
 
@@ -241,7 +262,11 @@ func (sb SessionBrowser) renderTitle(i int, selected bool, width int) string {
 	if selected {
 		titleStyle = titleStyle.Bold(true)
 	}
-	left := "  " + indicator + titleStyle.Render(sb.items[i].Title())
+	title := sb.items[i].Title()
+	if sb.items[i].sess != nil && sb.items[i].sess.ID == sb.currentID {
+		title += "  " + lipgloss.NewStyle().Foreground(sb.styles.T.Green).Bold(true).Render("󰄬 Current")
+	}
+	left := "  " + indicator + titleStyle.Render(title)
 	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(left)
 }
 

@@ -193,6 +193,7 @@ func (a *App) showSessions() {
 	} else {
 		a.sessionBrowser.SetSessions([]*session.Session{a.sess})
 	}
+	a.sessionBrowser.SetCurrent(a.sess.ID)
 	a.sessionBrowser.Show()
 	// The key event that triggered this command must not also be delivered to
 	// the freshly shown browser (it would be interpreted as "select" and the
@@ -221,24 +222,5 @@ func (a *App) resumeSession(id string) error {
 		}
 		s = loaded
 	}
-	a.sess = s
-	if a.sess.WorkDir == "" {
-		a.sess.WorkDir = a.workDir
-	}
-	a.ag.SetSession(s)
-	if a.persist != nil {
-		a.persist.SetSession(s)
-	}
-	a.conversation.Clear()
-	for _, m := range s.Messages {
-		a.conversation.AddMessage(string(m.Role), m.TextContent(), false)
-	}
-	a.stats.InputTokens, a.stats.OutputTokens = s.TotalInputTokens, s.TotalOutputTokens
-	a.header.SetTokens(s.TotalInputTokens + s.TotalOutputTokens)
-	if s.Provider != "" {
-		_ = a.switchProvider(s.Provider, s.Model)
-	}
-	a.statusBar.SetStatus("Session resumed: " + s.ID)
-	a.layout()
-	return nil
+	return a.restoreSession(s)
 }

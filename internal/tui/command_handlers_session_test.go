@@ -75,6 +75,35 @@ func TestResumeSessionByID(t *testing.T) {
 	}
 }
 
+func TestResumeSessionByIDRestoresStructuredConversation(t *testing.T) {
+	app := newTestApp(t)
+	storage, err := session.NewStorage(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := session.New()
+	saved.Provider, saved.Model = app.cfg.Provider, app.cfg.Model
+	saved.AddMessage(ai.NewTextMessage(ai.RoleUser, "inspect main.go"))
+	saved.AddMessage(ai.Message{Role: ai.RoleAssistant, Content: []ai.ContentPart{
+		{Type: ai.ContentTypeThought, Thought: "checking the file"},
+		{Type: ai.ContentTypeToolCall, ToolCall: &ai.ToolCall{ID: "call-1", Name: "read_file", Args: map[string]any{"path": "main.go"}}},
+	}})
+	saved.AddMessage(ai.Message{Role: ai.RoleTool, Content: []ai.ContentPart{
+		{Type: ai.ContentTypeToolResult, ToolResult: &ai.ToolResult{ToolCallID: "call-1", Content: "package main"}},
+	}})
+	if err := storage.Save(saved); err != nil {
+		t.Fatal(err)
+	}
+	app.storage = storage
+	app.handleSlashCommand("/resume " + saved.ID)
+	view := ansiStrip(app.conversation.View())
+	for _, want := range []string{"inspect main.go", "checking the file", "Readfile", "Completed"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("direct resume missing %q:\n%s", want, view)
+		}
+	}
+}
+
 func TestNewSessionSavesCurrentHistory(t *testing.T) {
 	app := newTestApp(t)
 	storage, err := session.NewStorage(t.TempDir())
@@ -146,6 +175,12 @@ func TestShowSessionsPickerShowsProjectSessions(t *testing.T) {
 	}
 	if app.sessionBrowser.ItemCount() != 1 {
 		t.Fatalf("expected 1 project session in picker, got %d", app.sessionBrowser.ItemCount())
+	}
+
+	app.sessionBrowser.Hide()
+	app.handleSlashCommand("/session")
+	if !app.sessionBrowser.Visible() {
+		t.Fatal("expected /session alias to open the session picker")
 	}
 
 	app.sessionBrowser.Hide()

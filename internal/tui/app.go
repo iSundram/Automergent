@@ -146,10 +146,19 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	app.header.SetProvider(cfg.Provider)
 	app.header.SetMode(cfg.Mode)
 	app.header.SetPhase(string(agent.DetectPhase(sess.Messages)))
+	app.header.SetTokens(sess.TotalInputTokens + sess.TotalOutputTokens)
+	app.stats.InputTokens = sess.TotalInputTokens
+	app.stats.OutputTokens = sess.TotalOutputTokens
 	if wd, err := os.Getwd(); err == nil {
 		app.workDir = wd
 	}
-	if len(sess.Messages) == 0 && initialPrompt == "" {
+	if len(sess.Messages) > 0 {
+		// Direct CLI resume (`automergent -s <id>`) loads the session before
+		// the TUI starts, so replay it here just as picker-based resume does.
+		for _, message := range sess.Messages {
+			app.replayMessage(message)
+		}
+	} else if initialPrompt == "" {
 		app.conversation.SetWelcomeState()
 	}
 	// Initialize active token estimate
@@ -362,37 +371,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.fileTree.SetItems(m.Items)
 	case components.SessionSelectedMsg:
 		if m.Session != nil {
-			a.sess = m.Session
-			if a.sess.WorkDir == "" {
-				a.sess.WorkDir = a.workDir
+			if err := a.restoreSession(m.Session); err != nil {
+				a.statusBar.SetStatus("Session loaded (provider switch failed: " + err.Error() + ")")
 			}
-			a.ag.SetSession(m.Session)
-			if a.persist != nil {
-				a.persist.SetSession(m.Session)
-			}
-			a.conversation.Clear()
-			for _, sm := range m.Session.Messages {
-				a.replayMessage(sm)
-			}
-			a.stats.InputTokens = m.Session.TotalInputTokens
-			a.stats.OutputTokens = m.Session.TotalOutputTokens
-			a.header.SetTokens(m.Session.TotalInputTokens + m.Session.TotalOutputTokens)
-			a.updateActiveTokens()
-			if calc := a.ag.AdaptiveCalculator(); calc != nil {
-				a.header.SetAdaptiveWeight(calc.Weight())
-			}
-			// Restore provider/model from session
-			if m.Session.Provider != "" {
-				model := m.Session.Model
-				if err := a.switchProvider(m.Session.Provider, model); err != nil {
-					a.statusBar.SetStatus(fmt.Sprintf("Session loaded (provider switch failed: %v)", err))
-				} else {
-					a.statusBar.SetStatus("Session loaded")
-				}
-			} else {
-				a.statusBar.SetStatus("Session loaded")
-			}
-			a.layout()
 		}
 	case modelsFetchedMsg:
 		a.availableModels = m
@@ -400,6 +381,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.updatePalette()
 	case sessionsLoadedMsg:
 		a.sessionBrowser.SetSessions(m.sessions)
+		a.sessionBrowser.SetCurrent(a.sess.ID)
 		a.sessionBrowser.Show()
 		a.layout()
 		return a, nil
@@ -574,6 +556,7 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		} else {
 			a.sessionBrowser.SetSessions([]*session.Session{a.sess})
 		}
+		a.sessionBrowser.SetCurrent(a.sess.ID)
 		a.sessionBrowser.Show()
 		a.swallowNextKey = true
 		a.layout()
@@ -800,6 +783,42 @@ func (a *App) fuzzyFilter(items []components.PaletteItem, filter string) []compo
 	return filtered
 }
 
+// restoreSession switches the active runtime and rebuilds the conversation
+// view from the structured message history.
+func (a *App) restoreSession(s *session.Session) error {
+	if s == nil {
+		return fmt.Errorf("session is nil")
+	}
+	a.sess = s
+	if a.sess.WorkDir == "" {
+		a.sess.WorkDir = a.workDir
+	}
+	a.ag.SetSession(s)
+	if a.persist != nil {
+		a.persist.SetSession(s)
+	}
+	a.conversation.Clear()
+	for _, sm := range s.Messages {
+		a.replayMessage(sm)
+	}
+	a.stats.InputTokens = s.TotalInputTokens
+	a.stats.OutputTokens = s.TotalOutputTokens
+	a.header.SetTokens(s.TotalInputTokens + s.TotalOutputTokens)
+	a.updateActiveTokens()
+	if calc := a.ag.AdaptiveCalculator(); calc != nil {
+		a.header.SetAdaptiveWeight(calc.Weight())
+	}
+	var providerErr error
+	if s.Provider != "" {
+		if err := a.switchProvider(s.Provider, s.Model); err != nil {
+			providerErr = err
+		}
+	}
+	a.statusBar.SetStatus("Session resumed: " + s.ID)
+	a.layout()
+	return providerErr
+}
+
 // replayMessage rebuilds the conversation view for one stored message so a
 // resumed session looks exactly like it did while running (thoughts, tool
 // calls, results and text are all restored, not just plain text).
@@ -816,34 +835,39 @@ func (a *App) replayMessage(sm ai.Message) {
 			}
 		}
 	case ai.RoleUser, ai.RoleSystem:
-		a.conversation.AddMessage(string(sm.Role), sm.TextContent(), false)
-	case ai.RoleAssistant:
-		thought := ""
-		for _, p := range sm.Content {
-			if p.Type == ai.ContentTypeThought {
-				thought = p.Thought
-				break
-			}
-		}
-		if thought != "" {
-			// Keep the same message layout as the live stream: an assistant
-			// message holding the thought, tool call boxes, then the text.
-			a.conversation.AddMessageFull(string(sm.Role), "", thought, false)
-			for _, p := range sm.Content {
-				if p.Type == ai.ContentTypeToolCall && p.ToolCall != nil {
-					argText := ""
-					if len(p.ToolCall.Args) > 0 {
-						if b, err := json.Marshal(p.ToolCall.Args); err == nil {
-							argText = string(b)
-						}
-					}
-					ctx := extractToolContext(p.ToolCall.Name, p.ToolCall.Args)
-					a.conversation.AddToolLifecycleStart(p.ToolCall.ID, p.ToolCall.Name, argText, ctx)
-				}
-			}
+		// System messages are model/context plumbing (compaction summaries,
+		// staged instructions), not user-facing conversation. They must not
+		// leak into the transcript when a session is resumed.
+		if sm.Role == ai.RoleSystem {
+			return
 		}
 		if text := sm.TextContent(); text != "" {
 			a.conversation.AddMessage(string(sm.Role), text, false)
+		}
+	case ai.RoleAssistant:
+		var thought, text string
+		for _, p := range sm.Content {
+			switch p.Type {
+			case ai.ContentTypeThought:
+				thought += p.Thought
+			case ai.ContentTypeText:
+				text += p.Text
+			}
+		}
+		if thought != "" || text != "" {
+			a.conversation.AddMessageFull(string(sm.Role), text, thought, false)
+		}
+		for _, p := range sm.Content {
+			if p.Type != ai.ContentTypeToolCall || p.ToolCall == nil {
+				continue
+			}
+			argText := ""
+			if len(p.ToolCall.Args) > 0 {
+				if b, err := json.Marshal(p.ToolCall.Args); err == nil {
+					argText = string(b)
+				}
+			}
+			a.conversation.AddToolLifecycleStart(p.ToolCall.ID, p.ToolCall.Name, argText, extractToolContext(p.ToolCall.Name, p.ToolCall.Args))
 		}
 	}
 }

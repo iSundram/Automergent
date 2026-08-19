@@ -361,7 +361,14 @@ func run(cmd *cobra.Command, args []string) error {
 	// Build agent
 	ag := agent.New(cfg, provider, sess, reg)
 	ag.SetSessionPersist(func() {
-		_ = storage.Save(sess)
+		// The TUI can switch sessions after startup. Persist the agent's
+		// current session rather than the pointer captured during launch.
+		current := ag.Session()
+		if current == nil {
+			return
+		}
+		_ = storage.Save(current)
+		pm.SetSession(current)
 		_ = pm.SaveRecoveryPoint()
 	})
 
@@ -444,14 +451,19 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Save session on exit; only save config if explicitly modified via flags
 	defer func() {
-		_ = storage.Save(sess)
+		current := ag.Session()
+		if current == nil {
+			current = sess
+		}
+		_ = storage.Save(current)
+		pm.SetSession(current)
 		_ = pm.Save()
 		pm.StopAutoSave()
 		if shouldSaveConfig {
 			_ = cfg.SaveIfLoaded()
 		}
 		if !flags.Quiet && (format == outputFormatText) {
-			printComprehensiveExitMessage(sess)
+			printComprehensiveExitMessage(current)
 		}
 	}()
 

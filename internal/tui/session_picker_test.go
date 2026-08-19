@@ -189,6 +189,7 @@ func TestResumeRestoresFullConversation(t *testing.T) {
 	s.Title = "Rich session"
 	s.WorkDir = "/root/OweCode"
 	s.AddMessage(ai.NewTextMessage(ai.RoleUser, "hello agent"))
+	s.AddMessage(ai.NewTextMessage(ai.RoleSystem, "hidden model-only instruction"))
 	assistant := ai.Message{Role: ai.RoleAssistant, Content: []ai.ContentPart{
 		{Type: ai.ContentTypeThought, Thought: "let me think about this"},
 		{Type: ai.ContentTypeText, Text: "I will check the file"},
@@ -249,6 +250,9 @@ func TestResumeRestoresFullConversation(t *testing.T) {
 	// mode is on, exactly as it was while running.
 	if strings.Contains(conv, "package main") {
 		t.Fatalf("lightweight tool output should stay hidden, got:\n%s", conv)
+	}
+	if strings.Contains(conv, "hidden model-only instruction") {
+		t.Fatalf("model-only system messages must not appear after resume:\n%s", conv)
 	}
 	t.Logf("CONV:\n%s", conv)
 }

@@ -3,6 +3,8 @@ package session
 import (
 	"testing"
 	"time"
+
+	"github.com/iSundram/Automergent/internal/ai"
 )
 
 func TestPersistenceManager_SaveLoad(t *testing.T) {
@@ -171,5 +173,38 @@ func TestPersistenceManager_ResumeSession(t *testing.T) {
 	}
 	if resumed.Title != "Resume Test" {
 		t.Errorf("Title = %q, want %q", resumed.Title, "Resume Test")
+	}
+}
+
+func TestResumeSessionPrefersRicherCleanHistoryOverStaleRecovery(t *testing.T) {
+	dir := t.TempDir()
+	storage, err := NewStorage(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clean := New()
+	clean.AddMessage(ai.NewTextMessage(ai.RoleUser, "one"))
+	clean.AddMessage(ai.NewTextMessage(ai.RoleAssistant, "two"))
+	clean.AddMessage(ai.NewTextMessage(ai.RoleUser, "three"))
+	if err := storage.Save(clean); err != nil {
+		t.Fatal(err)
+	}
+	recovery := New()
+	recovery.ID = clean.ID
+	recovery.AddMessage(ai.NewTextMessage(ai.RoleUser, "one"))
+	pm, err := NewPersistenceManager(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pm.SetSession(recovery)
+	if err := pm.SaveRecoveryPoint(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := pm.ResumeSession(clean.ID, storage)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Messages) != len(clean.Messages) {
+		t.Fatalf("resume returned stale recovery history: got %d messages, want %d", len(got.Messages), len(clean.Messages))
 	}
 }
