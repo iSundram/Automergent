@@ -24,8 +24,10 @@ import (
 	googleProvider "github.com/iSundram/Automergent/internal/ai/google"
 	"github.com/iSundram/Automergent/internal/cache"
 	"github.com/iSundram/Automergent/internal/config"
+	"github.com/iSundram/Automergent/internal/debug"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
+	"github.com/iSundram/Automergent/internal/tui/command"
 	"github.com/iSundram/Automergent/internal/tui/components"
 	"github.com/iSundram/Automergent/internal/tui/keys"
 	"github.com/iSundram/Automergent/internal/tui/themes"
@@ -1187,22 +1189,10 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 	if definition, ok := lookupSlashCommand(strings.TrimPrefix(cmd, "/")); ok {
 		cmd = "/" + definition.Name
 	}
-	if handled, command := a.handleWorkflowConfigCommand(cmd, args); handled {
-		return command
-	}
+
+	// Session-owned commands handled inline (not in command package)
+	// These are: /new, /sessions, /session, /resume, /clear, /reset, /compact, /approvals
 	switch cmd {
-	case "/help":
-		a.showHelp = true
-	case "/clear":
-		a.conversation.Clear()
-		a.statusBar.SetStatus("Conversation cleared")
-	case "/reset":
-		a.conversation.Clear()
-		a.sess.SetMessages(nil)
-		a.statusBar.SetStatus("History reset")
-	case "/compact":
-		a.statusBar.SetStatus("Compacting context...")
-		return a.compactContext()
 	case "/new":
 		if a.storage != nil && a.sess != nil && len(a.sess.Messages) > 0 {
 			_ = a.storage.Save(a.sess)
@@ -1218,158 +1208,12 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		a.updateActiveTokens()
 		a.stats.TotalCost = 0
 		a.statusBar.SetStatus("New session started")
-	case "/context":
-		if len(args) > 0 && args[0] == "detail" {
-			a.showContextDetail()
-		} else {
-			a.stats.InputTokens = a.sess.TotalInputTokens
-			a.stats.OutputTokens = a.sess.TotalOutputTokens
-			if tel := a.ag.Telemetry(); tel != nil {
-				a.stats.TotalCost = tel.GetCostSummary().TotalCostUSD
-			}
-			a.conversation.AddMessage("system", fmt.Sprintf("Provider: %s\nModel: %s\nInput tokens: %d\nOutput tokens: %d\nTotal cost: $%.4f\n\nUse '/context detail' for telemetry breakdown.", a.cfg.Provider, a.cfg.Model, a.sess.TotalInputTokens, a.sess.TotalOutputTokens, a.stats.TotalCost), false)
-		}
-	case "/provider":
-		if len(args) == 0 {
-			a.conversation.AddMessage("system", fmt.Sprintf("Current provider: %s (model: %s)", a.cfg.Provider, a.cfg.Model), false)
-			return nil
-		}
-		model := ""
-		if len(args) > 1 {
-			model = args[1]
-		}
-		if err := a.switchProvider(args[0], model); err != nil {
-			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
-			a.statusBar.SetStatus("Error")
-			return nil
-		}
-		a.conversation.AddMessage("system", fmt.Sprintf("Provider switched to %s", args[0]), false)
-		// Warn if API key is missing for the new provider
-		if pc, ok := a.cfg.Providers[args[0]]; !ok || pc.APIKey == "" {
-			a.conversation.AddMessage("system", fmt.Sprintf("Warning: No API key set for %s. Use /api-key <key> or set the appropriate environment variable.", args[0]), false)
-			a.statusBar.SetStatus("Provider updated (no API key)")
-		} else {
-			a.statusBar.SetStatus("Provider updated")
-		}
-		_ = a.persistProjectConfig()
-	case "/model":
-		if len(args) == 0 {
-			a.conversation.AddMessage("system", fmt.Sprintf("Current model: %s (provider: %s)\nUsage: /model <model-name>", a.cfg.Model, a.cfg.Provider), false)
-			return nil
-		}
-		if err := a.switchProvider(a.cfg.Provider, args[0]); err != nil {
-			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
-			a.statusBar.SetStatus("Error")
-			return nil
-		}
-		a.conversation.AddMessage("system", fmt.Sprintf("Model switched to %s", args[0]), false)
-		a.statusBar.SetStatus("Model updated")
-		_ = a.persistProjectConfig()
-	case "/mode":
-		if len(args) > 0 && agent.IsValid(args[0]) {
-			a.cfg.Mode = args[0]
-			a.header.SetMode(args[0])
-			a.conversation.AddMessage("system", fmt.Sprintf("Mode switched to %s", args[0]), false)
-			_ = a.persistProjectConfig()
-		} else {
-			a.conversation.AddMessage("assistant", "Error: usage /mode <edit|plan>", true)
-		}
-	case "/api-key":
-		if len(args) == 0 {
-			a.conversation.AddMessage("assistant", "Error: usage /api-key <value>", true)
-			return nil
-		}
-		a.ensureProviderConfig(a.cfg.Provider)
-		pc := a.cfg.Providers[a.cfg.Provider]
-		pc.APIKey = strings.Join(args, " ")
-		a.cfg.Providers[a.cfg.Provider] = pc
-		if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
-			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
-			return nil
-		}
-		a.conversation.AddMessage("system", fmt.Sprintf("API key updated for %s", a.cfg.Provider), false)
-		a.statusBar.SetStatus("API key updated")
-		_ = a.persistProjectConfig()
-	case "/base-url":
-		if len(args) == 0 {
-			a.conversation.AddMessage("assistant", "Error: usage /base-url <url>", true)
-			return nil
-		}
-		a.ensureProviderConfig(a.cfg.Provider)
-		pc := a.cfg.Providers[a.cfg.Provider]
-		pc.BaseURL = args[0]
-		a.cfg.Providers[a.cfg.Provider] = pc
-		if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
-			a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
-			return nil
-		}
-		a.conversation.AddMessage("system", fmt.Sprintf("Base URL updated for %s", a.cfg.Provider), false)
-		a.statusBar.SetStatus("Base URL updated")
-		_ = a.persistProjectConfig()
-	case "/effort":
-		a.ensureProviderConfig(a.cfg.Provider)
-		pc := a.cfg.Providers[a.cfg.Provider]
-		if len(args) == 0 {
-			current := pc.Effort
-			if current == "" {
-				current = "high (default)"
-			}
-			a.conversation.AddMessage("system", fmt.Sprintf("Current effort for %s: %s\nUsage: /effort <minimal|low|medium|high>", a.cfg.Provider, current), false)
-			return nil
-		}
-		effort := strings.ToLower(args[0])
-		switch effort {
-		case "minimal", "low", "medium", "high":
-			pc.Effort = effort
-			a.cfg.Providers[a.cfg.Provider] = pc
-			if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
-				a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
-				return nil
-			}
-			a.conversation.AddMessage("system", fmt.Sprintf("Effort for %s set to %s", a.cfg.Provider, effort), false)
-			a.statusBar.SetStatus("Effort updated")
-			_ = a.persistProjectConfig()
-		default:
-			a.conversation.AddMessage("assistant", "Error: usage /effort <minimal|low|medium|high>", true)
-		}
-	case "/provider-api-key":
-		if len(args) < 2 {
-			a.conversation.AddMessage("assistant", "Error: usage /provider-api-key <provider> <value>", true)
-			return nil
-		}
-		provider := args[0]
-		a.ensureProviderConfig(provider)
-		pc := a.cfg.Providers[provider]
-		pc.APIKey = strings.Join(args[1:], " ")
-		a.cfg.Providers[provider] = pc
-		if provider == a.cfg.Provider {
-			if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
-				a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
-				return nil
-			}
-		}
-		a.conversation.AddMessage("system", fmt.Sprintf("API key updated for %s", provider), false)
-		_ = a.persistProjectConfig()
-	case "/provider-base-url":
-		if len(args) < 2 {
-			a.conversation.AddMessage("assistant", "Error: usage /provider-base-url <provider> <url>", true)
-			return nil
-		}
-		provider := args[0]
-		a.ensureProviderConfig(provider)
-		pc := a.cfg.Providers[provider]
-		pc.BaseURL = args[1]
-		a.cfg.Providers[provider] = pc
-		if provider == a.cfg.Provider {
-			if err := a.switchProvider(a.cfg.Provider, a.cfg.Model); err != nil {
-				a.conversation.AddMessage("assistant", fmt.Sprintf("Error: %v", err), true)
-				return nil
-			}
-		}
-		a.conversation.AddMessage("system", fmt.Sprintf("Base URL updated for %s", provider), false)
-		_ = a.persistProjectConfig()
-	case "/sessions":
+		return nil
+
+	case "/sessions", "/session":
 		a.showSessions()
+		return nil
+
 	case "/resume":
 		if len(args) > 0 {
 			if err := a.resumeSession(args[0]); err != nil {
@@ -1378,70 +1222,44 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 		} else {
 			a.showSessions()
 		}
-	case "/diff":
-		a.diffPane.Toggle()
-		a.layout()
-	case "/tree":
-		a.showFileTree = !a.showFileTree
-		a.layout()
-	case "/lsp":
-		a.lspPanel.Toggle()
-		a.layout()
-	case "/review":
-		a.conversation.SetReviewMode(!a.conversation.ReviewMode())
-		a.statusBar.SetStatus(fmt.Sprintf("Review mode %s", map[bool]string{true: "enabled", false: "disabled"}[a.conversation.ReviewMode()]))
-	case "/cancel":
-		if a.thinking {
-			a.cancelActiveRun("Cancelled by user")
-		} else {
-			a.statusBar.SetStatus("No active request")
-		}
-	case "/search":
-		if len(args) == 0 {
-			a.conversation.AddMessage("assistant", "Usage: /search <query>", true)
-			return nil
-		}
-		a.conversation.AddMessage("system", a.searchWorkspace(strings.Join(args, " ")), false)
-	case "/run":
-		if len(args) == 0 {
-			a.conversation.AddMessage("assistant", "Usage: /run <command>", true)
-			return nil
-		}
-		return a.startAgent("Run this project command: " + strings.Join(args, " "))
-	case "/test":
-		request := "Run the project tests"
-		if len(args) > 0 {
-			request += " for " + strings.Join(args, " ")
-		}
-		return a.startAgent(request)
-	case "/build":
-		request := "Build the project"
-		if len(args) > 0 {
-			request += " with target " + strings.Join(args, " ")
-		}
-		return a.startAgent(request)
-	case "/export":
-		path := "conversation.md"
-		if len(args) > 0 {
-			path = args[0]
-		}
-		if err := a.exportConversation(path); err != nil {
-			a.conversation.AddMessage("assistant", fmt.Sprintf("Export failed: %v", err), true)
-			return nil
-		}
-		a.statusBar.SetStatus("Conversation exported to " + path)
-	case "/stats":
-		a.stats.InputTokens = a.sess.TotalInputTokens
-		a.stats.OutputTokens = a.sess.TotalOutputTokens
-		a.conversation.AddMessage("system", a.stats.View(), false)
+		return nil
+
+	case "/clear":
+		a.conversation.Clear()
+		a.statusBar.SetStatus("Conversation cleared")
+		return nil
+
+	case "/reset":
+		a.conversation.Clear()
+		a.sess.SetMessages(nil)
+		a.statusBar.SetStatus("History reset")
+		return nil
+
+	case "/compact":
+		a.statusBar.SetStatus("Compacting context...")
+		return a.compactContext()
+
 	case "/approvals":
 		a.handleApprovalsCommand(args)
-	case "/quit", "/exit":
-		return tea.Quit
-	default:
-		a.conversation.AddMessage("assistant", fmt.Sprintf("Unknown command: %s", cmd), true)
+		return nil
 	}
-	return nil
+
+	// Delegate all other commands to the command package
+	host := &commandHost{app: a}
+	cmdName := strings.TrimPrefix(cmd, "/")
+	dispatched, err := command.Default().Dispatch(host, cmdName, args)
+	if err != nil {
+		switch err.(type) {
+		case command.ErrUnknownCommand:
+			a.conversation.AddMessage("assistant", fmt.Sprintf("Unknown command: %s", cmd), true)
+		case command.ErrSessionOwned:
+			// Should not happen - handled above
+		default:
+			a.commandError(err.Error())
+		}
+		return nil
+	}
+	return dispatched
 }
 
 func (a *App) layout() {
@@ -2178,8 +1996,24 @@ func buildProviderFromConfig(cfg *config.Config) (ai.Provider, error) {
 	}
 
 	if shouldWrapPromptCacheProvider(cfg, provider) {
-		return cache.NewCachingProvider(provider, cache.NewPromptCache()), nil
+		provider = cache.NewCachingProvider(provider, cache.NewPromptCache())
 	}
+
+	// Wrap with debug provider if debug mode is enabled
+	fmt.Fprintf(os.Stderr, "[DEBUG] buildProviderFromConfig: Debug.Enabled=%v, Debug.Directory=%s, Debug.SaveRequests=%v, Debug.SaveResponses=%v\n", cfg.Debug.Enabled, cfg.Debug.Directory, cfg.Debug.SaveRequests, cfg.Debug.SaveResponses)
+	if cfg.Debug.Enabled {
+		sessionID := debug.NewSessionID()
+		fmt.Fprintf(os.Stderr, "[DEBUG] Creating debug logger with sessionID=%s\n", sessionID)
+		logger, err := debug.NewLogger(cfg.Debug, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create debug logger: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "[DEBUG] Logger created: %v\n", logger != nil)
+		if logger != nil {
+			provider = debug.NewDebugProvider(provider, logger)
+		}
+	}
+
 	return provider, nil
 }
 

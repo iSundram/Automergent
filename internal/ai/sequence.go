@@ -5,6 +5,75 @@ import (
 	"slices"
 )
 
+// RepairMissingToolResults inserts explicit error results for dangling tool
+// calls. This repairs sessions interrupted before the tool-result message was
+// persisted, allowing strict providers such as Google to accept the next turn.
+func RepairMissingToolResults(messages []Message) []Message {
+	if len(messages) == 0 {
+		return messages
+	}
+
+	out := make([]Message, 0, len(messages))
+	pending := make(map[string]ToolCall)
+	flush := func() {
+		if len(pending) == 0 {
+			return
+		}
+		ids := make([]string, 0, len(pending))
+		for id := range pending {
+			ids = append(ids, id)
+		}
+		slices.Sort(ids)
+		parts := make([]ContentPart, 0, len(ids))
+		for _, id := range ids {
+			call := pending[id]
+			parts = append(parts, ContentPart{
+				Type: ContentTypeToolResult,
+				ToolResult: &ToolResult{
+					ToolCallID: id,
+					Content:    fmt.Sprintf("[synthetic] tool %q was interrupted before producing a result", call.Name),
+					IsError:    true,
+				},
+			})
+		}
+		out = append(out, Message{Role: RoleTool, Content: parts})
+		pending = make(map[string]ToolCall)
+	}
+
+	for _, message := range messages {
+		switch message.Role {
+		case RoleAssistant:
+			flush()
+			out = append(out, message)
+			for _, call := range message.ToolCallParts() {
+				pending[call.ID] = call
+			}
+		case RoleTool:
+			out = append(out, message)
+			for _, part := range message.Content {
+				if part.Type == ContentTypeToolResult && part.ToolResult != nil {
+					delete(pending, part.ToolResult.ToolCallID)
+				}
+			}
+		case RoleUser:
+			if len(pending) > 0 {
+				for _, part := range message.Content {
+					if part.Type == ContentTypeToolResult && part.ToolResult != nil {
+						delete(pending, part.ToolResult.ToolCallID)
+					}
+				}
+				flush()
+			}
+			out = append(out, message)
+		default:
+			flush()
+			out = append(out, message)
+		}
+	}
+	flush()
+	return out
+}
+
 // ValidateMessageSequence validates message ordering and tool-call linkage.
 func ValidateMessageSequence(messages []Message) error {
 	pendingToolCalls := map[string]struct{}{}

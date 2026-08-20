@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"iter"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -449,7 +448,6 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		resp, retryResult := automergentErrors.RetryWithValue(ctx, policy, func() (*genai.GenerateContentResponse, error) {
 			resp, err := c.client.Models.GenerateContent(ctx, c.model, contents, config)
 			if err != nil {
-				log.Printf("google: attempt error: %v", err)
 				return nil, c.mapError(err)
 			}
 			return resp, nil
@@ -473,7 +471,6 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 		resp, err, ok := pull()
 		if err != nil {
 			stop()
-			log.Printf("google: stream attempt error: %v", err)
 			return firstStreamResult{}, c.mapError(err)
 		}
 		if !ok {

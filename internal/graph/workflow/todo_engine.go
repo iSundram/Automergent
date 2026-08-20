@@ -61,6 +61,13 @@ func (e *TodoWorkflowEngine) CreateWorkflow(ctx context.Context, taskID uuid.UUI
 	if err := e.store.CreateEdge(ctx, edge); err != nil {
 		return nil, fmt.Errorf("link workflow to bucket: %w", err)
 	}
+	parentEdge, err := NewEdge(taskID, workflow.ID, EdgeTypeParentOf, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create task workflow edge: %w", err)
+	}
+	if err := e.store.CreateEdge(ctx, parentEdge); err != nil {
+		return nil, fmt.Errorf("link task to workflow: %w", err)
+	}
 
 	return workflow, nil
 }
@@ -238,6 +245,28 @@ func (e *TodoWorkflowEngine) MarkTodoStatus(ctx context.Context, todoID uuid.UUI
 		return e.advanceWorkflowUnsafe(ctx, todo.WorkflowID)
 	}
 
+	return nil
+}
+
+func (e *TodoWorkflowEngine) AssignTodo(ctx context.Context, todoID uuid.UUID, assignee string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	todo, err := e.getTodoUnsafe(ctx, todoID)
+	if err != nil {
+		return err
+	}
+	todo.Assignee = assignee
+	todo.UpdatedAt = time.Now()
+	node, err := todo.toNode()
+	if err != nil {
+		return err
+	}
+	if err := e.store.UpdateNode(ctx, node); err != nil {
+		return err
+	}
+	if todo.BucketID != uuid.Nil {
+		return e.bucketManager.SetBucketOwner(ctx, todo.BucketID, assignee)
+	}
 	return nil
 }
 
@@ -476,17 +505,17 @@ func (e *TodoWorkflowEngine) GetWorkflowSummary(ctx context.Context, workflowID 
 	}
 
 	return &WorkflowSummary{
-		WorkflowID:      workflow.ID,
-		TaskID:          workflow.TaskID,
-		Title:           workflow.Title,
-		Category:        workflow.Category,
-		Status:          workflow.Status,
-		TotalTodos:      len(todos),
-		CompletedTodos:  completed,
-		CurrentTodo:     current,
-		Progress:        progress,
-		CreatedAt:       workflow.CreatedAt,
-		UpdatedAt:       workflow.UpdatedAt,
+		WorkflowID:     workflow.ID,
+		TaskID:         workflow.TaskID,
+		Title:          workflow.Title,
+		Category:       workflow.Category,
+		Status:         workflow.Status,
+		TotalTodos:     len(todos),
+		CompletedTodos: completed,
+		CurrentTodo:    current,
+		Progress:       progress,
+		CreatedAt:      workflow.CreatedAt,
+		UpdatedAt:      workflow.UpdatedAt,
 	}, nil
 }
 
@@ -534,8 +563,12 @@ func (w *TodoWorkflow) toNode() (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	id := w.ID
+	if id == uuid.Nil {
+		id = uuid.New()
+	}
 	return &Node{
-		ID:        uuid.New(),
+		ID:        id,
 		Type:      NodeTypeTodo,
 		Data:      data,
 		CreatedAt: w.CreatedAt,
@@ -548,8 +581,12 @@ func (t *TodoItem) toNode() (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	id := t.ID
+	if id == uuid.Nil {
+		id = uuid.New()
+	}
 	return &Node{
-		ID:        uuid.New(),
+		ID:        id,
 		Type:      NodeTypeTodo,
 		Data:      data,
 		CreatedAt: t.CreatedAt,

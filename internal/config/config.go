@@ -65,6 +65,9 @@ type Config struct {
 	Telemetry         bool `mapstructure:"telemetry" yaml:"telemetry"`
 	NoUpdateCheck     bool `mapstructure:"noUpdateCheck" yaml:"noUpdateCheck"`
 
+	// Debug holds debug mode configuration for API request/response logging
+	Debug DebugConfig `mapstructure:"debug" yaml:"debug"`
+
 	ProviderFallback []FallbackProvider `mapstructure:"providerFallback" yaml:"providerFallback,omitempty"`
 
 	Notifications NotificationConfig `mapstructure:"notifications" yaml:"notifications"`
@@ -331,4 +334,25 @@ func (g GitConfig) CoAuthorTrailerValue() string {
 		return g.CoAuthorTrailer
 	}
 	return "Co-authored-by: Automergent <automergent-bot@users.noreply.github.com>"
+}
+
+// DebugConfig holds debug mode configuration for API request/response logging
+type DebugConfig struct {
+	Enabled       bool   `mapstructure:"enabled" yaml:"enabled"`
+	Directory     string `mapstructure:"directory" yaml:"directory"`
+	SaveRequests  bool   `mapstructure:"saveRequests" yaml:"saveRequests"`
+	SaveResponses bool   `mapstructure:"saveResponses" yaml:"saveResponses"`
+	MaxFileSize   int    `mapstructure:"maxFileSize" yaml:"maxFileSize"` // in MB, 0 = unlimited
+}
+
+// DefaultDebugConfig returns default debug configuration
+func DefaultDebugConfig() DebugConfig {
+	home, _ := os.UserHomeDir()
+	return DebugConfig{
+		Enabled:       true,
+		Directory:     filepath.Join(home, ".automergent", "debug"),
+		SaveRequests:  true,
+		SaveResponses: true,
+		MaxFileSize:   10, // 10MB default
+	}
 }

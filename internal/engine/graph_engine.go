@@ -29,15 +29,15 @@ type GraphEngine struct {
 	Manager *graph.GraphManager
 
 	// Analysis
-	FeatureAnalyzer     *analysis.FeatureAnalyzer
-	EntryPointDetector  *analysis.EntryPointDetector
-	WiringAnalyzer      *analysis.WiringAnalyzer
-	ImpactAnalyzer      *analysis.ImpactAnalyzer
+	FeatureAnalyzer    *analysis.FeatureAnalyzer
+	EntryPointDetector *analysis.EntryPointDetector
+	WiringAnalyzer     *analysis.WiringAnalyzer
+	ImpactAnalyzer     *analysis.ImpactAnalyzer
 
 	// Workflow
-	BucketManager   *workflow.ContextBucketManager
-	TodoEngine      *workflow.TodoWorkflowEngine
-	RememberTool    *workflow.RememberTool
+	BucketManager *workflow.ContextBucketManager
+	TodoEngine    *workflow.TodoWorkflowEngine
+	RememberTool  *workflow.RememberTool
 
 	// Decision & Memory
 	DecisionRecorder *memory.DecisionRecorder
@@ -45,14 +45,14 @@ type GraphEngine struct {
 	ReplayEngine     *memory.ReplayEngine
 
 	// Tools
-	ToolRegistry      *tools.ToolRegistry
-	BuildAnalyzer     *tools.BuildCommandAnalyzer
-	DynamicToolGen    *tools.DynamicToolGenerator
+	ToolRegistry   *tools.ToolRegistry
+	BuildAnalyzer  *tools.BuildCommandAnalyzer
+	DynamicToolGen *tools.DynamicToolGenerator
 
 	// Wiring
-	WiringEngine       *wiring.WiringEngine
-	EntryPointWiring   *wiring.EntryPointWiring
-	EventSystem        *wiring.EventSystem
+	WiringEngine        *wiring.WiringEngine
+	EntryPointWiring    *wiring.EntryPointWiring
+	EventSystem         *wiring.EventSystem
 	AppearanceValidator *wiring.AppearanceValidator
 
 	// Healing
@@ -68,7 +68,7 @@ type GraphEngine struct {
 	TaskRouter        *continuity.TaskRouter
 
 	logger *zap.Logger
-	
+
 	// Adapters
 	workflowStore *workflowStoreAdapter
 	toolsStore    *toolsStoreAdapter
@@ -348,7 +348,7 @@ func (a *healingStoreAdapter) UpdateNode(ctx context.Context, node interface{}) 
 		data, _ := json.Marshal(nodeMap["data"])
 		createdAt, _ := time.Parse(time.RFC3339, nodeMap["created_at"].(string))
 		updatedAt, _ := time.Parse(time.RFC3339, nodeMap["updated_at"].(string))
-		
+
 		gNode := &graph.Node{
 			ID:        id,
 			Type:      graph.NodeType(typeStr),
@@ -372,7 +372,17 @@ func (a *healingStoreAdapter) ListNodes(ctx context.Context, nodeType string, li
 	}
 	var nodes []interface{}
 	for _, gNode := range gNodes {
-		nodes = append(nodes, gNode)
+		var data interface{}
+		if err := json.Unmarshal(gNode.Data, &data); err != nil {
+			data = map[string]interface{}{}
+		}
+		nodes = append(nodes, map[string]interface{}{
+			"id":         gNode.ID.String(),
+			"type":       string(gNode.Type),
+			"data":       data,
+			"created_at": gNode.CreatedAt.Format(time.RFC3339Nano),
+			"updated_at": gNode.UpdatedAt.Format(time.RFC3339Nano),
+		})
 	}
 	return nodes, nil
 }
@@ -389,7 +399,7 @@ func (a *healingStoreAdapter) CreateNode(ctx context.Context, node interface{}) 
 		data, _ := json.Marshal(nodeMap["data"])
 		createdAt, _ := time.Parse(time.RFC3339, nodeMap["created_at"].(string))
 		updatedAt, _ := time.Parse(time.RFC3339, nodeMap["updated_at"].(string))
-		
+
 		gNode := &graph.Node{
 			ID:        id,
 			Type:      graph.NodeType(typeStr),
@@ -415,8 +425,8 @@ type GraphConfig struct {
 	SimilarityConfig analysis.SimilarityConfig
 
 	// Workflow
-	DefaultSharePolicy        workflow.SharePolicy
-	MemoryPromotionThreshold  float64
+	DefaultSharePolicy       workflow.SharePolicy
+	MemoryPromotionThreshold float64
 
 	// Decision & Memory
 	DecisionConfidenceThreshold float64
@@ -444,8 +454,6 @@ func DefaultGraphConfig() *GraphConfig {
 	cleanupConfig := healing.DefaultCleanupConfig()
 	continuityConfig := continuity.DefaultContinuityConfig()
 
-	logger, _ := zap.NewDevelopment()
-
 	return &GraphConfig{
 		DatabasePath:                ".automergent/graph.db",
 		SimilarityConfig:            simConfig,
@@ -458,7 +466,9 @@ func DefaultGraphConfig() *GraphConfig {
 		FixValidatorConfig:          &fixConfig,
 		CleanupConfig:               &cleanupConfig,
 		ContinuityConfig:            &continuityConfig,
-		Logger:                      logger,
+		// Graph diagnostics must flow through the agent event system. A stderr
+		// logger corrupts the terminal while Bubble Tea owns the screen.
+		Logger: zap.NewNop(),
 	}
 }
 
@@ -469,8 +479,7 @@ func NewGraphEngine(ctx context.Context, config *GraphConfig) (*GraphEngine, err
 	}
 
 	if config.Logger == nil {
-		logger, _ := zap.NewDevelopment()
-		config.Logger = logger
+		config.Logger = zap.NewNop()
 	}
 
 	// Initialize core graph manager
@@ -599,6 +608,7 @@ type ProcessResult struct {
 	TaskID            string
 	WorkflowID        string
 	RouteType         continuity.TaskRelation
+	Analysis          *analysis.RequestAnalysis
 	FeatureMatches    []analysis.FeatureMatch
 	EntryPoints       []analysis.EntryPoint
 	WiringPattern     *analysis.WiringPattern
@@ -608,48 +618,148 @@ type ProcessResult struct {
 	UsageExamples     []wiring.UsageExample
 }
 
+// AnalyzeUserRequest returns the graph's recommendation packet without
+// creating workflows, changing files, or wiring a feature. It is safe to call
+// during triage and is the boundary between graph analysis and execution.
+func (e *GraphEngine) AnalyzeUserRequest(ctx context.Context, userRequest string, previousMessages []string) (*analysis.RequestAnalysis, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	result := analysis.AnalyzeGraphContext(userRequest, previousMessages)
+	return &result, nil
+}
+
 // ProcessUserRequest orchestrates the full pipeline for processing a user request.
 func (e *GraphEngine) ProcessUserRequest(ctx context.Context, userRequest string) (*ProcessResult, error) {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
 	result := &ProcessResult{}
-
-	// Step 1: Route the task to determine if it's new, follow-up, or related
-	messages := []continuity.Message{
-		{ID: uuid.New(), Role: "user", Content: userRequest, Timestamp: time.Now()},
+	recentTasks, err := e.Manager.Store().ListNodes(ctx, graph.NodeTypeTask, 10, 0)
+	if err != nil {
+		return nil, fmt.Errorf("list recent tasks: %w", err)
 	}
-	boundaries := e.TaskRouter.DetectTaskBoundary(messages)
+	previousMessages := taskDescriptions(recentTasks)
+	requestAnalysis, err := e.AnalyzeUserRequest(ctx, userRequest, previousMessages)
+	if err != nil {
+		return nil, err
+	}
+	result.Analysis = requestAnalysis
 
-	var taskID *uuid.UUID
-	var relation continuity.TaskRelation
-
-	if len(boundaries) > 0 {
-		lastBoundary := boundaries[len(boundaries)-1]
-		if lastBoundary.NewTaskID != nil {
-			taskID = lastBoundary.NewTaskID
-			relation = continuity.TaskRelationNewTask
-		} else if lastBoundary.PreviousTaskID != nil {
-			taskID = lastBoundary.PreviousTaskID
-			relation = continuity.TaskRelationFollowUp
+	// Step 1: Route against graph-owned tasks. Follow-ups resume the newest
+	// task; related work gets its own task linked to the previous one; isolated
+	// work starts with no inherited context.
+	var previousTaskID uuid.UUID
+	if len(recentTasks) > 0 {
+		previousTaskID = recentTasks[0].ID
+	}
+	relation := continuityRelation(requestAnalysis.Relation)
+	taskID := uuid.New()
+	newTask := true
+	if relation == continuity.TaskRelationFollowUp && previousTaskID != uuid.Nil {
+		taskID = previousTaskID
+		newTask = false
+	} else {
+		task := &graph.Task{
+			ID:          taskID,
+			Title:       truncateText(userRequest, 120),
+			Description: userRequest,
+			Status:      "analyzed",
+			Priority:    1,
+			Tags:        []string{string(requestAnalysis.Relation)},
+			Metadata:    persistentRequestMetadata(requestAnalysis),
+		}
+		taskNode, createErr := e.Manager.CreateTask(ctx, task)
+		if createErr != nil {
+			return nil, fmt.Errorf("create task: %w", createErr)
+		}
+		taskID = taskNode.ID
+		if relation == continuity.TaskRelationRelated && previousTaskID != uuid.Nil {
+			_, _ = e.Manager.Link(ctx, taskID, previousTaskID, graph.EdgeTypeRelatesTo, map[string]string{"context_policy": string(requestAnalysis.Context[0].Mode)})
 		}
 	}
-
-	if taskID == nil {
-		newTaskID := uuid.New()
-		taskID = &newTaskID
-		relation = continuity.TaskRelationNewTask
+	if relation == continuity.TaskRelationFollowUp && taskID != uuid.Nil {
+		if node, getErr := e.Manager.Store().GetNode(ctx, taskID); getErr == nil {
+			var task graph.Task
+			if node.UnmarshalData(&task) == nil {
+				task.ID = taskID
+				task.Title = truncateText(userRequest, 120)
+				task.Description = userRequest
+				task.Status = "analyzed"
+				task.Tags = []string{string(requestAnalysis.Relation)}
+				task.Metadata = persistentRequestMetadata(requestAnalysis)
+				if updated, marshalErr := task.ToNode(); marshalErr == nil {
+					updated.ID = taskID
+					_ = e.Manager.Store().UpdateNode(ctx, updated)
+				}
+			}
+		}
 	}
 
 	result.TaskID = taskID.String()
 	result.RouteType = relation
-
-	// Step 2: Create or resume workflow
-	workflow, err := e.TodoEngine.CreateWorkflow(ctx, *taskID, "user_request", userRequest, userRequest)
-	if err != nil {
-		return nil, fmt.Errorf("create workflow: %w", err)
+	if newTask {
+		taskBucket, bucketErr := e.BucketManager.CreateBucket(ctx, taskID, workflow.ContextBucketTypeTask, "task", userRequest, "assistant", workflow.SharePolicyPartial)
+		if bucketErr != nil {
+			return nil, fmt.Errorf("create task context bucket: %w", bucketErr)
+		}
+		_ = e.BucketManager.UpdateBucketData(ctx, taskBucket.ID, "original_user_message", userRequest)
+		_ = e.BucketManager.UpdateBucketData(ctx, taskBucket.ID, "routing", map[string]any{
+			"relation": requestAnalysis.Relation,
+			"scope":    requestAnalysis.Scope,
+			"risk":     requestAnalysis.Risk,
+		})
+		assistantBucket, bucketErr := e.BucketManager.CreateBucket(ctx, taskID, workflow.ContextBucketTypeAgent, "assistant", "User-facing assistant context", "assistant", workflow.SharePolicySummary)
+		if bucketErr != nil {
+			return nil, fmt.Errorf("create assistant context bucket: %w", bucketErr)
+		}
+		_ = e.BucketManager.UpdateBucketData(ctx, assistantBucket.ID, "original_user_message", userRequest)
+		coderBucket, coderErr := e.BucketManager.ResumeCoderContext(ctx, taskID)
+		if coderErr != nil {
+			return nil, fmt.Errorf("create coder context bucket: %w", coderErr)
+		}
+		_ = e.BucketManager.UpdateBucketData(ctx, coderBucket.ID, "original_user_message", userRequest)
+		_ = e.BucketManager.UpdateBucketData(ctx, coderBucket.ID, "entry_points", requestAnalysis.EntryPointHints)
+		_ = e.BucketManager.UpdateBucketData(ctx, coderBucket.ID, "working_area", requestAnalysis.Scope)
 	}
-	result.WorkflowID = workflow.ID.String()
+
+	// Step 2: Create or resume workflow. Follow-ups must keep the same
+	// workflow identity so todo context and injected memories remain addressable.
+	var wf *workflow.TodoWorkflow
+	if relation == continuity.TaskRelationFollowUp {
+		workflows, listErr := e.TodoEngine.ListWorkflows(ctx, taskID)
+		if listErr == nil && len(workflows) > 0 {
+			wf = workflows[0]
+		}
+	}
+	if wf == nil {
+		wf, err = e.TodoEngine.CreateWorkflow(ctx, taskID, "", userRequest, userRequest)
+		if err != nil {
+			return nil, fmt.Errorf("create workflow: %w", err)
+		}
+		// Materialize the graph recommendation as persisted todos. The graph
+		// records the plan; the agent still decides when tools execute each todo.
+		ids := make(map[string]uuid.UUID, len(requestAnalysis.Todos))
+		for _, recommendation := range requestAnalysis.Todos {
+			deps := make([]uuid.UUID, 0, len(recommendation.Dependencies))
+			for _, dep := range recommendation.Dependencies {
+				if id, ok := ids[dep]; ok {
+					deps = append(deps, id)
+				}
+			}
+			item, addErr := e.TodoEngine.AddTodo(ctx, wf.ID, recommendation.Title, recommendation.Title, deps, workflow.SharePolicyPartial, recommendation.ContextKeys)
+			if addErr != nil {
+				return nil, fmt.Errorf("create recommended todo %s: %w", recommendation.ID, addErr)
+			}
+			ids[recommendation.ID] = item.ID
+		}
+	}
+	result.WorkflowID = wf.ID.String()
+
+	// Graph preparation never guesses or persists a feature category. Feature
+	// discovery and wiring are explicit later-stage operations selected by the
+	// model, so this recommendation-only phase ends here.
+	return result, nil
 
 	// Step 3: Find similar features based on text request
 	featureMatches, err := e.FindSimilarFeaturesByText(ctx, userRequest, 10)
@@ -676,7 +786,7 @@ func (e *GraphEngine) ProcessUserRequest(ctx context.Context, userRequest string
 		}
 	} else {
 		// Create a dummy feature node for pattern analysis
-		dummyFeature := &graph.Node{ID: *taskID, Type: graph.NodeTypeTask}
+		dummyFeature := &graph.Node{ID: taskID, Type: graph.NodeTypeTask}
 		wiringPattern, err = e.WiringAnalyzer.GetWiringPattern(ctx, dummyFeature.ID)
 		if err != nil {
 			e.logger.Warn("failed to get wiring pattern", zap.Error(err))
@@ -692,24 +802,17 @@ func (e *GraphEngine) ProcessUserRequest(ctx context.Context, userRequest string
 		result.ImpactScope = impactScope
 	}
 
-	// Step 7: Create feature appearance from request
-	featureAppearance := e.buildFeatureAppearance(*taskID, userRequest, result.FeatureMatches, result.EntryPoints, wiringPattern)
+	// Step 7: Create a proposed feature appearance. This is a graph artifact for
+	// review; applying it is an explicit operation through ApplyWiring.
+	featureAppearance := e.buildFeatureAppearance(taskID, userRequest, result.FeatureMatches, result.EntryPoints, wiringPattern)
 
-	// Step 8: Wire the feature
-	integrationResult, err := e.WiringEngine.WireFeature(ctx, featureAppearance, e.toSimilarFeaturesFromMatches(result.FeatureMatches))
-	if err != nil {
-		e.logger.Warn("failed to wire feature", zap.Error(err))
-	} else {
-		result.IntegrationResult = integrationResult
-	}
-
-	// Step 9: Validate appearance
+	// Step 8: Validate the proposal and generate examples. Neither operation
+	// modifies product files.
 	validationResult := e.AppearanceValidator.ValidateAppearance(ctx, featureAppearance)
 	if !validationResult.Valid {
 		e.logger.Warn("appearance validation failed", zap.Strings("errors", extractErrorMessages(validationResult.Errors)))
 	}
 
-	// Step 10: Generate usage examples
 	usageExamples, err := e.AppearanceValidator.GenerateUsageExamples(ctx, featureAppearance)
 	if err != nil {
 		e.logger.Warn("failed to generate usage examples", zap.Error(err))
@@ -720,6 +823,151 @@ func (e *GraphEngine) ProcessUserRequest(ctx context.Context, userRequest string
 	result.Appearance = featureAppearance
 
 	return result, nil
+}
+
+// RenderTaskGraph returns a compact, human-readable view of the latest task
+// graph. It is intentionally derived from persisted nodes so the TUI and debug
+// logs show the same state used by orchestration.
+func (e *GraphEngine) RenderTaskGraph(ctx context.Context) (string, error) {
+	nodes, err := e.Manager.Store().ListNodes(ctx, graph.NodeTypeTask, 1, 0)
+	if err != nil {
+		return "", err
+	}
+	if len(nodes) == 0 {
+		return "graph: no tasks", nil
+	}
+	var task graph.Task
+	if err := nodes[0].UnmarshalData(&task); err != nil {
+		return "", err
+	}
+	var request analysis.RequestAnalysis
+	if len(task.Metadata) > 0 {
+		_ = json.Unmarshal(task.Metadata, &request)
+	}
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "task %s\n", nodes[0].ID)
+	fmt.Fprintf(&sb, "relation: %s  context: %s\nrisk: %s  scope: %s\n", request.Relation, contextMode(request), request.Risk, request.Scope)
+	if len(request.EntryPointHints) > 0 {
+		fmt.Fprintf(&sb, "entry points: %s\n", strings.Join(request.EntryPointHints, ", "))
+	}
+	workflows, err := e.TodoEngine.ListWorkflows(ctx, nodes[0].ID)
+	if err == nil {
+		for _, wf := range workflows {
+			fmt.Fprintf(&sb, "workflow: %s (%s)\n", wf.Title, wf.Status)
+			todos, _ := e.Manager.Store().ListNodes(ctx, graph.NodeTypeTodo, 1000, 0)
+			for _, node := range todos {
+				var todo workflow.TodoItem
+				if json.Unmarshal(node.Data, &todo) == nil && todo.WorkflowID == wf.ID {
+					fmt.Fprintf(&sb, "  todo [%s] %s\n", todo.Status, todo.Title)
+				}
+			}
+		}
+	}
+	return sb.String(), nil
+}
+
+func contextMode(request analysis.RequestAnalysis) analysis.ContextShareMode {
+	if len(request.Context) == 0 {
+		return analysis.ContextShareNone
+	}
+	return request.Context[0].Mode
+}
+
+// ApplyWiring is the explicit execution boundary for a previously analyzed
+// feature. Callers should present the proposal and obtain any required user
+// approval before invoking it.
+func (e *GraphEngine) ApplyWiring(ctx context.Context, result *ProcessResult) (*wiring.IntegrationResult, error) {
+	if result == nil || result.Appearance == nil {
+		return nil, fmt.Errorf("no analyzed feature appearance")
+	}
+	if result.Analysis == nil || !result.Analysis.NeedsWiring {
+		return nil, fmt.Errorf("request does not require feature wiring")
+	}
+	return e.WiringEngine.WireFeature(ctx, result.Appearance, e.toSimilarFeaturesFromMatches(result.FeatureMatches))
+}
+
+// RecordLifecycleEvent persists an orchestration event in the graph and links
+// it to the task. Tool calls, prompt stages, todo transitions, verification,
+// and cleanup should all use this path so the execution history is replayable.
+func (e *GraphEngine) RecordLifecycleEvent(ctx context.Context, taskID uuid.UUID, eventType, source string, payload interface{}) (*graph.Node, error) {
+	event := &graph.Event{
+		ID:        uuid.New(),
+		Type:      eventType,
+		Source:    source,
+		Payload:   mustJSON(payload),
+		Timestamp: time.Now(),
+	}
+	node, err := e.Manager.CreateEvent(ctx, event)
+	if err != nil {
+		return nil, err
+	}
+	if taskID != uuid.Nil {
+		if _, err := e.Manager.Link(ctx, taskID, node.ID, graph.EdgeTypeTriggers, map[string]string{"event": eventType}); err != nil {
+			return nil, err
+		}
+	}
+	return node, nil
+}
+
+// RecordToolObservation is a small convenience wrapper used by agents and
+// coordinators to persist both successful and failed tool decisions.
+func (e *GraphEngine) RecordToolObservation(ctx context.Context, taskID uuid.UUID, tool, outcome, contextBucket string, details interface{}) error {
+	_, err := e.RecordLifecycleEvent(ctx, taskID, "tool_observation", "tool:"+tool, map[string]interface{}{
+		"tool": tool, "outcome": outcome, "context_bucket": contextBucket, "details": details,
+	})
+	return err
+}
+
+func mustJSON(value interface{}) json.RawMessage {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return json.RawMessage(`{"error":"failed to encode event payload"}`)
+	}
+	return data
+}
+
+func persistentRequestMetadata(request *analysis.RequestAnalysis) json.RawMessage {
+	if request == nil {
+		return json.RawMessage(`{}`)
+	}
+	return mustJSON(map[string]any{
+		"relation":          request.Relation,
+		"intent":            request.Intent,
+		"scope":             request.Scope,
+		"context":           request.Context,
+		"entry_point_hints": request.EntryPointHints,
+		"cleanup_keys":      request.CleanupKeys,
+	})
+}
+
+func taskDescriptions(nodes []*graph.Node) []string {
+	descriptions := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		var task graph.Task
+		if err := node.UnmarshalData(&task); err == nil && task.Description != "" {
+			descriptions = append(descriptions, task.Description)
+		}
+	}
+	return descriptions
+}
+
+func continuityRelation(relation analysis.RequestRelation) continuity.TaskRelation {
+	switch relation {
+	case analysis.RequestRelationFollowUp:
+		return continuity.TaskRelationFollowUp
+	case analysis.RequestRelationRelated:
+		return continuity.TaskRelationRelated
+	default:
+		return continuity.TaskRelationNewTask
+	}
+}
+
+func truncateText(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= max {
+		return value
+	}
+	return value[:max]
 }
 
 // FindSimilarFeaturesByText finds similar features based on a text request (not FeatureMatchRequest).
@@ -946,9 +1194,9 @@ func (e *GraphEngine) GetGraphStats(ctx context.Context) (map[string]int, error)
 
 func (e *GraphEngine) buildFeatureAppearance(taskID uuid.UUID, request string, matches []analysis.FeatureMatch, entryPoints []analysis.EntryPoint, wiringPattern *analysis.WiringPattern) *wiring.FeatureAppearance {
 	appearance := &wiring.FeatureAppearance{
-		FeatureID:   taskID,
-		EntryPoints: make(map[wiring.EntryPointType][]wiring.EntryPointInterface),
-		ConfigKeys:  []wiring.ConfigEntryPoint{},
+		FeatureID:       taskID,
+		EntryPoints:     make(map[wiring.EntryPointType][]wiring.EntryPointInterface),
+		ConfigKeys:      []wiring.ConfigEntryPoint{},
 		EnvironmentVars: []string{},
 		Documentation: wiring.FeatureDocumentation{
 			Readme: request,
@@ -1043,12 +1291,12 @@ func (e *GraphEngine) convertAnalysisEntryPoint(ep analysis.EntryPoint) wiring.E
 				CreatedAt:   time.Now(),
 				UpdatedAt:   time.Now(),
 			},
-			Method:        "POST",
-			Route:         ep.Location,
-			Websocket:     false,
-			Middleware:    []string{"logging", "recovery"},
-			AuthRequired:  true,
-			RateLimit:     &wiring.RateLimitConfig{Requests: 60, Window: time.Minute, Burst: 5},
+			Method:       "POST",
+			Route:        ep.Location,
+			Websocket:    false,
+			Middleware:   []string{"logging", "recovery"},
+			AuthRequired: true,
+			RateLimit:    &wiring.RateLimitConfig{Requests: 60, Window: time.Minute, Burst: 5},
 		}
 	case analysis.EntryPointTypeCLIFlag:
 		return &wiring.CLIEntryPoint{

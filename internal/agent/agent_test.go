@@ -394,3 +394,33 @@ func TestPruneFirstMessageTriageUsesStoredPrompt(t *testing.T) {
 		t.Fatalf("expected original prompt metadata to be removed")
 	}
 }
+
+func TestBuildToolResultMessageIncludesEveryRequestedCall(t *testing.T) {
+	calls := []ai.ToolCall{
+		{ID: "call_613309", Name: "read_file"},
+		{ID: "call_missing", Name: "search"},
+	}
+	executed := []executedToolCall{{
+		call:   calls[0],
+		result: tools.Result{Content: "file contents"},
+	}}
+
+	message := buildToolResultMessage(calls, executed)
+	sequence := []ai.Message{
+		ai.NewTextMessage(ai.RoleUser, "inspect"),
+		{Role: ai.RoleAssistant, Content: []ai.ContentPart{
+			{Type: ai.ContentTypeToolCall, ToolCall: &calls[0]},
+			{Type: ai.ContentTypeToolCall, ToolCall: &calls[1]},
+		}},
+		message,
+	}
+	if err := ai.ValidateMessageSequence(sequence); err != nil {
+		t.Fatalf("tool result message does not complete sequence: %v", err)
+	}
+	if len(message.Content) != 2 {
+		t.Fatalf("result count = %d, want 2", len(message.Content))
+	}
+	if !message.Content[1].ToolResult.IsError {
+		t.Fatal("missing execution did not receive an interrupted error result")
+	}
+}

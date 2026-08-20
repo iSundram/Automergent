@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	_ "modernc.org/sqlite"
@@ -117,6 +119,14 @@ func getSchemaVersion(db *sql.DB) (int, error) {
 }
 
 func OpenDB(path string) (*sql.DB, error) {
+	if path == "" {
+		return nil, fmt.Errorf("database path is empty")
+	}
+	if dir := filepath.Dir(path); dir != "." && dir != "" {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, fmt.Errorf("create database directory: %w", err)
+		}
+	}
 	db, err := sql.Open("sqlite", path+"?_foreign_keys=on&_busy_timeout=5000&_journal_mode=WAL")
 	if err != nil {
 		return nil, fmt.Errorf("open database: %w", err)

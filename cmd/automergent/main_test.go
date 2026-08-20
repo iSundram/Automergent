@@ -54,6 +54,39 @@ func TestRememberedProjectDoesNotRequireApproval(t *testing.T) {
 	}
 }
 
+func TestDecodeConfigPromptSystemEnabled(t *testing.T) {
+	tests := []struct {
+		name string
+		yaml string
+		want bool
+	}{
+		{name: "default", yaml: "mode: edit\n", want: true},
+		{name: "explicit true", yaml: "promptSystemEnabled: true\n", want: true},
+		{name: "explicit false", yaml: "promptSystemEnabled: false\n", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config.yaml")
+			if err := os.WriteFile(path, []byte(tc.yaml), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			viper.Reset()
+			defer viper.Reset()
+			viper.SetConfigFile(path)
+			if err := viper.ReadInConfig(); err != nil {
+				t.Fatal(err)
+			}
+			cfg := config.Default()
+			if err := decodeConfigFromViper(cfg); err != nil {
+				t.Fatal(err)
+			}
+			if cfg.PromptSystemEnabled != tc.want {
+				t.Fatalf("PromptSystemEnabled = %t, want %t", cfg.PromptSystemEnabled, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseOutputFormat(t *testing.T) {
 	tests := []struct {
 		name     string

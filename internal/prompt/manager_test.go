@@ -35,24 +35,24 @@ func TestPromptManager_NewPromptManager(t *testing.T) {
 
 func TestPromptManager_ProcessUserMessage_NewFeature(t *testing.T) {
 	pm := NewPromptManager(nil, nil, "")
-	
+
 	parts, err := pm.ProcessUserMessage(
 		nil,
 		"Add a new REST API endpoint for user authentication",
 		"/home/user/project",
 		[]string{"internal/api/handlers.go", "internal/auth/jwt.go"},
 	)
-	
+
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	// Should have initial thinking, categorization, task definition, coder init, workflow plan
 	foundStages := make(map[PromptStage]bool)
 	for _, part := range parts {
 		foundStages[part.Stage] = true
 	}
-	
+
 	expectedStages := []PromptStage{
 		StageInitialThinking,
 		StageCategorization,
@@ -60,13 +60,13 @@ func TestPromptManager_ProcessUserMessage_NewFeature(t *testing.T) {
 		StageCoderInit,
 		StageWorkflowPlan,
 	}
-	
+
 	for _, stage := range expectedStages {
 		if !foundStages[stage] {
 			t.Errorf("expected stage %s not found", stage)
 		}
 	}
-	
+
 	// Check that current request is set
 	req := pm.GetCurrentRequest()
 	if req == nil {
@@ -78,7 +78,7 @@ func TestPromptManager_ProcessUserMessage_NewFeature(t *testing.T) {
 	if !req.RequiresCoder {
 		t.Error("expected requires coder to be true for new feature")
 	}
-	
+
 	// Check coder context is initialized
 	coderCtx := pm.GetCoderContext()
 	if coderCtx == nil {
@@ -94,18 +94,18 @@ func TestPromptManager_ProcessUserMessage_NewFeature(t *testing.T) {
 
 func TestPromptManager_ProcessUserMessage_Debug(t *testing.T) {
 	pm := NewPromptManager(nil, nil, "")
-	
+
 	_, err := pm.ProcessUserMessage(
 		nil,
 		"Debug why the JWT token validation is failing",
 		"/home/user/project",
 		[]string{"internal/auth/jwt.go"},
 	)
-	
+
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	req := pm.GetCurrentRequest()
 	if req == nil {
 		t.Error("expected current request to be set")
@@ -115,20 +115,55 @@ func TestPromptManager_ProcessUserMessage_Debug(t *testing.T) {
 	}
 }
 
+func TestPromptManager_ContinuationIsRecordedOnceAndSharesContext(t *testing.T) {
+	pm := NewPromptManager(nil, nil, "")
+	if _, err := pm.ProcessUserMessage(nil, "Add thinking effort support", "/project", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pm.ProcessUserMessage(nil, "Continue, wire it into the TUI", "/project", nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx := pm.GetAssistantContext()
+	if len(ctx.ConversationHistory) != 2 {
+		t.Fatalf("history length = %d, want 2", len(ctx.ConversationHistory))
+	}
+	req := pm.GetCurrentRequest()
+	if req.Relation != RequestRelationFollowUp || req.ContextShare != ContextShareFull {
+		t.Fatalf("continuation routing = %s/%s", req.Relation, req.ContextShare)
+	}
+}
+
+func TestPromptManager_NewTaskStartsIsolatedContext(t *testing.T) {
+	pm := NewPromptManager(nil, nil, "")
+	if _, err := pm.ProcessUserMessage(nil, "Add thinking effort support", "/project", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pm.ProcessUserMessage(nil, "New task: review session persistence", "/project", nil); err != nil {
+		t.Fatal(err)
+	}
+	req := pm.GetCurrentRequest()
+	if req.Relation != RequestRelationNew || req.ContextShare != ContextShareNone {
+		t.Fatalf("new task routing = %s/%s", req.Relation, req.ContextShare)
+	}
+	if len(pm.GetStashedContexts()) != 1 {
+		t.Fatalf("stash count = %d, want 1", len(pm.GetStashedContexts()))
+	}
+}
+
 func TestPromptManager_ProcessUserMessage_Simple(t *testing.T) {
 	pm := NewPromptManager(nil, nil, "")
-	
+
 	_, err := pm.ProcessUserMessage(
 		nil,
 		"Show me the current config",
 		"/home/user/project",
 		[]string{"internal/config/config.go"},
 	)
-	
+
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	req := pm.GetCurrentRequest()
 	if req == nil {
 		t.Error("expected current request to be set")
@@ -140,7 +175,7 @@ func TestPromptManager_ProcessUserMessage_Simple(t *testing.T) {
 
 func TestPromptManager_GetNextTodoPrompt(t *testing.T) {
 	pm := NewPromptManager(nil, nil, "")
-	
+
 	// Process a request first
 	_, err := pm.ProcessUserMessage(
 		nil,
@@ -151,7 +186,7 @@ func TestPromptManager_GetNextTodoPrompt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	// Get next todo
 	nextPrompt := pm.GetNextTodoPrompt()
 	if nextPrompt == nil {
@@ -164,7 +199,7 @@ func TestPromptManager_GetNextTodoPrompt(t *testing.T) {
 
 func TestPromptManager_CompleteTodo(t *testing.T) {
 	pm := NewPromptManager(nil, nil, "")
-	
+
 	_, err := pm.ProcessUserMessage(
 		nil,
 		"Add a new feature",
@@ -174,15 +209,15 @@ func TestPromptManager_CompleteTodo(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	coderCtx := pm.GetCoderContext()
 	if coderCtx == nil || len(coderCtx.TodoItems) == 0 {
 		t.Fatal("expected todo items")
 	}
-	
+
 	todoID := coderCtx.TodoItems[0].ID
 	pm.CompleteTodo(todoID, "Done")
-	
+
 	// Check todo is marked completed
 	coderCtx = pm.GetCoderContext()
 	found := false
@@ -199,7 +234,7 @@ func TestPromptManager_CompleteTodo(t *testing.T) {
 
 func TestPromptManager_StashContext(t *testing.T) {
 	pm := NewPromptManager(nil, nil, "")
-	
+
 	_, err := pm.ProcessUserMessage(
 		nil,
 		"Add a new feature",
@@ -209,7 +244,7 @@ func TestPromptManager_StashContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	stashPrompt := pm.StashContext("Testing stash")
 	if stashPrompt == nil {
 		t.Error("expected stash prompt")
@@ -221,7 +256,7 @@ func TestPromptManager_StashContext(t *testing.T) {
 
 func TestPromptManager_SaveAndResumeStash(t *testing.T) {
 	pm := NewPromptManager(nil, nil, "")
-	
+
 	_, err := pm.ProcessUserMessage(
 		nil,
 		"Add a new feature",
@@ -231,7 +266,7 @@ func TestPromptManager_SaveAndResumeStash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	// Save stash
 	stash := pm.SaveStash("Test summary", []string{"test"})
 	if stash == nil {
@@ -240,7 +275,7 @@ func TestPromptManager_SaveAndResumeStash(t *testing.T) {
 	if stash.Summary != "Test summary" {
 		t.Errorf("expected summary 'Test summary', got %s", stash.Summary)
 	}
-	
+
 	// Resume stash
 	resumePrompt := pm.ResumeContext(stash.ID)
 	if resumePrompt == nil {
@@ -253,7 +288,7 @@ func TestPromptManager_SaveAndResumeStash(t *testing.T) {
 
 func TestPromptManager_CreateNewContext(t *testing.T) {
 	pm := NewPromptManager(nil, nil, "")
-	
+
 	_, err := pm.ProcessUserMessage(
 		nil,
 		"Add a new feature",
@@ -263,7 +298,7 @@ func TestPromptManager_CreateNewContext(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	// Create new context using PromptManager's CreateNewContext
 	newPrompt := pm.CreateNewContext("Start new task", true)
 	if newPrompt == nil {
@@ -272,7 +307,7 @@ func TestPromptManager_CreateNewContext(t *testing.T) {
 	if newPrompt.Stage != StageContextManage {
 		t.Errorf("expected stage context_manage, got %s", newPrompt.Stage)
 	}
-	
+
 	// Old request should be cleared
 	if pm.GetCurrentRequest() != nil {
 		t.Error("expected current request to be cleared")
@@ -281,7 +316,7 @@ func TestPromptManager_CreateNewContext(t *testing.T) {
 
 func TestPromptManager_ShareContextWithCoder(t *testing.T) {
 	pm := NewPromptManager(nil, nil, "")
-	
+
 	_, err := pm.ProcessUserMessage(
 		nil,
 		"Add a new feature",
@@ -291,7 +326,7 @@ func TestPromptManager_ShareContextWithCoder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	
+
 	sharePrompt := pm.ShareContextWithCoder("Share all context")
 	if sharePrompt == nil {
 		t.Error("expected share prompt")
@@ -303,7 +338,7 @@ func TestPromptManager_ShareContextWithCoder(t *testing.T) {
 
 func TestCategorizer_Categorize(t *testing.T) {
 	categorizer := NewCategorizer(nil)
-	
+
 	testCases := []struct {
 		prompt      string
 		expectedCat RequestCategory
@@ -317,7 +352,7 @@ func TestCategorizer_Categorize(t *testing.T) {
 		{"Show me the config file", CategoryDirect},
 		{"Quick fix typo", CategorySimple},
 	}
-	
+
 	for _, tc := range testCases {
 		result := categorizer.Categorize(tc.prompt, "/tmp", []string{})
 		if result.Category != tc.expectedCat {
@@ -328,19 +363,19 @@ func TestCategorizer_Categorize(t *testing.T) {
 
 func TestCategorizer_ComplexityDetection(t *testing.T) {
 	categorizer := NewCategorizer(nil)
-	
+
 	// Simple
 	result := categorizer.Categorize("Fix typo", "/tmp", []string{})
 	if result.Complexity != ComplexitySimple {
 		t.Errorf("expected simple complexity, got %s", result.Complexity)
 	}
-	
+
 	// Moderate (multiple files)
 	result = categorizer.Categorize("Add new API endpoint", "/tmp", []string{"a.go", "b.go", "c.go", "d.go"})
 	if result.Complexity != ComplexityModerate {
 		t.Errorf("expected moderate complexity, got %s", result.Complexity)
 	}
-	
+
 	// Complex (many files + complex keywords)
 	result = categorizer.Categorize("Refactor the entire authentication system", "/tmp", []string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go", "g.go", "h.go", "i.go", "j.go", "k.go"})
 	if result.Complexity != ComplexityComplex {
@@ -348,10 +383,21 @@ func TestCategorizer_ComplexityDetection(t *testing.T) {
 	}
 }
 
+func TestCategorizerRepositoryInvestigationIsNotSimple(t *testing.T) {
+	categorizer := NewCategorizer(nil)
+	result := categorizer.Categorize("Read files related to the search tool and tell issues if any", "/tmp", nil)
+	if result.Category != CategoryIssueSuspect {
+		t.Fatalf("category = %s, want %s", result.Category, CategoryIssueSuspect)
+	}
+	if result.Complexity == ComplexitySimple {
+		t.Fatalf("repository investigation was collapsed to simple complexity")
+	}
+}
+
 func TestAssistantPrompts_BuildInitialThinkingPrompt(t *testing.T) {
 	ap := NewAssistantPrompts(nil)
 	prompt := ap.BuildInitialThinkingPrompt("Test prompt")
-	
+
 	if prompt == nil {
 		t.Fatal("expected prompt")
 	}
@@ -380,7 +426,7 @@ func TestCoderPrompts_BuildCoderInitPrompt(t *testing.T) {
 		Strategy:       StrategyCoderAgent,
 		AllowedTools:   ToolSetModerate,
 	}
-	
+
 	prompt := cp.BuildCoderInitPrompt(coderCtx, categorized)
 	if prompt == nil {
 		t.Fatal("expected prompt")
@@ -404,7 +450,7 @@ func TestContextPrompts_BuildStashPrompt(t *testing.T) {
 			OriginalPrompt: "Test task",
 		},
 	}
-	
+
 	prompt := cp.BuildStashPrompt(assistantCtx, "Test reason")
 	if prompt == nil {
 		t.Fatal("expected prompt")
@@ -421,7 +467,7 @@ func TestWorkflowPrompts_BuildTodoWalkthroughPrompt(t *testing.T) {
 		{ID: "2", Description: "Todo 2", Status: TodoStatusInProgress, Priority: 2},
 		{ID: "3", Description: "Todo 3", Status: TodoStatusPending, Priority: 3},
 	}
-	
+
 	prompt := wp.BuildTodoWalkthroughPrompt(todos, 1)
 	if prompt == nil {
 		t.Fatal("expected prompt")
@@ -434,7 +480,7 @@ func TestWorkflowPrompts_BuildTodoWalkthroughPrompt(t *testing.T) {
 func TestToolPrompts_BuildReadFilePrompt(t *testing.T) {
 	tp := NewToolPrompts(nil)
 	prompt := tp.BuildReadFilePrompt("/tmp/test.go", 1, 10)
-	
+
 	if prompt == nil {
 		t.Fatal("expected prompt")
 	}
@@ -448,7 +494,7 @@ func TestToolPrompts_BuildReadFilePrompt(t *testing.T) {
 
 func TestPromptSystem_Integration(t *testing.T) {
 	ps := NewPromptSystem()
-	
+
 	// Process a request
 	parts, err := ps.ProcessUserMessage(nil, "Add new feature", "/tmp", []string{"main.go"})
 	if err != nil {
@@ -457,13 +503,13 @@ func TestPromptSystem_Integration(t *testing.T) {
 	if len(parts) == 0 {
 		t.Error("expected prompt parts")
 	}
-	
+
 	// Get next action
 	next := ps.GetNextAction()
 	if next == nil {
 		t.Error("expected next action")
 	}
-	
+
 	// Complete task
 	complete := ps.CompleteCurrentTask("Done")
 	if complete == nil {

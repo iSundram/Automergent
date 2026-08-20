@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 
@@ -25,7 +26,12 @@ func (m *ContextBucketManager) CreateBucket(ctx context.Context, taskID uuid.UUI
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	shortID, err := m.nextShortIDUnsafe(ctx)
+	if err != nil {
+		return nil, err
+	}
 	bucket := &ContextBucket{
+		ShortID:     shortID,
 		WorkflowID:  taskID,
 		Name:        name,
 		Type:        bucketType,
@@ -54,7 +60,12 @@ func (m *ContextBucketManager) CreateBucketForTodo(ctx context.Context, todoID u
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	shortID, err := m.nextShortIDUnsafe(ctx)
+	if err != nil {
+		return nil, err
+	}
 	bucket := &ContextBucket{
+		ShortID:     shortID,
 		TodoID:      todoID,
 		Name:        name,
 		Type:        ContextBucketTypeTodo,
@@ -257,6 +268,7 @@ func (m *ContextBucketManager) GetBucketSummary(ctx context.Context, bucketID uu
 
 	return &BucketSummary{
 		BucketID:    bucket.ID,
+		ShortID:     bucket.ShortID,
 		Name:        bucket.Name,
 		Type:        bucket.Type,
 		ItemCount:   len(data),
@@ -264,6 +276,78 @@ func (m *ContextBucketManager) GetBucketSummary(ctx context.Context, bucketID uu
 		SharePolicy: bucket.SharePolicy,
 		Keys:        keys,
 	}, nil
+}
+
+// ResolveBucketID accepts either the durable UUID or the compact cN handle
+// shown in prompts and the TUI.
+func (m *ContextBucketManager) ResolveBucketID(ctx context.Context, value string) (uuid.UUID, error) {
+	if id, err := uuid.Parse(value); err == nil {
+		return id, nil
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	nodes, err := m.store.ListNodes(ctx, NodeTypeContextBucket, 10000, 0)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	for _, node := range nodes {
+		var bucket ContextBucket
+		if json.Unmarshal(node.Data, &bucket) == nil && bucket.ShortID == value {
+			return node.ID, nil
+		}
+	}
+	return uuid.Nil, fmt.Errorf("context bucket %q not found", value)
+}
+
+func (m *ContextBucketManager) SetBucketOwner(ctx context.Context, bucketID uuid.UUID, owner string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	bucket, err := m.getBucketUnsafe(ctx, bucketID)
+	if err != nil {
+		return err
+	}
+	bucket.Owner = owner
+	bucket.UpdatedAt = time.Now()
+	node, err := bucket.toNode()
+	if err != nil {
+		return err
+	}
+	return m.store.UpdateNode(ctx, node)
+}
+
+func (m *ContextBucketManager) GetAgentBucket(ctx context.Context, taskID uuid.UUID, owner string) (*ContextBucket, error) {
+	m.mu.RLock()
+	nodes, err := m.store.ListNodes(ctx, NodeTypeContextBucket, 1000, 0)
+	m.mu.RUnlock()
+	if err != nil {
+		return nil, err
+	}
+	for _, node := range nodes {
+		var bucket ContextBucket
+		if json.Unmarshal(node.Data, &bucket) == nil && bucket.WorkflowID == taskID && bucket.Type == ContextBucketTypeAgent && bucket.Owner == owner {
+			bucket.ID = node.ID
+			return &bucket, nil
+		}
+	}
+	return nil, ErrBucketNotFound
+}
+
+func (m *ContextBucketManager) nextShortIDUnsafe(ctx context.Context) (string, error) {
+	nodes, err := m.store.ListNodes(ctx, NodeTypeContextBucket, 10000, 0)
+	if err != nil {
+		return "", fmt.Errorf("list context buckets: %w", err)
+	}
+	maxID := 0
+	for _, node := range nodes {
+		var bucket ContextBucket
+		if json.Unmarshal(node.Data, &bucket) != nil || len(bucket.ShortID) < 2 || bucket.ShortID[0] != 'c' {
+			continue
+		}
+		if n, err := strconv.Atoi(bucket.ShortID[1:]); err == nil && n > maxID {
+			maxID = n
+		}
+	}
+	return fmt.Sprintf("c%d", maxID+1), nil
 }
 
 func (m *ContextBucketManager) ListBuckets(ctx context.Context, taskID uuid.UUID) ([]*ContextBucket, error) {
@@ -291,9 +375,8 @@ func (m *ContextBucketManager) ListBuckets(ctx context.Context, taskID uuid.UUID
 
 func (m *ContextBucketManager) ResumeCoderContext(ctx context.Context, taskID uuid.UUID) (*ContextBucket, error) {
 	m.mu.RLock()
-	defer m.mu.RUnlock()
-
 	nodes, err := m.store.ListNodes(ctx, NodeTypeContextBucket, 1000, 0)
+	m.mu.RUnlock()
 	if err != nil {
 		return nil, err
 	}
@@ -391,8 +474,12 @@ func (b *ContextBucket) toNode() (*Node, error) {
 	if err != nil {
 		return nil, err
 	}
+	id := b.ID
+	if id == uuid.Nil {
+		id = uuid.New()
+	}
 	return &Node{
-		ID:        uuid.New(),
+		ID:        id,
 		Type:      NodeTypeContextBucket,
 		Data:      data,
 		CreatedAt: b.CreatedAt,

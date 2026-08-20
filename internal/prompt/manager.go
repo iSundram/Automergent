@@ -3,6 +3,7 @@ package prompt
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -12,14 +13,14 @@ import (
 // PromptManager is the main entry point for the prompt system.
 // It orchestrates all prompt generators and manages the prompt lifecycle.
 type PromptManager struct {
-	config          *PromptConfig
-	categorizer     *Categorizer
+	config           *PromptConfig
+	categorizer      *Categorizer
 	assistantPrompts *AssistantPrompts
-	coderPrompts    *CoderPrompts
-	contextPrompts  *ContextPrompts
-	workflowPrompts *WorkflowPrompts
-	toolPrompts     *ToolPrompts
-	contextSelector *ContextSelector
+	coderPrompts     *CoderPrompts
+	contextPrompts   *ContextPrompts
+	workflowPrompts  *WorkflowPrompts
+	toolPrompts      *ToolPrompts
+	contextSelector  *ContextSelector
 
 	// State
 	assistantContext *AssistantContext
@@ -68,7 +69,8 @@ func (pm *PromptManager) ProcessUserMessage(ctx context.Context, userMessage str
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	// Add to conversation history
+	// Record the authored message once. Previously continuation messages were
+	// appended twice, which made relation detection and context ranking drift.
 	pm.assistantContext.ConversationHistory = append(pm.assistantContext.ConversationHistory, Message{
 		Role:      "user",
 		Content:   userMessage,
@@ -77,6 +79,15 @@ func (pm *PromptManager) ProcessUserMessage(ctx context.Context, userMessage str
 
 	// If this is the first message or no current request, categorize
 	if pm.currentRequest == nil {
+		return pm.startNewRequest(userMessage, workingDir, availableFiles)
+	}
+
+	// Explicit context resets create a separate task while preserving the old
+	// task as a resumable stash.
+	if isNewTaskMessage(userMessage) {
+		pm.saveStashLocked("Auto-stash before independent task", []string{"auto", "independent-task"})
+		pm.currentRequest = nil
+		pm.coderContext = nil
 		return pm.startNewRequest(userMessage, workingDir, availableFiles)
 	}
 
@@ -101,6 +112,8 @@ func (pm *PromptManager) startNewRequest(userMessage, workingDir string, availab
 	// Note: In actual use, the categorization would be done by the LLM
 	// For now, we do it programmatically
 	categorized := pm.categorizer.Categorize(userMessage, workingDir, availableFiles)
+	categorized.Relation = RequestRelationNew
+	categorized.ContextShare = ContextShareNone
 	pm.currentRequest = categorized
 
 	// Initialize coder context if needed
@@ -153,15 +166,16 @@ func (pm *PromptManager) startNewRequest(userMessage, workingDir string, availab
 
 // continueRequest continues processing an existing request.
 func (pm *PromptManager) continueRequest(userMessage string) ([]PromptPart, error) {
-	// Add to conversation history
-	pm.assistantContext.ConversationHistory = append(pm.assistantContext.ConversationHistory, Message{
-		Role:      "user",
-		Content:   userMessage,
-		Timestamp: time.Now(),
-	})
-
-	// For now, treat as new context management or clarification
-	// In practice, this would be more sophisticated
+	mode := ContextShareFull
+	if containsAny(userMessage, []string{"summary", "briefly", "just the result"}) {
+		mode = ContextShareSummary
+	} else if containsAny(userMessage, []string{"related", "similar", "also inspect"}) {
+		mode = ContextSharePartial
+	}
+	pm.currentRequest.Relation = RequestRelationFollowUp
+	pm.currentRequest.ContextShare = mode
+	// Continuations receive an explicit share policy so the next prompt cannot
+	// accidentally inherit the entire conversation.
 	contextPrompt := *pm.assistantPrompts.BuildContextManagementPrompt(
 		ContextActionShare,
 		pm.assistantContext,
@@ -172,8 +186,8 @@ func (pm *PromptManager) continueRequest(userMessage string) ([]PromptPart, erro
 
 // GetNextTodoPrompt gets the prompt for the next todo item.
 func (pm *PromptManager) GetNextTodoPrompt() *PromptPart {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 
 	if pm.coderContext == nil || len(pm.coderContext.TodoItems) == 0 {
 		return nil
@@ -263,6 +277,10 @@ func (pm *PromptManager) DispatchParallelTodos(todoIDs []string) *PromptPart {
 	prompt := pm.coderPrompts.BuildParallelDispatchPrompt(pm.coderContext, todos, pm.coderContext.SharedContext)
 	if prompt != nil {
 		promptCopy := *prompt
+		if promptCopy.Metadata == nil {
+			promptCopy.Metadata = map[string]any{}
+		}
+		promptCopy.Metadata["ephemeral"] = true
 		return &promptCopy
 	}
 	return nil
@@ -282,6 +300,37 @@ func (pm *PromptManager) CompleteTodo(todoID string, result string) {
 			pm.coderContext.TodoItems[i].Status = TodoStatusCompleted
 			break
 		}
+	}
+}
+
+// CompleteActiveTodo advances the scoped workflow after a tool batch. A failed
+// batch blocks the active todo so the next model turn diagnoses it instead of
+// silently moving on.
+func (pm *PromptManager) CompleteActiveTodo(success bool) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	if pm.coderContext == nil {
+		return
+	}
+	status := TodoStatusCompleted
+	if !success {
+		status = TodoStatusBlocked
+	}
+	for i := range pm.coderContext.TodoItems {
+		if pm.coderContext.TodoItems[i].Status != TodoStatusInProgress {
+			continue
+		}
+		id := pm.coderContext.TodoItems[i].ID
+		pm.coderContext.TodoItems[i].Status = status
+		if pm.currentRequest != nil {
+			for j := range pm.currentRequest.TodoItems {
+				if pm.currentRequest.TodoItems[j].ID == id {
+					pm.currentRequest.TodoItems[j].Status = status
+					break
+				}
+			}
+		}
+		return
 	}
 }
 
@@ -326,8 +375,8 @@ func (pm *PromptManager) saveStashLocked(summary string, tags []string) *Context
 
 // ResumeContext resumes from a stashed context.
 func (pm *PromptManager) ResumeContext(stashID string) *PromptPart {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 
 	var stash *ContextStash
 	for _, s := range pm.stashedContexts {
@@ -379,8 +428,8 @@ func (pm *PromptManager) ApplyStash(stashID string, merge bool) error {
 
 // ShareContextWithCoder shares context from assistant to coder.
 func (pm *PromptManager) ShareContextWithCoder(shareSpec string) *PromptPart {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
 
 	if pm.coderContext == nil {
 		return nil
@@ -464,10 +513,37 @@ func (pm *PromptManager) CompleteRequest(result string) *PromptPart {
 		// Clear current request
 		pm.currentRequest = nil
 		pm.coderContext = nil
+		pm.cleanupEphemeralPromptsLocked()
 
 		return &promptCopy
 	}
 	return nil
+}
+
+// CleanupEphemeralPrompts removes injected/staged prompt parts after their
+// consuming task completes. Durable decisions and user-authored messages are
+// retained in their respective stores.
+func (pm *PromptManager) CleanupEphemeralPrompts() {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	pm.cleanupEphemeralPromptsLocked()
+}
+
+func (pm *PromptManager) cleanupEphemeralPromptsLocked() {
+	kept := pm.promptHistory[:0]
+	for _, part := range pm.promptHistory {
+		if part.Metadata != nil {
+			if ephemeral, ok := part.Metadata["ephemeral"].(bool); ok && ephemeral {
+				continue
+			}
+		}
+		kept = append(kept, part)
+	}
+	pm.promptHistory = kept
+}
+
+func isNewTaskMessage(message string) bool {
+	return containsAny(strings.ToLower(message), []string{"new task", "separate task", "unrelated task", "start a fresh", "forget the previous"})
 }
 
 // GetPromptHistory returns the history of prompt parts.

@@ -112,6 +112,7 @@ type TodoItem struct {
 
 type ContextBucket struct {
 	ID          uuid.UUID         `json:"id"`
+	ShortID     string            `json:"short_id,omitempty"`
 	WorkflowID  uuid.UUID         `json:"workflow_id,omitempty"`
 	TodoID      uuid.UUID         `json:"todo_id,omitempty"`
 	Name        string            `json:"name"`
@@ -152,6 +153,7 @@ type Memory struct {
 
 type BucketSummary struct {
 	BucketID     uuid.UUID         `json:"bucket_id"`
+	ShortID      string            `json:"short_id,omitempty"`
 	Name         string            `json:"name"`
 	Type         ContextBucketType `json:"type"`
 	ItemCount    int               `json:"item_count"`

@@ -45,8 +45,9 @@ func Default() *Config {
 		Verbose:              false,
 ReasoningPreAnalysis: false,
 	PromptSystemEnabled:  true,
+	Debug:                DefaultDebugConfig(),
 
-		Security: SecurityConfig{
+	Security: SecurityConfig{
 			Sandbox:                "auto",
 			RequireGitForAutoModes: true,
 			BlockedWritePaths: []string{

@@ -32,10 +32,10 @@ const (
 type ExecutionStrategy string
 
 const (
-	StrategyDirect       ExecutionStrategy = "direct"
-	StrategyParallel     ExecutionStrategy = "parallel"
-	StrategySequential   ExecutionStrategy = "sequential"
-	StrategyCoderAgent   ExecutionStrategy = "coder_agent"
+	StrategyDirect          ExecutionStrategy = "direct"
+	StrategyParallel        ExecutionStrategy = "parallel"
+	StrategySequential      ExecutionStrategy = "sequential"
+	StrategyCoderAgent      ExecutionStrategy = "coder_agent"
 	StrategyTodoWalkthrough ExecutionStrategy = "todo_walkthrough"
 )
 
@@ -43,12 +43,12 @@ const (
 type ContextAction string
 
 const (
-	ContextActionStash     ContextAction = "stash"
-	ContextActionSeparate  ContextAction = "separate"
-	ContextActionDelete    ContextAction = "delete"
-	ContextActionNew       ContextAction = "new"
-	ContextActionResume    ContextAction = "resume"
-	ContextActionShare     ContextAction = "share"
+	ContextActionStash    ContextAction = "stash"
+	ContextActionSeparate ContextAction = "separate"
+	ContextActionDelete   ContextAction = "delete"
+	ContextActionNew      ContextAction = "new"
+	ContextActionResume   ContextAction = "resume"
+	ContextActionShare    ContextAction = "share"
 )
 
 // ToolSet represents a set of allowed tools.
@@ -64,7 +64,11 @@ const (
 
 // CategorizedRequest represents a categorized user request.
 type CategorizedRequest struct {
-	Category       RequestCategory
+	Category RequestCategory
+	// Relation is set for every message so follow-ups and independent tasks do
+	// not accidentally share the same execution context.
+	Relation       RequestRelation
+	ContextShare   ContextShareMode
 	Complexity     TaskComplexity
 	Strategy       ExecutionStrategy
 	AllowedTools   ToolSet
@@ -76,6 +80,23 @@ type CategorizedRequest struct {
 	ContextNeeds   []ContextNeed
 	CreatedAt      time.Time
 }
+
+type RequestRelation string
+
+const (
+	RequestRelationNew      RequestRelation = "new_task"
+	RequestRelationFollowUp RequestRelation = "follow_up"
+	RequestRelationRelated  RequestRelation = "related"
+)
+
+type ContextShareMode string
+
+const (
+	ContextShareNone    ContextShareMode = "none"
+	ContextShareSummary ContextShareMode = "summary"
+	ContextSharePartial ContextShareMode = "partial"
+	ContextShareFull    ContextShareMode = "full"
+)
 
 // TodoItem represents a todo item in the workflow.
 type TodoItem struct {
@@ -94,10 +115,10 @@ type TodoItem struct {
 type TodoStatus string
 
 const (
-	TodoStatusPending   TodoStatus = "pending"
+	TodoStatusPending    TodoStatus = "pending"
 	TodoStatusInProgress TodoStatus = "in_progress"
-	TodoStatusCompleted TodoStatus = "completed"
-	TodoStatusBlocked   TodoStatus = "blocked"
+	TodoStatusCompleted  TodoStatus = "completed"
+	TodoStatusBlocked    TodoStatus = "blocked"
 )
 
 // ContextNeed represents a context requirement.
@@ -113,12 +134,12 @@ type ContextNeed struct {
 type ContextSource string
 
 const (
-	ContextSourceWorkingDir  ContextSource = "working_dir"
-	ContextSourceUserPrompt  ContextSource = "user_prompt"
-	ContextSourceCodebase    ContextSource = "codebase"
-	ContextSourceStashed     ContextSource = "stashed"
-	ContextSourceShared      ContextSource = "shared"
-	ContextSourceGenerated   ContextSource = "generated"
+	ContextSourceWorkingDir ContextSource = "working_dir"
+	ContextSourceUserPrompt ContextSource = "user_prompt"
+	ContextSourceCodebase   ContextSource = "codebase"
+	ContextSourceStashed    ContextSource = "stashed"
+	ContextSourceShared     ContextSource = "shared"
+	ContextSourceGenerated  ContextSource = "generated"
 )
 
 // InjectTiming represents when to inject context.
@@ -180,15 +201,15 @@ type PromptPart struct {
 type PromptStage string
 
 const (
-	StageInitialThinking  PromptStage = "initial_thinking"
-	StageCategorization   PromptStage = "categorization"
-	StageTaskDefinition   PromptStage = "task_definition"
-	StageCoderInit        PromptStage = "coder_init"
-	StageWorkflowPlan     PromptStage = "workflow_plan"
-	StageExecution        PromptStage = "execution"
-	StageContextManage    PromptStage = "context_manage"
-	StageTodoInject       PromptStage = "todo_inject"
-	StageCompletion       PromptStage = "completion"
+	StageInitialThinking PromptStage = "initial_thinking"
+	StageCategorization  PromptStage = "categorization"
+	StageTaskDefinition  PromptStage = "task_definition"
+	StageCoderInit       PromptStage = "coder_init"
+	StageWorkflowPlan    PromptStage = "workflow_plan"
+	StageExecution       PromptStage = "execution"
+	StageContextManage   PromptStage = "context_manage"
+	StageTodoInject      PromptStage = "todo_inject"
+	StageCompletion      PromptStage = "completion"
 )
 
 // ContextProfile defines what context to include for a specific category.
@@ -305,11 +326,11 @@ func GetContextProfile(category RequestCategory) ContextProfile {
 			MinRelevanceScore:     0.6,
 		},
 	}
-	
+
 	if profile, ok := profiles[category]; ok {
 		return profile
 	}
-	
+
 	// Default profile for unknown categories
 	return ContextProfile{
 		Category:              CategoryUnknown,

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/iSundram/Automergent/internal/graph"
 )
 
 var (
@@ -16,24 +17,24 @@ var (
 )
 
 type ContextCleanup struct {
-	mu           sync.RWMutex
-	store        GraphStore
-	config       StalenessConfig
+	mu              sync.RWMutex
+	store           GraphStore
+	config          StalenessConfig
 	injectedPrompts map[uuid.UUID][]*InjectedPrompt
-	contextCache  map[uuid.UUID]*ContextEntry
+	contextCache    map[uuid.UUID]*ContextEntry
 }
 
 type InjectedPrompt struct {
-	ID          uuid.UUID       `json:"id"`
-	BucketID    uuid.UUID       `json:"bucket_id"`
-	Prompt      string          `json:"prompt"`
-	TaskID      uuid.UUID       `json:"task_id,omitempty"`
-	AgentID     uuid.UUID       `json:"agent_id,omitempty"`
-	InjectedAt  time.Time       `json:"injected_at"`
-	ExpiresAt   time.Time       `json:"expires_at"`
-	Used        bool            `json:"used"`
-	UsedAt      *time.Time      `json:"used_at,omitempty"`
-	Metadata    json.RawMessage `json:"metadata,omitempty"`
+	ID         uuid.UUID       `json:"id"`
+	BucketID   uuid.UUID       `json:"bucket_id"`
+	Prompt     string          `json:"prompt"`
+	TaskID     uuid.UUID       `json:"task_id,omitempty"`
+	AgentID    uuid.UUID       `json:"agent_id,omitempty"`
+	InjectedAt time.Time       `json:"injected_at"`
+	ExpiresAt  time.Time       `json:"expires_at"`
+	Used       bool            `json:"used"`
+	UsedAt     *time.Time      `json:"used_at,omitempty"`
+	Metadata   json.RawMessage `json:"metadata,omitempty"`
 }
 
 type ContextEntry struct {
@@ -58,10 +59,10 @@ func NewContextCleanup(store GraphStore, config StalenessConfig) *ContextCleanup
 
 func (cc *ContextCleanup) CleanupStaleContext(ctx context.Context, bucketID uuid.UUID) error {
 	cc.mu.Lock()
-	defer cc.mu.Unlock()
 
 	prompts := cc.injectedPrompts[bucketID]
 	if len(prompts) == 0 {
+		cc.mu.Unlock()
 		return nil
 	}
 
@@ -85,9 +86,11 @@ func (cc *ContextCleanup) CleanupStaleContext(ctx context.Context, bucketID uuid
 
 	if removedCount > 0 {
 		if err := cc.persistPromptCleanup(ctx, bucketID, validPrompts); err != nil {
+			cc.mu.Unlock()
 			return fmt.Errorf("persist prompt cleanup: %w", err)
 		}
 	}
+	cc.mu.Unlock()
 
 	return cc.DeduplicateContext(ctx, bucketID)
 }
@@ -96,7 +99,7 @@ func (cc *ContextCleanup) PruneStaleNodes(ctx context.Context) (int64, error) {
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 
-	now := time.Time{}
+	now := time.Now()
 	cutoff := now.Add(-cc.config.NodeTTL)
 
 	nodes, err := cc.store.ListNodes(ctx, "context_bucket", 0, 0)
@@ -106,20 +109,20 @@ func (cc *ContextCleanup) PruneStaleNodes(ctx context.Context) (int64, error) {
 
 	var removed int64
 	for _, node := range nodes {
-		bucket, ok := node.(map[string]interface{})
-		if !ok {
-			continue
-		}
-
-		createdAtStr, _ := bucket["created_at"].(string)
-		createdAt, err := time.Parse(time.RFC3339, createdAtStr)
-		if err != nil {
+		var createdAt time.Time
+		var id uuid.UUID
+		switch bucket := node.(type) {
+		case *graph.Node:
+			createdAt = bucket.CreatedAt
+			id = bucket.ID
+		case map[string]interface{}:
+			createdAt, _ = time.Parse(time.RFC3339, fmt.Sprint(bucket["created_at"]))
+			id, _ = uuid.Parse(fmt.Sprint(bucket["id"]))
+		default:
 			continue
 		}
 
 		if createdAt.Before(cutoff) {
-			idStr, _ := bucket["id"].(string)
-			id, _ := uuid.Parse(idStr)
 			if err := cc.store.DeleteNode(ctx, id); err != nil {
 				continue
 			}
@@ -136,7 +139,7 @@ func (cc *ContextCleanup) CleanupInjectedPrompts(ctx context.Context) (int64, er
 	cc.mu.Lock()
 	defer cc.mu.Unlock()
 
-	now := time.Time{}
+	now := time.Now()
 	var totalRemoved int64
 
 	for bucketID, prompts := range cc.injectedPrompts {
@@ -264,7 +267,7 @@ func (cc *ContextCleanup) GetActivePrompts(bucketID uuid.UUID) []*InjectedPrompt
 
 	prompts := cc.injectedPrompts[bucketID]
 	result := make([]*InjectedPrompt, 0, len(prompts))
-	now := time.Time{}
+	now := time.Now()
 
 	for _, p := range prompts {
 		if p.Used && p.UsedAt != nil && now.Sub(*p.UsedAt) > cc.config.PromptTTL {
@@ -287,7 +290,7 @@ func (cc *ContextCleanup) GetContextStats(bucketID uuid.UUID) map[string]interfa
 	active := 0
 	used := 0
 	expired := 0
-	now := time.Time{}
+	now := time.Now()
 
 	for _, p := range prompts {
 		if p.Used {

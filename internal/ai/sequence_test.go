@@ -100,3 +100,23 @@ func TestValidateMessageSequenceInvalidTransitions(t *testing.T) {
 		}
 	})
 }
+
+func TestRepairMissingToolResults(t *testing.T) {
+	messages := []Message{
+		NewTextMessage(RoleUser, "inspect"),
+		{Role: RoleAssistant, Content: []ContentPart{{Type: ContentTypeToolCall, ToolCall: &ToolCall{ID: "call_613309", Name: "read_file"}}}},
+		NewTextMessage(RoleUser, "continue"),
+	}
+
+	repaired := RepairMissingToolResults(messages)
+	if err := ValidateMessageSequence(repaired); err != nil {
+		t.Fatalf("repaired sequence is invalid: %v", err)
+	}
+	if len(repaired) != 4 || repaired[2].Role != RoleTool {
+		t.Fatalf("unexpected repaired sequence: %+v", repaired)
+	}
+	result := repaired[2].Content[0].ToolResult
+	if result == nil || result.ToolCallID != "call_613309" || !result.IsError {
+		t.Fatalf("unexpected synthetic result: %+v", result)
+	}
+}

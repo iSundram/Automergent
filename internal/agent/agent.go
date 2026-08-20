@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -19,11 +20,13 @@ import (
 	"github.com/iSundram/Automergent/internal/errors"
 	"github.com/iSundram/Automergent/internal/graph/analysis"
 	"github.com/iSundram/Automergent/internal/graph/continuity"
+	graphworkflow "github.com/iSundram/Automergent/internal/graph/workflow"
 	promptpkg "github.com/iSundram/Automergent/internal/prompt"
 	"github.com/iSundram/Automergent/internal/reasoning"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
 	subagent "github.com/iSundram/Automergent/internal/tools/agent"
+	contexttools "github.com/iSundram/Automergent/internal/tools/context"
 	"github.com/iSundram/Automergent/internal/version"
 )
 
@@ -57,8 +60,15 @@ type Agent struct {
 	coordinatorCancel  context.CancelFunc
 
 	// Graph-based intelligence engine
-	graphEngine *engine.GraphEngine
-	graphOnce   sync.Once
+	graphEngine   *engine.GraphEngine
+	graphOnce     sync.Once
+	graphTaskID   uuid.UUID
+	graphWorkflow uuid.UUID
+	graphAnalysis *analysis.RequestAnalysis
+	activeTodo     graphTodoState
+	// toolProfile is ephemeral per request. It is never persisted, added to
+	// session messages, or rendered in the user-facing prompt.
+	toolProfile map[string]bool
 
 	// New prompt system for staged prompt delivery
 	promptSystem     *promptpkg.PromptSystem
@@ -148,6 +158,14 @@ type ToolCallEvent struct {
 	Args      map[string]any
 	Decision  ToolDecisionRecord
 	StartedAt time.Time
+	TaskID     string
+	WorkflowID string
+	TodoID     string
+	TodoTitle  string
+	TodoStatus string
+	TodoOwner  string
+	BucketID   string
+	BucketShortID string
 }
 
 type ToolDoneEvent struct {
@@ -159,6 +177,32 @@ type ToolDoneEvent struct {
 	Duration   time.Duration
 	Result     tools.Result
 	Decision   ToolDecisionRecord
+	TaskID     string
+	WorkflowID string
+	TodoID     string
+	TodoTitle  string
+	TodoStatus string
+	TodoOwner  string
+	BucketID   string
+	BucketShortID string
+}
+
+type TodoEvent struct {
+	TaskID string
+	WorkflowID string
+	TodoID string
+	Title string
+	Status string
+	Owner string
+	Progress float64
+	BucketID string
+	BucketShortID string
+}
+
+type graphTodoState struct {
+	Todo *graphworkflow.TodoItem
+	Bucket *graphworkflow.ContextBucket
+	Owner string
 }
 
 type toolCallBatch struct {
@@ -174,6 +218,7 @@ type executedToolCall struct {
 	finishedAt time.Time
 	result     tools.Result
 	decision   ToolDecisionRecord
+	todo       graphTodoState
 }
 
 const (
@@ -190,12 +235,16 @@ const (
 	EventStatus    = "status"
 	EventThinking  = "thinking"
 	EventCompacted = "compacted"
+	EventTodoSnapshot = "todo_snapshot"
+	EventTodoUpdate = "todo_update"
 )
 
 const (
 	triageInjectedMetadataKey     = "triage_injected"
 	originalUserPromptMetadataKey = "original_user_prompt"
 )
+
+var errPromptSystemPrepared = fmt.Errorf("prompt system prepared execution context")
 
 // New creates a new Agent.
 func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *tools.Registry) *Agent {
@@ -382,6 +431,18 @@ func (a *Agent) SetSession(sess *session.Session) {
 // Run executes the agent loop for the given user prompt.
 func (a *Agent) Run(ctx context.Context, prompt string) error {
 	originalUserPrompt := prompt
+	if isCasualMessage(originalUserPrompt) {
+		userMsg := ai.NewTextMessage(ai.RoleUser, originalUserPrompt)
+		a.sess.AddMessage(userMsg)
+		a.recordToTranscript(userMsg)
+		response := "Hello! How can I help?"
+		assistantMsg := ai.NewTextMessage(ai.RoleAssistant, response)
+		a.sess.AddMessage(assistantMsg)
+		a.recordToTranscript(assistantMsg)
+		a.Emit(EventDone, response)
+		a.tryPersist()
+		return nil
+	}
 
 	// 1. Initial Triage Phase (Dynamic Workflow)
 	// If this is the very first message, we run a hidden triage loop
@@ -392,14 +453,14 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 
 	// Apply triage wrapper for first message if using legacy mode
 	firstUserPrompt := originalUserPrompt
-	if isFirstMessage {
+	if isFirstMessage && (a.cfg == nil || !a.cfg.PromptSystemEnabled) {
 		firstUserPrompt = TriageInstruction + "\n\nUser Request: " + originalUserPrompt
 	}
 
 	// Persist the user-authored message before any optional coordinator path
 	// can return. The triage wrapper exists only in the request copy below.
 	userMsg := ai.NewTextMessage(ai.RoleUser, firstUserPrompt)
-	if isFirstMessage {
+	if firstUserPrompt != originalUserPrompt {
 		userMsg.Metadata = map[string]any{
 			triageInjectedMetadataKey:     true,
 			originalUserPromptMetadataKey: originalUserPrompt,
@@ -412,14 +473,26 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	if a.cfg != nil && a.cfg.PromptSystemEnabled {
 		err := a.runPromptSystemPipeline(ctx, originalUserPrompt, isFirstMessage)
 		if err == nil {
-			return nil // Prompt system pipeline completed the task
+			return nil
 		}
-		// Log error but continue to standard loop as fallback
-		a.Emit(EventStatus, fmt.Sprintf("prompt system: %v, falling back to standard loop", err))
+		if err == errPromptSystemPrepared {
+			a.Emit(EventStatus, "prompt and graph context prepared; starting tool-capable execution")
+		} else {
+			a.Emit(EventError, err)
+			return fmt.Errorf("agent: prepare prompt system: %w", err)
+		}
+	}
+	// Ask the provider for a minimal, private tool profile. This classification
+	// is routing metadata only and is discarded after the request.
+	a.toolProfile = a.selectToolProfile(ctx, originalUserPrompt)
+	defer func() { a.toolProfile = nil }()
+	if a.toolProfile != nil {
+		a.Emit(EventStatus, fmt.Sprintf("native tool surface prepared: %d tools", len(a.toolProfile)))
 	}
 
-	// If prompt system not enabled or failed, use legacy standard loop
-	a.Emit(EventStatus, "using standard agent loop (legacy)")
+	if a.cfg == nil || !a.cfg.PromptSystemEnabled {
+		a.Emit(EventStatus, "using standard agent loop (legacy)")
+	}
 
 	// In edit mode, check that we are inside a git repository when required.
 	if a.cfg.Mode == "edit" && a.cfg.Security.RequireGitForAutoModes {
@@ -443,6 +516,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	firstStandardTurn := isFirstMessage
 	for {
 		provider := a.Provider()
+		a.sess.SetMessages(ai.RepairMissingToolResults(a.sess.Messages))
 
 		// Check context window usage
 		tokens, _ := provider.TokenCount(a.sess.Messages)
@@ -456,7 +530,8 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			autoCompressAt = a.cfg.AutoCompressAt
 		}
 
-		if limit > 0 && float64(tokens)/float64(limit) > autoCompressAt {
+		promptManaged := a.cfg != nil && a.cfg.PromptSystemEnabled
+		if !promptManaged && limit > 0 && float64(tokens)/float64(limit) > autoCompressAt {
 			a.Emit(EventStatus, "Neural Compaction: Freeing up context window...")
 			a.sess.SetMessages(a.CompactSessionMessages(ctx, a.sess.Messages))
 		} else {
@@ -468,7 +543,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		// Use new prompt system for system prompt (categorized, todo-aware, context-aware)
 		// Falls back to legacy buildSystemPrompt if prompt system not available
 		systemPrompt := a.getSystemPrompt(ctx, provider)
-		toolSchemas := buildToolSchemas(a.tools)
+		toolSchemas := a.buildActiveToolSchemas()
 
 		thinkingBudget := a.getThinkingBudget()
 
@@ -541,8 +616,9 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			return nil
 		}
 
-		for _, executed := range a.executeToolCallsParallel(ctx, toolCalls) {
-			a.Emit(EventToolDone, ToolDoneEvent{
+		executedCalls := a.executeToolCallsParallel(ctx, toolCalls)
+		for _, executed := range executedCalls {
+			done := ToolDoneEvent{
 				ID:         executed.call.ID,
 				Name:       executed.call.Name,
 				Context:    executed.context,
@@ -551,18 +627,159 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 				Duration:   executed.finishedAt.Sub(executed.startedAt),
 				Result:     executed.result,
 				Decision:   executed.decision,
-			})
+			}
+			a.fillTodoDoneEvent(&done, executed.todo)
+			a.Emit(EventToolDone, done)
 			a.Emit(EventStatus, LongTaskStatus{
 				TaskID:      executed.call.ID,
 				Phase:       executed.call.Name,
 				ProgressPct: 100,
 				Log:         fmt.Sprintf("Completed %s", executed.call.Name),
 			})
+			if a.graphTaskID != uuid.Nil {
+				outcome := "success"
+				if executed.result.IsError {
+					outcome = "error"
+				}
+				if graphEngine := a.GraphEngine(); graphEngine != nil {
+					_ = graphEngine.RecordToolObservation(ctx, a.graphTaskID, executed.call.Name, outcome, executed.context, map[string]any{"tool_call_id": executed.call.ID})
+				}
+			}
 		}
+		resultMsg := buildToolResultMessage(toolCalls, executedCalls)
+		a.sess.AddMessage(resultMsg)
+		a.recordToTranscript(resultMsg)
 	}
 }
 
+func (a *Agent) beginGraphTodo(ctx context.Context, calls []ai.ToolCall) graphTodoState {
+	state := graphTodoState{}
+	if a.graphWorkflow == uuid.Nil || a.GraphEngine() == nil || a.GraphEngine().TodoEngine == nil {
+		return state
+	}
+	todo, err := a.GraphEngine().TodoEngine.GetNextTodo(ctx, a.graphWorkflow)
+	if err != nil || todo == nil {
+		return state
+	}
+	owner := ownerForTools(calls)
+	if todo.Status == graphworkflow.TodoStatusPending || todo.Status == graphworkflow.TodoStatusBlocked {
+		if err := a.GraphEngine().TodoEngine.MarkTodoStatus(ctx, todo.ID, graphworkflow.TodoStatusInProgress); err != nil {
+			return state
+		}
+	}
+	_ = a.GraphEngine().TodoEngine.AssignTodo(ctx, todo.ID, owner)
+	todo.Status = graphworkflow.TodoStatusInProgress
+	bucket, _ := a.GraphEngine().BucketManager.GetBucketByTodo(ctx, todo.ID)
+	state = graphTodoState{Todo: todo, Bucket: bucket, Owner: owner}
+	a.activeTodo = state
+	a.emitTodoEvent(ctx, EventTodoUpdate, state)
+	return state
+}
+
+func (a *Agent) finishGraphTodo(ctx context.Context, state graphTodoState, results []executedToolCall) {
+	if state.Todo == nil || a.GraphEngine() == nil || a.GraphEngine().TodoEngine == nil {
+		return
+	}
+	blocked := false
+	for _, result := range results {
+		if result.result.IsError {
+			blocked = true
+		}
+		if state.Bucket != nil {
+			key := "tool:" + result.call.ID
+			_ = a.GraphEngine().BucketManager.UpdateBucketData(ctx, state.Bucket.ID, key, map[string]any{
+				"name": result.call.Name, "context": result.context, "summary": result.result.Summary,
+				"error": result.result.IsError, "content": truncateGraphResult(result.result.Content),
+			})
+		}
+	}
+	status := graphworkflow.TodoStatusDone
+	if blocked {
+		status = graphworkflow.TodoStatusBlocked
+	}
+	if err := a.GraphEngine().TodoEngine.MarkTodoStatus(ctx, state.Todo.ID, status); err == nil {
+		state.Todo.Status = status
+	}
+	a.emitTodoEvent(ctx, EventTodoUpdate, state)
+	a.activeTodo = graphTodoState{}
+}
+
+func (a *Agent) emitTodoEvent(ctx context.Context, eventType string, state graphTodoState) {
+	if state.Todo == nil {
+		return
+	}
+	progress := 0.0
+	if a.GraphEngine() != nil && a.GraphEngine().TodoEngine != nil {
+		if summary, err := a.GraphEngine().TodoEngine.GetWorkflowSummary(ctx, state.Todo.WorkflowID); err == nil {
+			progress = summary.Progress
+		}
+	}
+	event := TodoEvent{TaskID: a.graphTaskID.String(), WorkflowID: state.Todo.WorkflowID.String(), TodoID: state.Todo.ID.String(), Title: state.Todo.Title, Status: string(state.Todo.Status), Owner: state.Owner, Progress: progress}
+	if state.Bucket != nil {
+		event.BucketID = state.Bucket.ID.String()
+		event.BucketShortID = state.Bucket.ShortID
+	}
+	a.Emit(eventType, event)
+}
+
+func (a *Agent) fillTodoEvent(event *ToolCallEvent) {
+	state := a.activeTodo
+	if state.Todo == nil { return }
+	event.TaskID, event.WorkflowID = a.graphTaskID.String(), state.Todo.WorkflowID.String()
+	event.TodoID, event.TodoTitle, event.TodoStatus, event.TodoOwner = state.Todo.ID.String(), state.Todo.Title, string(state.Todo.Status), state.Owner
+	if state.Bucket != nil { event.BucketID, event.BucketShortID = state.Bucket.ID.String(), state.Bucket.ShortID }
+}
+
+func (a *Agent) fillTodoDoneEvent(event *ToolDoneEvent, state graphTodoState) {
+	if state.Todo == nil { return }
+	event.TaskID, event.WorkflowID = a.graphTaskID.String(), state.Todo.WorkflowID.String()
+	event.TodoID, event.TodoTitle, event.TodoStatus, event.TodoOwner = state.Todo.ID.String(), state.Todo.Title, string(state.Todo.Status), state.Owner
+	if state.Bucket != nil { event.BucketID, event.BucketShortID = state.Bucket.ID.String(), state.Bucket.ShortID }
+}
+
+func ownerForTools(calls []ai.ToolCall) string {
+	owner := "assistant"
+	for _, call := range calls {
+		switch call.Name {
+		case "edit_file", "write_file", "create_file", "delete_file", "move_file", "copy_file", "bash", "run_command", "write_shell":
+			return "coder"
+		case "lsp_diagnostics", "test", "go_test":
+			owner = "tester"
+		}
+	}
+	return owner
+}
+
+func truncateGraphResult(value string) string {
+	if len(value) > 2000 { return value[:2000] + "..." }
+	return value
+}
+
+func buildToolResultMessage(requested []ai.ToolCall, executed []executedToolCall) ai.Message {
+	results := make(map[string]tools.Result, len(executed))
+	for _, item := range executed {
+		results[item.call.ID] = item.result
+	}
+	parts := make([]ai.ContentPart, 0, len(requested))
+	for _, call := range requested {
+		result, ok := results[call.ID]
+		if !ok {
+			result = tools.Result{IsError: true, Content: fmt.Sprintf("tool %q was interrupted before producing a result", call.Name)}
+		}
+		parts = append(parts, ai.ContentPart{
+			Type: ai.ContentTypeToolResult,
+			ToolResult: &ai.ToolResult{
+				ToolCallID: call.ID,
+				Content:    result.Content,
+				IsError:    result.IsError,
+			},
+		})
+	}
+	return ai.Message{Role: ai.RoleTool, Content: parts}
+}
+
 func (a *Agent) executeToolCallsParallel(ctx context.Context, toolCalls []ai.ToolCall) []executedToolCall {
+	todoState := a.beginGraphTodo(ctx, toolCalls)
 	decisionByCallID := make(map[string]ToolDecisionRecord, len(toolCalls))
 	decisionRecords := make([]ToolDecisionRecord, 0, len(toolCalls))
 	requestCalls := make([]tools.OrchestrationCall, len(toolCalls))
@@ -615,8 +832,10 @@ func (a *Agent) executeToolCallsParallel(ctx context.Context, toolCalls []ai.Too
 			finishedAt: record.FinishedAt,
 			result:     record.Result,
 			decision:   decision,
+			todo:       todoState,
 		})
 	}
+	a.finishGraphTodo(ctx, todoState, results)
 
 	return results
 }
@@ -632,14 +851,16 @@ func (a *Agent) executeOrchestrationCall(ctx context.Context, call tools.Orchest
 	context := toolCallContext(tc)
 	decision := a.evaluateToolDecision(tc)
 
-	a.Emit(EventToolCall, ToolCallEvent{
+	event := ToolCallEvent{
 		ID:        tc.ID,
 		Name:      tc.Name,
 		Context:   context,
 		Args:      tc.Args,
 		Decision:  decision,
 		StartedAt: startedAt,
-	})
+	}
+	a.fillTodoEvent(&event)
+	a.Emit(EventToolCall, event)
 
 	status := fmt.Sprintf("running %s", tc.Name)
 	if context != "" {
@@ -928,6 +1149,125 @@ func buildToolSchemas(reg *tools.Registry) []ai.ToolSchema {
 	return schemas
 }
 
+func (a *Agent) buildActiveToolSchemas() []ai.ToolSchema {
+	all := buildToolSchemas(a.tools)
+	if a.toolProfile != nil {
+		return filterToolSchemas(all, a.toolProfile)
+	}
+	return all
+}
+
+func (a *Agent) selectToolProfile(ctx context.Context, userPrompt string) map[string]bool {
+	all := buildToolSchemas(a.tools)
+	if len(all) == 0 || a.Provider() == nil {
+		return nil
+	}
+	system := `Classify the current user request for tool personalization only.
+Return exactly one JSON object and no other text: {"category":"..."}.
+Allowed categories: feature_addition, bug_fix, issue_investigation, review, test, plan, question, direct_command, conversation, unknown.
+Do not answer the request and do not call tools.`
+	request := ai.CompletionRequest{
+		Messages:    []ai.Message{ai.NewTextMessage(ai.RoleUser, userPrompt)},
+		System:      system,
+		Temperature: 0,
+		MaxTokens:   128,
+		Stream:      false,
+	}
+	routerCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	resp, err := a.Provider().Complete(routerCtx, request)
+	if err != nil || resp == nil {
+		return nil
+	}
+	var text strings.Builder
+	for chunk := range resp.Stream() {
+		if chunk.Text != "" {
+			text.WriteString(chunk.Text)
+		}
+	}
+	var selected struct {
+		Category string `json:"category"`
+	}
+	if json.Unmarshal([]byte(extractJSONObject(text.String())), &selected) != nil {
+		return nil
+	}
+	switch selected.Category {
+	case "feature_addition", "bug_fix", "direct_command":
+		return allToolNames(all)
+	case "test":
+		return verificationToolNames()
+	case "issue_investigation", "review", "plan", "question":
+		return readOnlyToolNames()
+	case "conversation":
+		return contextToolNames()
+	default:
+		return allToolNames(all)
+	}
+}
+
+func extractJSONObject(value string) string {
+	value = strings.TrimSpace(value)
+	start := strings.IndexByte(value, '{')
+	end := strings.LastIndexByte(value, '}')
+	if start < 0 || end < start {
+		return value
+	}
+	return value[start : end+1]
+}
+
+func allToolNames(all []ai.ToolSchema) map[string]bool {
+	names := make(map[string]bool, len(all))
+	for _, schema := range all {
+		names[schema.Name] = true
+	}
+	return names
+}
+
+func readOnlyToolNames() map[string]bool {
+	names := map[string]bool{
+		"read_file": true, "view": true, "list_directory": true,
+		"grep": true, "glob": true, "search": true,
+		"lsp_diagnostics": true, "list_shells": true, "read_shell": true,
+		"list_agents": true, "read_agent": true,
+		"web_search": true, "web_fetch": true,
+	}
+	for name := range contextToolNames() {
+		names[name] = true
+	}
+	return names
+}
+
+func verificationToolNames() map[string]bool {
+	names := readOnlyToolNames()
+	names["bash"] = true
+	names["write_shell"] = true
+	names["stop_shell"] = true
+	return names
+}
+
+func contextToolNames() map[string]bool {
+	return map[string]bool{
+		"context_bucket_create": true, "context_bucket_list": true,
+		"context_bucket_get": true, "context_bucket_update": true,
+		"context_share": true, "remember": true,
+	}
+}
+
+func filterToolSchemas(all []ai.ToolSchema, allowed map[string]bool) []ai.ToolSchema {
+	filtered := make([]ai.ToolSchema, 0, len(all))
+	for _, schema := range all {
+		if allowed[schema.Name] {
+			filtered = append(filtered, schema)
+		}
+	}
+	// A registry mismatch must not strand the model without tools. Returning
+	// the registered surface is safer than silently sending an empty list.
+	if len(filtered) == 0 {
+		return all
+	}
+	return filtered
+}
+
 // checkContextLimit emits warning/critical events when context usage is high.
 // It uses the approximate token count so no provider API call is needed.
 func (a *Agent) checkContextLimit(provider ai.Provider, messages []ai.Message) {
@@ -1073,6 +1413,33 @@ func (a *Agent) GraphEngine() *engine.GraphEngine {
 	return a.graphEngine
 }
 
+// ContextToolRegistration reports whether graph-backed context operations were
+// made available to the model. The graph remains a recommendation/state plane;
+// these tools mutate only explicit context buckets and memories.
+type ContextToolRegistration struct {
+	Enabled bool
+	Names   []string
+	Reason  string
+}
+
+// RegisterContextTools exposes graph-backed context operations to the model.
+func (a *Agent) RegisterContextTools() ContextToolRegistration {
+	graphEngine := a.GraphEngine()
+	if graphEngine == nil || a.tools == nil {
+		reason := "graph engine unavailable"
+		if a.tools == nil {
+			reason = "tool registry unavailable"
+		}
+		return ContextToolRegistration{Reason: reason}
+	}
+	contexttools.Register(a.tools, graphEngine.BucketManager, graphEngine.RememberTool)
+	names := []string{"context_bucket_create", "context_bucket_list", "context_bucket_get", "context_bucket_update", "context_share"}
+	if graphEngine.RememberTool != nil {
+		names = append(names, "remember")
+	}
+	return ContextToolRegistration{Enabled: true, Names: names, Reason: "graph engine initialized"}
+}
+
 // runCoordinatorIfNeeded runs the coordinator for complex tasks that benefit from multi-agent execution.
 // Returns (result string, error). If result is non-nil and error is nil, the task is complete.
 func (a *Agent) runCoordinatorIfNeeded(ctx context.Context, prompt string) (string, error) {
@@ -1202,23 +1569,7 @@ func (a *Agent) initializeCoordinatorWithPromptSystem() error {
 // getSystemPrompt returns the system prompt using the new prompt system.
 // Falls back to legacy buildSystemPrompt if prompt system is not available or exhausted.
 func (a *Agent) getSystemPrompt(ctx context.Context, provider ai.Provider) string {
-	// If prompt system is enabled and has pending staged prompts, use them
 	if a.cfg != nil && a.cfg.PromptSystemEnabled && a.promptSystem != nil {
-		// Check for next staged prompt from first message processing
-		if nextPrompt := a.promptSystem.GetNextAction(); nextPrompt != nil {
-			a.Emit(EventStatus, fmt.Sprintf("using staged prompt: %s", nextPrompt.Stage))
-			return nextPrompt.Content
-		}
-
-		// If we have a categorized request with todo items, build a todo-aware prompt
-		if categorized := a.promptSystem.GetCurrentRequest(); categorized != nil && len(categorized.TodoItems) > 0 {
-			// Build context-aware prompt for current todo
-			if nextTodo := a.getNextTodoPrompt(); nextTodo != nil {
-				return nextTodo.Content
-			}
-		}
-
-		// Build standard prompt using prompt system (todo-aware, context-aware)
 		return a.buildPromptSystemPrompt(ctx, provider)
 	}
 
@@ -1271,12 +1622,8 @@ func (a *Agent) buildPromptSystemPrompt(ctx context.Context, provider ai.Provide
 		sb.WriteString(selectedContext)
 		sb.WriteString("\n")
 
-		// Tools
-		sb.WriteString("## Available Tools\n")
-		for _, tool := range a.tools.All() {
-			sb.WriteString(fmt.Sprintf("- %s: %s\n", tool.Name(), tool.Description()))
-		}
-		sb.WriteString("\n")
+			sb.WriteString("## Tool Policy\nUse only the native tools exposed for this request. Do not invent unavailable tools.\n\n")
+			sb.WriteString(renderLiveToolContract(a.tools))
 
 		// Safety protocols (abbreviated)
 		sb.WriteString("## Safety & Blast Radius\n")
@@ -1297,9 +1644,7 @@ func (a *Agent) buildPromptSystemPrompt(ctx context.Context, provider ai.Provide
 
 	// Current task context
 	if categorized := a.promptSystem.GetCurrentRequest(); categorized != nil {
-		sb.WriteString(fmt.Sprintf("## Current Task: %s\n", categorized.OriginalPrompt))
-		sb.WriteString(fmt.Sprintf("Category: %s | Complexity: %s | Strategy: %s\n\n",
-			categorized.Category, categorized.Complexity, categorized.Strategy))
+		sb.WriteString(fmt.Sprintf("## Current Request\n%s\n\n", categorized.OriginalPrompt))
 
 		// Todo progress
 		if len(categorized.TodoItems) > 0 {
@@ -1339,13 +1684,21 @@ func (a *Agent) buildPromptSystemPrompt(ctx context.Context, provider ai.Provide
 			sb.WriteString("\n")
 		}
 	}
-
-	// Tools
-	sb.WriteString("## Available Tools\n")
-	for _, tool := range a.tools.All() {
-		sb.WriteString(fmt.Sprintf("- %s: %s\n", tool.Name(), tool.Description()))
+	if a.graphAnalysis != nil {
+		sb.WriteString("## Graph Analysis\n")
+		sb.WriteString(fmt.Sprintf("Relation: %s | Risk: %s | Scope: %s\n", a.graphAnalysis.Relation, a.graphAnalysis.Risk, a.graphAnalysis.Scope))
+		sb.WriteString(fmt.Sprintf("Needs wiring: %t | Needs verification: %t\n", a.graphAnalysis.NeedsWiring, a.graphAnalysis.NeedsVerification))
+		if len(a.graphAnalysis.EntryPointHints) > 0 {
+			sb.WriteString("Product entry points: " + strings.Join(a.graphAnalysis.EntryPointHints, ", ") + "\n")
+		}
+		if len(a.graphAnalysis.Context) > 0 {
+			sb.WriteString(fmt.Sprintf("Context sharing: %s (%s)\n", a.graphAnalysis.Context[0].Mode, a.graphAnalysis.Context[0].Reason))
+		}
+		sb.WriteString("\n")
 	}
-	sb.WriteString("\n")
+
+	sb.WriteString("## Tool Policy\nUse only the native tools exposed for this request. Do not invent unavailable tools.\n\n")
+	sb.WriteString(renderLiveToolContract(a.tools))
 
 	// Safety protocols (abbreviated)
 	sb.WriteString("## Safety & Blast Radius\n")
@@ -1374,6 +1727,37 @@ func (a *Agent) buildPromptSystemPrompt(ctx context.Context, provider ai.Provide
 		sb.WriteString("[Note: Conversation history is long. Focus on recent state and established plan.]\n\n")
 	}
 
+	return sb.String()
+}
+
+// renderLiveToolContract gives the model an actionable contract for the
+// native file and verification tools. Schemas describe arguments, but this
+// explains sequencing and prevents the model from silently skipping edits.
+func renderLiveToolContract(reg *tools.Registry) string {
+	if reg == nil { return "" }
+	available := func(name string) bool { _, ok := reg.Get(name); return ok }
+	var sb strings.Builder
+	sb.WriteString("## Native Tool Contract\n")
+	sb.WriteString("Use tools to inspect and change the repository; never claim a change was made without a successful tool result. Read the current file before editing it.\n")
+	if available("read_file") || available("view") {
+		sb.WriteString("- Read: use `read_file` (or `view`) with `path`; use `start_line`/`end_line` when supported.\n")
+	}
+	if available("search") || available("grep") || available("glob") {
+		sb.WriteString("- Explore: use `search`/`grep` for symbols and `glob` for file discovery before choosing files.\n")
+	}
+	if available("edit_file") {
+		sb.WriteString("- Edit existing files: use `edit_file` with `path`, exact `old_str`, and `new_str`; set `replace_all` only when every match should change.\n")
+	}
+	if available("write_file") {
+		sb.WriteString("- Replace or create complete content: use `write_file` with `path` and `content`; prefer `edit_file` for localized changes.\n")
+	}
+	if available("create_file") {
+		sb.WriteString("- New file: use `create_file` with `path` and `content`; do not use an unavailable editor or shell redirection.\n")
+	}
+	if available("bash") || available("run_command") {
+		sb.WriteString("- Verify: after edits, run the narrowest relevant build/test command with `bash`/`run_command`, then fix failures or report them.\n")
+	}
+	sb.WriteString("Tool calls are grouped under the active todo. Keep exploration, implementation, and verification evidence in their respective context buckets.\n\n")
 	return sb.String()
 }
 
@@ -1544,193 +1928,39 @@ func (a *Agent) runGraphPipeline(ctx context.Context, prompt string, isFirstMess
 // runPromptSystemPipeline runs the new internal/prompt system pipeline for a user request.
 // Returns nil if the pipeline completed the task, error if it failed (fallback to standard loop).
 func (a *Agent) runPromptSystemPipeline(ctx context.Context, prompt string, isFirstMessage bool) error {
-	a.Emit(EventStatus, "🧠 Running prompt system pipeline...")
-
-	// Process the user message through the new prompt system
-	parts, err := a.promptSystem.ProcessUserMessage(ctx, prompt, a.workDir, nil)
-	if err != nil {
-		return fmt.Errorf("prompt system processing failed: %w", err)
-	}
-
-	// Get the categorized request
-	categorized := a.promptSystem.GetCurrentRequest()
-	if categorized == nil {
-		return fmt.Errorf("no categorized request")
-	}
-
-	a.Emit(EventStatus, fmt.Sprintf("📋 Categorized as: %s (complexity: %s, strategy: %s)",
-		categorized.Category, categorized.Complexity, categorized.Strategy))
-
-	// If requires coder, initialize coordinator with prompt system
-	if categorized.RequiresCoder {
-		a.Emit(EventStatus, "🔧 Initializing coordinator with prompt system...")
-		a.initializeCoordinatorWithPromptSystem()
-	}
-
-	// Send staged prompts
-	for i, part := range parts {
-		a.Emit(EventStatus, fmt.Sprintf("📤 Prompt stage %d/%d: %s", i+1, len(parts), part.Stage))
-
-		// Build request with the prompt part as system prompt
-		toolSchemas := buildToolSchemas(a.tools)
-		thinkingBudget := a.getThinkingBudget()
-
-		req := ai.CompletionRequest{
-			Messages:    a.sess.Messages,
-			Tools:       toolSchemas,
-			System:      part.Content,
-			Temperature: 0.0,
-			MaxTokens:   8192,
-			Stream:      true,
-			Thinking: &ai.ThinkingConfig{
-				Type:         "enabled",
-				BudgetTokens: thinkingBudget,
-				Stream:       true,
-			},
-		}
-
-		resp, err := a.Provider().Complete(ctx, req)
+	a.Emit(EventStatus, "🧠 Preparing graph and prompt context")
+	if graphEngine := a.GraphEngine(); graphEngine != nil {
+		result, err := graphEngine.ProcessUserRequest(ctx, prompt)
 		if err != nil {
-			return fmt.Errorf("prompt stage %d failed: %w", i, err)
+			return fmt.Errorf("graph analysis failed: %w", err)
 		}
-
-		text, thought, usage, err := a.drainStream(resp)
-		if err != nil {
-			return fmt.Errorf("prompt stage %d stream failed: %w", i, err)
+		if id, err := uuid.Parse(result.TaskID); err == nil {
+			a.graphTaskID = id
 		}
-
-		// Add assistant response to session
-		msg := ai.Message{
-			Role:     ai.RoleAssistant,
-			Metadata: resp.GetMetadata(),
+		a.graphAnalysis = result.Analysis
+		if id, err := uuid.Parse(result.WorkflowID); err == nil {
+			a.graphWorkflow = id
 		}
-		if thought != "" {
-			msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeThought, Thought: thought})
-		}
-		if text != "" {
-			msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeText, Text: text})
-		}
-		if len(msg.Content) > 0 {
-			a.sess.AddMessage(msg)
-			a.recordToTranscript(msg)
-		}
-		a.sess.AddUsage(usage)
+		a.Emit(EventStatus, fmt.Sprintf("graph context prepared; relation=%s; risk=%s; todos=%d",
+			result.Analysis.Relation, result.Analysis.Risk, len(result.Analysis.Todos)))
+		a.Emit(EventStatus, fmt.Sprintf("graph route: %s; task: %s", result.RouteType, result.TaskID))
 	}
+	// The normal loop is the only execution boundary. Analysis stages never
+	// call the provider and never receive tool schemas.
+	return errPromptSystemPrepared
+}
 
-	// After staged prompts, check if we have a todo workflow to execute
-	if categorized != nil && len(categorized.TodoItems) > 0 {
-		a.Emit(EventStatus, "📋 Executing todo workflow...")
-
-		// Get coder context and execute todos
-		coderCtx := a.promptSystem.GetCoderContext()
-		if coderCtx != nil {
-			for _, todo := range categorized.TodoItems {
-				if todo.Status == promptpkg.TodoStatusPending {
-					// Check dependencies
-					depsMet := true
-					for _, depID := range todo.Dependencies {
-						found := false
-						for _, t := range categorized.TodoItems {
-							if t.ID == depID && t.Status == promptpkg.TodoStatusCompleted {
-								found = true
-								break
-							}
-						}
-						if !found {
-							depsMet = false
-							break
-						}
-					}
-					if !depsMet {
-						continue
-					}
-
-					// Mark as in progress
-					for i := range categorized.TodoItems {
-						if categorized.TodoItems[i].ID == todo.ID {
-							categorized.TodoItems[i].Status = promptpkg.TodoStatusInProgress
-							break
-						}
-					}
-
-					a.Emit(EventStatus, fmt.Sprintf("⚙️ Executing todo: %s", todo.Description))
-
-					// Build execution prompt for this todo
-					execPrompt := a.promptSystem.Manager.CoderPrompts().BuildExecutionPrompt(
-						coderCtx, &todo, categorized)
-
-					toolSchemas := buildToolSchemas(a.tools)
-					thinkingBudget := a.getThinkingBudget()
-
-					req := ai.CompletionRequest{
-						Messages:    a.sess.Messages,
-						Tools:       toolSchemas,
-						System:      execPrompt.Content,
-						Temperature: 0.0,
-						MaxTokens:   8192,
-						Stream:      true,
-						Thinking: &ai.ThinkingConfig{
-							Type:         "enabled",
-							BudgetTokens: thinkingBudget,
-							Stream:       true,
-						},
-					}
-
-					resp, err := a.Provider().Complete(ctx, req)
-					if err != nil {
-						a.Emit(EventStatus, fmt.Sprintf("Todo failed: %v", err))
-						continue
-					}
-
-					text, thought, usage, err := a.drainStream(resp)
-					if err != nil {
-						continue
-					}
-
-					// Add response to session
-					msg := ai.Message{
-						Role:     ai.RoleAssistant,
-						Metadata: resp.GetMetadata(),
-					}
-					if thought != "" {
-						msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeThought, Thought: thought})
-					}
-					if text != "" {
-						msg.Content = append(msg.Content, ai.ContentPart{Type: ai.ContentTypeText, Text: text})
-					}
-					if len(msg.Content) > 0 {
-						a.sess.AddMessage(msg)
-						a.recordToTranscript(msg)
-					}
-					a.sess.AddUsage(usage)
-
-					// Mark todo as completed
-					for i := range categorized.TodoItems {
-						if categorized.TodoItems[i].ID == todo.ID {
-							categorized.TodoItems[i].Status = promptpkg.TodoStatusCompleted
-							break
-						}
-					}
-
-					a.Emit(EventStatus, fmt.Sprintf("✅ Todo completed: %s", todo.Description))
-				}
-			}
-		}
+func complexityLabel(result *analysis.RequestAnalysis) string {
+	if result == nil {
+		return "unknown"
 	}
-
-	// Final response
-	a.Emit(EventStatus, "✅ Prompt system pipeline completed")
-
-	// If we have a result, add to session
-	if categorized != nil && categorized.OriginalPrompt != "" {
-		msg := ai.NewTextMessage(ai.RoleAssistant, "Task completed via prompt system pipeline")
-		a.sess.AddMessage(msg)
-		a.recordToTranscript(msg)
-		a.Emit(EventDone, "Task completed")
-		return nil
+	if len(result.Todos) >= 4 || result.NeedsWiring {
+		return "complex"
 	}
-
-	return nil
+	if len(result.Todos) > 1 || result.RequiresCoder {
+		return "moderate"
+	}
+	return "simple"
 }
 
 func (a *Agent) resumeGraphTask(ctx context.Context, taskID string, relation continuity.TaskRelation) error {
@@ -1745,6 +1975,17 @@ func (a *Agent) resumeGraphTask(ctx context.Context, taskID string, relation con
 
 func generateID() string {
 	return fmt.Sprintf("%d", time.Now().UnixNano())
+}
+
+func isCasualMessage(message string) bool {
+	normalized := strings.ToLower(strings.TrimSpace(message))
+	normalized = strings.Trim(normalized, "!.,? ")
+	switch normalized {
+	case "hi", "hello", "hey", "hiya", "good morning", "good afternoon", "good evening":
+		return true
+	default:
+		return false
+	}
 }
 
 func min(a, b int) int {

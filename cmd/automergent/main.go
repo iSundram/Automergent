@@ -23,6 +23,7 @@ import (
 	googleProvider "github.com/iSundram/Automergent/internal/ai/google"
 	"github.com/iSundram/Automergent/internal/cache"
 	"github.com/iSundram/Automergent/internal/config"
+	"github.com/iSundram/Automergent/internal/debug"
 	automergentErrors "github.com/iSundram/Automergent/internal/errors"
 	"github.com/iSundram/Automergent/internal/git"
 	planningPkg "github.com/iSundram/Automergent/internal/planning"
@@ -377,6 +378,17 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Build agent
 	ag := agent.New(cfg, provider, sess, reg)
+	// Graph-backed context operations are registered after the agent exists so
+	// they share the same persistent task/bucket store as orchestration.
+	contextTools := ag.RegisterContextTools()
+	if cfg.Verbose || cfg.Debug.Enabled {
+		graphPath := filepath.Join(".automergent", "graph.db")
+		if wd, err := os.Getwd(); err == nil {
+			graphPath = filepath.Join(wd, graphPath)
+		}
+		fmt.Fprintf(os.Stderr, "[GRAPH] prompt_system_enabled=%t config_file=%q graph_initialized=%t graph_db=%q context_tools=%v reason=%q\n",
+			cfg.PromptSystemEnabled, cfg.ConfigFile, contextTools.Enabled, graphPath, contextTools.Names, contextTools.Reason)
+	}
 	ag.SetSessionPersist(func() {
 		// The TUI can switch sessions after startup. Persist the agent's
 		// current session rather than the pointer captured during launch.
@@ -1219,8 +1231,21 @@ func resolveProvider(cfg *config.Config) (aiPkg.Provider, error) {
 	}
 
 	if shouldWrapPromptCacheProvider(cfg, provider) {
-		return cache.NewCachingProvider(provider, cache.NewPromptCache()), nil
+		provider = cache.NewCachingProvider(provider, cache.NewPromptCache())
 	}
+
+	// Wrap with debug provider if debug mode is enabled
+	if cfg.Debug.Enabled {
+		sessionID := debug.NewSessionID()
+		logger, err := debug.NewLogger(cfg.Debug, sessionID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create debug logger: %w", err)
+		}
+		if logger != nil {
+			provider = debug.NewDebugProvider(provider, logger)
+		}
+	}
+
 	return provider, nil
 }
 
@@ -1262,6 +1287,13 @@ func decodeConfigFromViper(cfg *config.Config) error {
 	// This handles mapstructure tags correctly.
 	if err := viper.Unmarshal(cfg); err != nil {
 		return fmt.Errorf("viper unmarshal: %w", err)
+	}
+	// Keep this feature flag explicit. Viper's decode behavior can vary when a
+	// config file is absent, when an environment key is present, or when a
+	// previously-used Viper instance is reset. The default must remain intact
+	// unless the user actually supplied the key.
+	if viper.IsSet("promptSystemEnabled") {
+		cfg.PromptSystemEnabled = viper.GetBool("promptSystemEnabled")
 	}
 	return nil
 }

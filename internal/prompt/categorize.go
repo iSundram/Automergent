@@ -45,6 +45,17 @@ func (c *Categorizer) Categorize(prompt string, workingDir string, files []strin
 }
 
 func (c *Categorizer) detectCategory(prompt string) RequestCategory {
+	// Inquiry phrasing takes precedence over verbs that may occur inside the
+	// question (for example, "which files implement search?").
+	if containsAny(prompt, []string{
+		"tell me", "which files", "what files", "where is", "how does",
+		"read files", "explain",
+	}) {
+		if containsAny(prompt, []string{"issue", "issues", "error", "broken", "not working"}) {
+			return CategoryIssueSuspect
+		}
+		return CategoryUserAsking
+	}
 	// New feature keywords
 	if containsAny(prompt, []string{
 		"add", "create", "implement", "build", "new feature", "new function",
@@ -56,7 +67,8 @@ func (c *Categorizer) detectCategory(prompt string) RequestCategory {
 	// Issue suspect keywords (must come before debug to catch "suspect" before "issue")
 	if containsAny(prompt, []string{
 		"suspect", "might be", "could be", "possibly", "think it's",
-		"investigate", "check if", "verify if", "look into",
+		"investigate", "check if", "verify if", "look into", "tell issues",
+		"find issues", "identify issues", "related files", "root cause",
 	}) {
 		return CategoryIssueSuspect
 	}
@@ -115,6 +127,8 @@ func (c *Categorizer) detectComplexity(prompt string, files []string) TaskComple
 	moderateIndicators := []string{
 		"add", "create", "implement", "modify", "update", "change",
 		"new", "feature", "function", "component", "module", "api",
+		"read files", "related files", "search", "grep", "analyze",
+		"issues", "inspect", "understand", "compare",
 	}
 
 	if containsAny(prompt, complexIndicators) || len(files) > 10 {
