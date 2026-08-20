@@ -229,6 +229,11 @@ func (i Input) Update(msg tea.Msg) (Input, tea.Cmd) {
 			i.pastedContent = ""
 		}
 
+		// Consume Enter/Ctrl+M when input is empty - app handles sending, prevent textarea adding newline
+		if (km.String() == "enter" || km.String() == "ctrl+m") && strings.TrimSpace(i.ta.Value()) == "" {
+			return i, nil
+		}
+
 		switch km.String() {
 		case "alt+up", "ctrl+p":
 			if len(i.history) > 0 {
