@@ -391,7 +391,7 @@ func (a *Agent) summarizeWithLLM(ctx context.Context, messages []ai.Message, pro
 		System:      "You are a precise technical summarizer. Extract and condense key information without adding interpretation.",
 		Temperature: 0.3,
 		MaxTokens:   1000,
-		Stream:      false,
+		Stream:      true,
 	}
 
 	// Call provider

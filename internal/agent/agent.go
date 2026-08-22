@@ -1037,7 +1037,7 @@ Do not answer the request and do not call tools.`
 		System:      system,
 		Temperature: 0,
 		MaxTokens:   128,
-		Stream:      false,
+		Stream:      true,
 	}
 	routerCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
 	defer cancel()
