@@ -32,8 +32,9 @@ func TestRunReasoningPreAnalysisEnabledInvokesAnalyzerAndEmitsStatus(t *testing.
 	if analyzedPrompt != prompt {
 		t.Fatalf("expected analyzer prompt %q, got %q", prompt, analyzedPrompt)
 	}
-	if len(provider.userPrompts) != 1 {
-		t.Fatalf("expected provider call to proceed, got %d", len(provider.userPrompts))
+	// Prompt system makes 3 calls: intent identification, task planning, then main call
+	if len(provider.userPrompts) != 3 {
+		t.Fatalf("expected 3 provider calls (intent+planning+main), got %d", len(provider.userPrompts))
 	}
 
 	statuses := drainStatusEvents(ag.events)
@@ -58,8 +59,9 @@ func TestRunReasoningPreAnalysisErrorDoesNotBlockProvider(t *testing.T) {
 	if called != 1 {
 		t.Fatalf("expected analyzer to be called once, got %d", called)
 	}
-	if len(provider.userPrompts) != 1 {
-		t.Fatalf("expected provider call to proceed, got %d", len(provider.userPrompts))
+	// Prompt system makes 3 calls: intent identification, task planning, then main call
+	if len(provider.userPrompts) != 3 {
+		t.Fatalf("expected 3 provider calls (intent+planning+main), got %d", len(provider.userPrompts))
 	}
 
 	statuses := drainStatusEvents(ag.events)

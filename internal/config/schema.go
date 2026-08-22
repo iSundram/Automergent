@@ -231,11 +231,7 @@ func DefaultSchema() *Schema {
 				Default:     false,
 				Description: "Enable reasoning pre-analysis for each prompt",
 			},
-			"promptSystemEnabled": {
-				Type:        TypeBool,
-				Default:     true,
-				Description: "Enable graph-backed prompt and context orchestration",
-			},
+
 			"security.sandbox": {
 				Type:        TypeString,
 				Default:     "auto",

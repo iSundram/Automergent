@@ -13,6 +13,18 @@ import (
 	"github.com/iSundram/Automergent/internal/tools"
 )
 
+type mockLLMProvider struct {
+	ai.Provider
+}
+
+func (m *mockLLMProvider) Name() string { return "test-provider" }
+func (m *mockLLMProvider) Complete(ctx context.Context, req ai.CompletionRequest) (ai.CompletionResponse, error) {
+	return ai.NewStaticResponse("ok", "", nil, ai.StopReasonEnd, ai.Usage{}), nil
+}
+func (m *mockLLMProvider) Models(ctx context.Context) ([]ai.Model, error) { return nil, nil }
+func (m *mockLLMProvider) TokenCount(messages []ai.Message) (int, error) { return 0, nil }
+func (m *mockLLMProvider) ContextLimit() int { return 128000 }
+
 type scopeTestTool struct {
 	readOnly    bool
 	destructive bool
@@ -224,7 +236,8 @@ func TestNewSeedsApprovalsFromSession(t *testing.T) {
 
 	tc := ai.ToolCall{Name: tool.Name(), Args: map[string]any{"operation": "write"}}
 
-	ag := New(&config.Config{Mode: "plan"}, nil, nil, reg)
+	provider := &mockLLMProvider{}
+	ag := New(&config.Config{Mode: "plan"}, provider, nil, reg)
 	// Seed the session with the project-scoped key that New() will look up.
 	sess := session.New()
 	sess.AddApproval(ag.scopedToolApprovalKey(tc, tool), "tui")

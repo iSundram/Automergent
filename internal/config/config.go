@@ -44,7 +44,6 @@ type Config struct {
 	Verbose     bool   `mapstructure:"verbose" yaml:"verbose"`
 
 	ReasoningPreAnalysis bool `mapstructure:"reasoningPreAnalysis" yaml:"reasoningPreAnalysis"`
-	PromptSystemEnabled  bool `mapstructure:"promptSystemEnabled" yaml:"promptSystemEnabled"`
 
 	Security  SecurityConfig            `mapstructure:"security" yaml:"security"`
 	Tools     map[string]ToolConfig     `mapstructure:"tools" yaml:"tools"`
@@ -260,6 +259,7 @@ type ProviderConfig struct {
 	Project      string                 `mapstructure:"project" yaml:"project,omitempty"`
 	Location     string                 `mapstructure:"location" yaml:"location,omitempty"`
 	Effort       string                 `mapstructure:"effort" yaml:"effort,omitempty"`
+	ThinkingLevel string                `mapstructure:"thinkingLevel" yaml:"thinkingLevel,omitempty"`
 	Models       map[string]ModelConfig `mapstructure:"models" yaml:"models,omitempty"`
 }
 

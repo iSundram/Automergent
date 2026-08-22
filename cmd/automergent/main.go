@@ -382,12 +382,8 @@ func run(cmd *cobra.Command, args []string) error {
 	// they share the same persistent task/bucket store as orchestration.
 	contextTools := ag.RegisterContextTools()
 	if cfg.Verbose || cfg.Debug.Enabled {
-		graphPath := filepath.Join(".automergent", "graph.db")
-		if wd, err := os.Getwd(); err == nil {
-			graphPath = filepath.Join(wd, graphPath)
-		}
-		fmt.Fprintf(os.Stderr, "[GRAPH] prompt_system_enabled=%t config_file=%q graph_initialized=%t graph_db=%q context_tools=%v reason=%q\n",
-			cfg.PromptSystemEnabled, cfg.ConfigFile, contextTools.Enabled, graphPath, contextTools.Names, contextTools.Reason)
+		fmt.Fprintf(os.Stderr, "[CONTEXT] config_file=%q context_enabled=%v reason=%q\n",
+			cfg.ConfigFile, contextTools.Enabled, contextTools.Reason)
 	}
 	ag.SetSessionPersist(func() {
 		// The TUI can switch sessions after startup. Persist the agent's
@@ -1292,9 +1288,6 @@ func decodeConfigFromViper(cfg *config.Config) error {
 	// config file is absent, when an environment key is present, or when a
 	// previously-used Viper instance is reset. The default must remain intact
 	// unless the user actually supplied the key.
-	if viper.IsSet("promptSystemEnabled") {
-		cfg.PromptSystemEnabled = viper.GetBool("promptSystemEnabled")
-	}
 	return nil
 }
 

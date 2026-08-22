@@ -4,6 +4,8 @@ import (
 	"context"
 
 	contextpkg "github.com/iSundram/Automergent/internal/context"
+	"github.com/iSundram/Automergent/internal/taskstate"
+	"github.com/iSundram/Automergent/internal/tools"
 )
 
 // PromptSystem provides a unified interface for all prompt operations.
@@ -14,29 +16,14 @@ type PromptSystem struct {
 	workingDir string
 }
 
-// NewPromptSystem creates a new prompt system with default configuration.
-func NewPromptSystem() *PromptSystem {
-	config := DefaultPromptConfig()
-	return &PromptSystem{
-		Manager:    NewPromptManager(config, nil, ""),
-		Config:     config,
-		workingDir: "",
+// NewPromptSystemWithLLM creates a new prompt system with an LLM client for intent identification.
+func NewPromptSystemWithLLM(config *PromptConfig, mgr *contextpkg.Manager, workingDir string, llmClient LLMClient, toolRegistry *tools.Registry) *PromptSystem {
+	var toolExecutor ToolExecutor
+	if toolRegistry != nil {
+		toolExecutor = NewToolExecutorAdapter(toolRegistry)
 	}
-}
-
-// NewPromptSystemWithConfig creates a new prompt system with custom configuration.
-func NewPromptSystemWithConfig(config *PromptConfig) *PromptSystem {
 	return &PromptSystem{
-		Manager:    NewPromptManager(config, nil, ""),
-		Config:     config,
-		workingDir: "",
-	}
-}
-
-// NewPromptSystemWithContextManager creates a new prompt system with a context manager.
-func NewPromptSystemWithContextManager(config *PromptConfig, mgr *contextpkg.Manager, workingDir string) *PromptSystem {
-	return &PromptSystem{
-		Manager:    NewPromptManager(config, mgr, workingDir),
+		Manager:    NewPromptManager(config, mgr, workingDir, llmClient, toolExecutor),
 		Config:     config,
 		workingDir: workingDir,
 	}
@@ -49,7 +36,6 @@ func (ps *PromptSystem) ProcessUserMessage(ctx context.Context, userMessage, wor
 
 // GetNextAction gets the next prompt part for execution.
 func (ps *PromptSystem) GetNextAction() *PromptPart {
-	// Try to get next todo
 	if todoPrompt := ps.Manager.GetNextTodoPrompt(); todoPrompt != nil {
 		return todoPrompt
 	}
@@ -86,9 +72,19 @@ func (ps *PromptSystem) GetAssistantContext() *AssistantContext {
 	return ps.Manager.GetAssistantContext()
 }
 
-// GetCurrentRequest returns the current categorized request.
-func (ps *PromptSystem) GetCurrentRequest() *CategorizedRequest {
-	return ps.Manager.GetCurrentRequest()
+// GetCurrentIntentSet returns the current intent set.
+func (ps *PromptSystem) GetCurrentIntentSet() *IntentSet {
+	return ps.Manager.GetCurrentIntentSet()
+}
+
+// GetCurrentTasks returns the current generated tasks.
+func (ps *PromptSystem) GetCurrentTasks() []TaskSpec {
+	return ps.Manager.GetCurrentTasks()
+}
+
+// GetTaskState returns the task state store for tool access.
+func (ps *PromptSystem) GetTaskState() *taskstate.Store {
+	return ps.Manager.taskState
 }
 
 // GetStashedContexts returns all stashed contexts.
@@ -96,7 +92,12 @@ func (ps *PromptSystem) GetStashedContexts() []ContextStash {
 	return ps.Manager.GetStashedContexts()
 }
 
-// GetSelectedContext returns the selected context for the current request.
+// GetInitResults returns the init phase results.
+func (ps *PromptSystem) GetInitResults() *InitResults {
+	return ps.Manager.GetInitResults()
+}
+
+// GetSelectedContext returns the selected context for the current tasks.
 func (ps *PromptSystem) GetSelectedContext(ctx context.Context) (string, error) {
 	return ps.Manager.GetSelectedContext(ctx)
 }

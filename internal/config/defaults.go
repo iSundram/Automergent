@@ -44,7 +44,6 @@ func Default() *Config {
 		Quiet:                false,
 		Verbose:              false,
 ReasoningPreAnalysis: false,
-	PromptSystemEnabled:  true,
 	Debug:                DefaultDebugConfig(),
 
 	Security: SecurityConfig{

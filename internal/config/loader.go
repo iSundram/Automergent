@@ -666,8 +666,7 @@ func setTopLevelField(cfg *Config, key string, value any) error {
 		cfg.Verbose = toBool(value)
 	case "reasoningPreAnalysis":
 		cfg.ReasoningPreAnalysis = toBool(value)
-	case "promptSystemEnabled":
-		cfg.PromptSystemEnabled = toBool(value)
+
 	case "zeroDataRetention":
 		cfg.ZeroDataRetention = toBool(value)
 	case "telemetry":

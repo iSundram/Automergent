@@ -8,44 +8,62 @@ import (
 	"time"
 
 	contextpkg "github.com/iSundram/Automergent/internal/context"
+	"github.com/iSundram/Automergent/internal/shared"
+	"github.com/iSundram/Automergent/internal/taskstate"
 )
 
 // PromptManager is the main entry point for the prompt system.
 // It orchestrates all prompt generators and manages the prompt lifecycle.
 type PromptManager struct {
 	config           *PromptConfig
-	categorizer      *Categorizer
+	intentIdentifier *LLMIntentIdentifier
+	initExecutor     *InitPhaseExecutor
+	taskPlanner      *LLMTaskPlanner
 	assistantPrompts *AssistantPrompts
 	coderPrompts     *CoderPrompts
 	contextPrompts   *ContextPrompts
 	workflowPrompts  *WorkflowPrompts
 	toolPrompts      *ToolPrompts
 	contextSelector  *ContextSelector
+	toolExecutor     ToolExecutor
 
 	// State
-	assistantContext *AssistantContext
-	coderContext     *CoderContext
-	currentRequest   *CategorizedRequest
-	promptHistory    []PromptPart
-	stashedContexts  []ContextStash
-	workingDir       string
-	mu               sync.RWMutex
+	assistantContext  *AssistantContext
+	coderContext      *CoderContext
+	currentIntentSet  *shared.IntentSet
+	currentInitPhase  *InitPhase
+	currentInitResults *shared.InitResults
+	currentTasks      []shared.TaskSpec
+	promptHistory     []PromptPart
+	stashedContexts   []ContextStash
+	workingDir        string
+	progress          func(stage, detail string)
+	mu                sync.RWMutex
+
+	// Task state store for tools
+	taskState *taskstate.Store
 }
 
-// NewPromptManager creates a new prompt manager.
-func NewPromptManager(config *PromptConfig, contextManager *contextpkg.Manager, workingDir string) *PromptManager {
+// NewPromptManager creates a new prompt manager with an LLM client for intent identification.
+func NewPromptManager(config *PromptConfig, contextManager *contextpkg.Manager, workingDir string, llmClient LLMClient, toolExecutor ToolExecutor) *PromptManager {
 	if config == nil {
 		config = DefaultPromptConfig()
+	}
+	if llmClient == nil {
+		panic("LLMClient is required for intent identification")
 	}
 
 	pm := &PromptManager{
 		config:           config,
-		categorizer:      NewCategorizer(config),
+		intentIdentifier: NewLLMIntentIdentifier(config, llmClient),
+		initExecutor:     NewInitPhaseExecutor(config),
+		taskPlanner:      NewLLMTaskPlanner(config, llmClient),
 		assistantPrompts: NewAssistantPrompts(config),
 		coderPrompts:     NewCoderPrompts(config),
 		contextPrompts:   NewContextPrompts(config),
 		workflowPrompts:  NewWorkflowPrompts(config),
 		toolPrompts:      NewToolPrompts(config),
+		toolExecutor:     toolExecutor,
 		assistantContext: &AssistantContext{
 			ConversationHistory: []Message{},
 			UserPreferences:     make(map[string]string),
@@ -54,9 +72,9 @@ func NewPromptManager(config *PromptConfig, contextManager *contextpkg.Manager, 
 		promptHistory:   []PromptPart{},
 		stashedContexts: []ContextStash{},
 		workingDir:      workingDir,
+		taskState:       taskstate.NewStore(),
 	}
 
-	// Initialize context selector if context manager is provided
 	if contextManager != nil {
 		pm.contextSelector = NewContextSelector(contextManager, workingDir, config)
 	}
@@ -69,113 +87,209 @@ func (pm *PromptManager) ProcessUserMessage(ctx context.Context, userMessage str
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	// Record the authored message once. Previously continuation messages were
-	// appended twice, which made relation detection and context ranking drift.
 	pm.assistantContext.ConversationHistory = append(pm.assistantContext.ConversationHistory, Message{
 		Role:      "user",
 		Content:   userMessage,
 		Timestamp: time.Now(),
 	})
 
-	// If this is the first message or no current request, categorize
-	if pm.currentRequest == nil {
-		return pm.startNewRequest(userMessage, workingDir, availableFiles)
+	if pm.currentIntentSet == nil {
+		return pm.startNewIntentFlow(ctx, userMessage, workingDir, availableFiles)
 	}
 
-	// Explicit context resets create a separate task while preserving the old
-	// task as a resumable stash.
 	if isNewTaskMessage(userMessage) {
 		pm.saveStashLocked("Auto-stash before independent task", []string{"auto", "independent-task"})
-		pm.currentRequest = nil
+		pm.currentIntentSet = nil
+		pm.currentInitPhase = nil
+		pm.currentInitResults = nil
+		pm.currentTasks = nil
+		pm.taskState = taskstate.NewStore()
 		pm.coderContext = nil
-		return pm.startNewRequest(userMessage, workingDir, availableFiles)
+		return pm.startNewIntentFlow(ctx, userMessage, workingDir, availableFiles)
 	}
 
-	// Otherwise, continue existing request
 	return pm.continueRequest(userMessage)
 }
 
-// startNewRequest starts processing a new user request.
-func (pm *PromptManager) startNewRequest(userMessage, workingDir string, availableFiles []string) ([]PromptPart, error) {
+// startNewIntentFlow starts processing a new user request using intent identification.
+func (pm *PromptManager) startNewIntentFlow(ctx context.Context, userMessage, workingDir string, availableFiles []string) ([]PromptPart, error) {
 	var parts []PromptPart
 
-	// Stage 1: Initial thinking
 	thinkingPrompt := *pm.assistantPrompts.BuildInitialThinkingPrompt(userMessage)
 	parts = append(parts, thinkingPrompt)
 	pm.promptHistory = append(pm.promptHistory, thinkingPrompt)
 
-	// Stage 2: Categorization
-	categorizePrompt := *pm.assistantPrompts.BuildCategorizationPrompt(userMessage, workingDir, availableFiles)
-	parts = append(parts, categorizePrompt)
-	pm.promptHistory = append(pm.promptHistory, categorizePrompt)
+	intentSet := pm.intentIdentifier.IdentifyIntents(ctx, userMessage, workingDir, availableFiles)
+	pm.currentIntentSet = intentSet
 
-	// Note: In actual use, the categorization would be done by the LLM
-	// For now, we do it programmatically
-	categorized := pm.categorizer.Categorize(userMessage, workingDir, availableFiles)
-	categorized.Relation = RequestRelationNew
-	categorized.ContextShare = ContextShareNone
-	pm.currentRequest = categorized
+	var intentNames []string
+	for _, intent := range intentSet.Intents {
+		intentNames = append(intentNames, string(intent.Type))
+	}
+	pm.notifyProgress("Intents", strings.Join(intentNames, ", "))
 
-	// Initialize coder context if needed
-	if categorized.RequiresCoder {
-		pm.coderContext = &CoderContext{
-			WorkingDir:        workingDir,
-			Files:             categorized.WorkingAreas,
-			CodeSnippets:      make(map[string]string),
-			Constraints:       []string{},
-			TodoItems:         categorized.TodoItems,
-			SharedContext:     make(map[string]string),
-			ParentAssistantID: "assistant-main",
+	pm.taskState.SetIntentAndInit(intentSet, nil)
+
+	pm.initExecutor.OnAction = func(action InitAction, execErr error) {
+		if execErr != nil {
+			pm.notifyProgress("Init", fmt.Sprintf("%s %s — failed: %v", action.Tool, action.Target, execErr))
+			return
+		}
+		switch action.Tool {
+		case "glob", "grep":
+			lines := strings.Count(strings.TrimSpace(action.Result), "\n") + 1
+			if strings.TrimSpace(action.Result) == "" {
+				lines = 0
+			}
+			pm.notifyProgress("Init", fmt.Sprintf("%s %s — %d results", action.Tool, action.Target, lines))
+		case "read":
+			pm.notifyProgress("Init", fmt.Sprintf("read %s — %d chars", action.Target, len(action.Result)))
+		default:
+			pm.notifyProgress("Init", fmt.Sprintf("%s %s", action.Tool, action.Target))
 		}
 	}
 
-	// Stage 3: Task definition
-	taskDefPrompt := *pm.assistantPrompts.BuildTaskDefinitionPrompt(categorized)
-	parts = append(parts, taskDefPrompt)
-	pm.promptHistory = append(pm.promptHistory, taskDefPrompt)
+	intentPrompt := pm.buildIntentIdentificationPrompt(intentSet)
+	parts = append(parts, *intentPrompt)
+	pm.promptHistory = append(pm.promptHistory, *intentPrompt)
 
-	// Stage 4: Initialize coder if needed
-	if categorized.RequiresCoder {
-		coderInitPrompt := *pm.coderPrompts.BuildCoderInitPrompt(pm.coderContext, categorized)
-		parts = append(parts, coderInitPrompt)
-		pm.promptHistory = append(pm.promptHistory, coderInitPrompt)
-	}
+	if intentSet.RequiresInit && intentSet.InitPhase != nil {
+		pm.currentInitPhase = intentSet.InitPhase
+		initPrompt := BuildInitPrompt(intentSet.InitPhase)
+		parts = append(parts, *initPrompt)
+		pm.promptHistory = append(pm.promptHistory, *initPrompt)
 
-	// Stage 5: Workflow plan or direct execution
-	switch categorized.Strategy {
-	case StrategyParallel, StrategyTodoWalkthrough:
-		workflowPrompt := *pm.coderPrompts.BuildWorkflowPlanPrompt(pm.coderContext, categorized)
-		parts = append(parts, workflowPrompt)
-		pm.promptHistory = append(pm.promptHistory, workflowPrompt)
-	case StrategyCoderAgent:
-		// For coder agent, workflow plan is part of coder init
-	case StrategyDirect:
-		if categorized.Complexity == ComplexitySimple {
-			simplePrompt := *pm.assistantPrompts.BuildSimpleTaskPrompt(categorized)
-			parts = append(parts, simplePrompt)
-			pm.promptHistory = append(pm.promptHistory, simplePrompt)
-		} else {
-			moderatePrompt := *pm.coderPrompts.BuildModerateTaskPrompt(pm.coderContext, categorized)
-			parts = append(parts, moderatePrompt)
-			pm.promptHistory = append(pm.promptHistory, moderatePrompt)
+		initResults, err := pm.initExecutor.Execute(ctx, intentSet.InitPhase, workingDir, pm.toolExecutor)
+		if err != nil {
+			return parts, fmt.Errorf("init phase failed: %w", err)
+		}
+		pm.currentInitResults = initResults
+		pm.taskState.SetIntentAndInit(intentSet, initResults)
+
+		tasks, err := pm.taskPlanner.PlanTasks(ctx, intentSet, initResults)
+		if err != nil {
+			return parts, fmt.Errorf("task planning failed: %w", err)
+		}
+		pm.currentTasks = tasks
+		pm.taskState.SetPlan(tasks, pm.convertTasksToTodos(tasks))
+		pm.notifyTaskPlan(tasks)
+
+		taskPrompt := BuildInitResultsPrompt(intentSet.InitPhase, intentSet)
+		parts = append(parts, *taskPrompt)
+		pm.promptHistory = append(pm.promptHistory, *taskPrompt)
+
+		taskPrompts := BuildTaskPrompts(tasks, initResults)
+		parts = append(parts, taskPrompts...)
+		for _, tp := range taskPrompts {
+			pm.promptHistory = append(pm.promptHistory, tp)
+		}
+
+		if pm.requiresCoder(tasks) {
+			pm.coderContext = &CoderContext{
+				WorkingDir:        workingDir,
+				Files:             initResults.FilesFound,
+				CodeSnippets:      initResults.CodeSnippets,
+				Constraints:       []string{},
+				TodoItems:         pm.convertTasksToTodos(tasks),
+				SharedContext:     make(map[string]string),
+				ParentAssistantID: "assistant-main",
+			}
+		}
+	} else {
+		tasks, err := pm.taskPlanner.PlanTasks(ctx, intentSet, &shared.InitResults{})
+		if err != nil {
+			return parts, fmt.Errorf("task planning failed: %w", err)
+		}
+		pm.currentTasks = tasks
+		pm.taskState.SetPlan(tasks, pm.convertTasksToTodos(tasks))
+		pm.taskState.SetIntentAndInit(intentSet, &shared.InitResults{})
+		pm.notifyTaskPlan(tasks)
+
+		taskPrompts := BuildTaskPrompts(tasks, &shared.InitResults{})
+		parts = append(parts, taskPrompts...)
+		for _, tp := range taskPrompts {
+			pm.promptHistory = append(pm.promptHistory, tp)
+		}
+
+		if pm.requiresCoder(tasks) {
+			pm.coderContext = &CoderContext{
+				WorkingDir:        workingDir,
+				Files:             []string{},
+				CodeSnippets:      make(map[string]string),
+				Constraints:       []string{},
+				TodoItems:         pm.convertTasksToTodos(tasks),
+				SharedContext:     make(map[string]string),
+				ParentAssistantID: "assistant-main",
+			}
 		}
 	}
 
 	return parts, nil
 }
 
+// buildIntentIdentificationPrompt creates a prompt showing identified intents.
+func (pm *PromptManager) buildIntentIdentificationPrompt(intentSet *shared.IntentSet) *PromptPart {
+	var sb strings.Builder
+
+	sb.WriteString("INTENT IDENTIFICATION RESULTS\n\n")
+	sb.WriteString("Original Request: ")
+	sb.WriteString(intentSet.OriginalPrompt)
+	sb.WriteString("\n\n")
+	sb.WriteString("Identified Intents:\n")
+
+	for _, intent := range intentSet.Intents {
+		sb.WriteString(fmt.Sprintf("- %s (priority: %d, confidence: %.0f%%)", intent.Type, intent.Priority, intent.Confidence*100))
+		if len(intent.Dependencies) > 0 {
+			sb.WriteString(fmt.Sprintf(", depends on: %s", strings.Join(intent.Dependencies, ", ")))
+		}
+		sb.WriteString("\n")
+		sb.WriteString(fmt.Sprintf("  Parameters: %v\n", intent.Parameters))
+		sb.WriteString(fmt.Sprintf("  Text: %s\n\n", intent.RawText))
+	}
+
+	sb.WriteString(fmt.Sprintf("Requires Initialization: %v\n", intentSet.RequiresInit))
+
+	return &PromptPart{
+		Stage:    StageCategorization,
+		Content:  sb.String(),
+		Tools:    ToolSetContextOnly,
+		Metadata: map[string]any{"intent_set": intentSet},
+	}
+}
+
+func (pm *PromptManager) requiresCoder(tasks []shared.TaskSpec) bool {
+	for _, task := range tasks {
+		if task.Role == "coder" {
+			return true
+		}
+	}
+	return false
+}
+
+func (pm *PromptManager) convertTasksToTodos(tasks []shared.TaskSpec) []shared.TodoItem {
+	var todos []shared.TodoItem
+	for _, task := range tasks {
+		todos = append(todos, shared.TodoItem{
+			ID:           task.ID,
+			Description:  task.Description,
+			Status:       shared.TodoStatusPending,
+			Priority:     task.Priority,
+			Dependencies: task.Dependencies,
+			Tools:        task.Tools,
+			ContextKeys:  []string{},
+			InjectLater:  false,
+			Injected:     false,
+		})
+	}
+	return todos
+}
+
 // continueRequest continues processing an existing request.
 func (pm *PromptManager) continueRequest(userMessage string) ([]PromptPart, error) {
-	mode := ContextShareFull
-	if containsAny(userMessage, []string{"summary", "briefly", "just the result"}) {
-		mode = ContextShareSummary
-	} else if containsAny(userMessage, []string{"related", "similar", "also inspect"}) {
-		mode = ContextSharePartial
+	if pm.currentIntentSet == nil {
+		return []PromptPart{}, nil
 	}
-	pm.currentRequest.Relation = RequestRelationFollowUp
-	pm.currentRequest.ContextShare = mode
-	// Continuations receive an explicit share policy so the next prompt cannot
-	// accidentally inherit the entire conversation.
+
 	contextPrompt := *pm.assistantPrompts.BuildContextManagementPrompt(
 		ContextActionShare,
 		pm.assistantContext,
@@ -193,15 +307,13 @@ func (pm *PromptManager) GetNextTodoPrompt() *PromptPart {
 		return nil
 	}
 
-	// Find next pending todo
 	for i, todo := range pm.coderContext.TodoItems {
-		if todo.Status == TodoStatusPending {
-			// Check dependencies
+		if todo.Status == shared.TodoStatusPending {
 			depsMet := true
 			for _, depID := range todo.Dependencies {
 				found := false
 				for _, t := range pm.coderContext.TodoItems {
-					if t.ID == depID && t.Status == TodoStatusCompleted {
+					if t.ID == depID && t.Status == shared.TodoStatusCompleted {
 						found = true
 						break
 					}
@@ -212,9 +324,8 @@ func (pm *PromptManager) GetNextTodoPrompt() *PromptPart {
 				}
 			}
 			if depsMet {
-				// Mark as in progress
-				pm.coderContext.TodoItems[i].Status = TodoStatusInProgress
-				prompt := pm.coderPrompts.BuildExecutionPrompt(pm.coderContext, &pm.coderContext.TodoItems[i], pm.currentRequest)
+				pm.coderContext.TodoItems[i].Status = shared.TodoStatusInProgress
+				prompt := pm.coderPrompts.BuildExecutionPrompt(pm.coderContext, &pm.coderContext.TodoItems[i], nil)
 				if prompt != nil {
 					promptCopy := *prompt
 					return &promptCopy
@@ -238,7 +349,6 @@ func (pm *PromptManager) InjectTodoContext(todoID, contextKey, contextValue stri
 	for i, todo := range pm.coderContext.TodoItems {
 		if todo.ID == todoID && todo.InjectLater && !todo.Injected {
 			pm.coderContext.TodoItems[i].Injected = true
-			// Add to shared context
 			pm.coderContext.SharedContext[contextKey] = contextValue
 			prompt := pm.coderPrompts.BuildTodoInjectPrompt(pm.coderContext, &pm.coderContext.TodoItems[i], contextKey, contextValue)
 			if prompt != nil {
@@ -260,10 +370,10 @@ func (pm *PromptManager) DispatchParallelTodos(todoIDs []string) *PromptPart {
 		return nil
 	}
 
-	var todos []TodoItem
+	var todos []shared.TodoItem
 	for _, id := range todoIDs {
 		for _, todo := range pm.coderContext.TodoItems {
-			if todo.ID == id && todo.Status == TodoStatusPending {
+			if todo.ID == id && todo.Status == shared.TodoStatusPending {
 				todos = append(todos, todo)
 				break
 			}
@@ -297,39 +407,28 @@ func (pm *PromptManager) CompleteTodo(todoID string, result string) {
 
 	for i, todo := range pm.coderContext.TodoItems {
 		if todo.ID == todoID {
-			pm.coderContext.TodoItems[i].Status = TodoStatusCompleted
+			pm.coderContext.TodoItems[i].Status = shared.TodoStatusCompleted
 			break
 		}
 	}
 }
 
-// CompleteActiveTodo advances the scoped workflow after a tool batch. A failed
-// batch blocks the active todo so the next model turn diagnoses it instead of
-// silently moving on.
+// CompleteActiveTodo advances the scoped workflow after a tool batch.
 func (pm *PromptManager) CompleteActiveTodo(success bool) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 	if pm.coderContext == nil {
 		return
 	}
-	status := TodoStatusCompleted
+	status := shared.TodoStatusCompleted
 	if !success {
-		status = TodoStatusBlocked
+		status = shared.TodoStatusBlocked
 	}
 	for i := range pm.coderContext.TodoItems {
-		if pm.coderContext.TodoItems[i].Status != TodoStatusInProgress {
+		if pm.coderContext.TodoItems[i].Status != shared.TodoStatusInProgress {
 			continue
 		}
-		id := pm.coderContext.TodoItems[i].ID
 		pm.coderContext.TodoItems[i].Status = status
-		if pm.currentRequest != nil {
-			for j := range pm.currentRequest.TodoItems {
-				if pm.currentRequest.TodoItems[j].ID == id {
-					pm.currentRequest.TodoItems[j].Status = status
-					break
-				}
-			}
-		}
 		return
 	}
 }
@@ -416,10 +515,7 @@ func (pm *PromptManager) ApplyStash(stashID string, merge bool) error {
 		return fmt.Errorf("stash not found: %s", stashID)
 	}
 
-	// In a real implementation, this would deserialize and apply the context
-	// For now, we just note it
 	if !merge {
-		// Replace context
 		pm.assistantContext.ConversationHistory = []Message{}
 	}
 
@@ -482,11 +578,23 @@ func (pm *PromptManager) AssistantPrompts() *AssistantPrompts {
 	return pm.assistantPrompts
 }
 
-// GetCurrentRequest returns the current categorized request.
+// GetCurrentRequest returns the current categorized request (legacy compatibility).
 func (pm *PromptManager) GetCurrentRequest() *CategorizedRequest {
+	return nil
+}
+
+// GetCurrentIntentSet returns the current intent set.
+func (pm *PromptManager) GetCurrentIntentSet() *shared.IntentSet {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-	return pm.currentRequest
+	return pm.currentIntentSet
+}
+
+// GetCurrentTasks returns the current generated tasks.
+func (pm *PromptManager) GetCurrentTasks() []shared.TaskSpec {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.currentTasks
 }
 
 // CompleteRequest marks the current request as complete and returns a response prompt.
@@ -494,24 +602,32 @@ func (pm *PromptManager) CompleteRequest(result string) *PromptPart {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if pm.currentRequest == nil {
+	if pm.currentIntentSet == nil {
 		return nil
 	}
 
-	responsePrompt := pm.assistantPrompts.BuildUserResponsePrompt(pm.currentRequest, result)
+	responsePrompt := &PromptPart{
+		Stage:    StageCompletion,
+		Content:  "Task completed: " + result,
+		Tools:    ToolSetContextOnly,
+		Metadata: map[string]any{"result": result},
+	}
+
 	if responsePrompt != nil {
 		promptCopy := *responsePrompt
 		pm.promptHistory = append(pm.promptHistory, promptCopy)
 
-		// Add to conversation history
 		pm.assistantContext.ConversationHistory = append(pm.assistantContext.ConversationHistory, Message{
 			Role:      "assistant",
 			Content:   result,
 			Timestamp: time.Now(),
 		})
 
-		// Clear current request
-		pm.currentRequest = nil
+		pm.currentIntentSet = nil
+		pm.currentInitPhase = nil
+		pm.currentInitResults = nil
+		pm.currentTasks = nil
+		pm.taskState = taskstate.NewStore()
 		pm.coderContext = nil
 		pm.cleanupEphemeralPromptsLocked()
 
@@ -521,8 +637,7 @@ func (pm *PromptManager) CompleteRequest(result string) *PromptPart {
 }
 
 // CleanupEphemeralPrompts removes injected/staged prompt parts after their
-// consuming task completes. Durable decisions and user-authored messages are
-// retained in their respective stores.
+// consuming task completes.
 func (pm *PromptManager) CleanupEphemeralPrompts() {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
@@ -546,6 +661,15 @@ func isNewTaskMessage(message string) bool {
 	return containsAny(strings.ToLower(message), []string{"new task", "separate task", "unrelated task", "start a fresh", "forget the previous"})
 }
 
+func containsAny(s string, substrings []string) bool {
+	for _, sub := range substrings {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
+}
+
 // GetPromptHistory returns the history of prompt parts.
 func (pm *PromptManager) GetPromptHistory() []PromptPart {
 	pm.mu.RLock()
@@ -558,6 +682,39 @@ func (pm *PromptManager) GetStashedContexts() []ContextStash {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.stashedContexts
+}
+
+// SetProgress registers a callback invoked at each pipeline stage for UI visibility.
+func (pm *PromptManager) SetProgress(fn func(stage, detail string)) {
+	pm.progress = fn
+}
+
+func (pm *PromptManager) notifyProgress(stage, detail string) {
+	if pm.progress != nil {
+		pm.progress(stage, detail)
+	}
+}
+
+func (pm *PromptManager) notifyTaskPlan(tasks []shared.TaskSpec) {
+	if pm.progress == nil || len(tasks) == 0 {
+		return
+	}
+	var sb strings.Builder
+	for i, t := range tasks {
+		deps := ""
+		if len(t.Dependencies) > 0 {
+			deps = fmt.Sprintf(" (after %s)", strings.Join(t.Dependencies, ", "))
+		}
+		sb.WriteString(fmt.Sprintf("%d. [%s] %s%s\n", i+1, t.Type, t.Description, deps))
+	}
+	pm.notifyProgress("Plan", strings.TrimSpace(sb.String()))
+}
+
+// GetInitResults returns the init phase results.
+func (pm *PromptManager) GetInitResults() *shared.InitResults {
+	pm.mu.RLock()
+	defer pm.mu.RUnlock()
+	return pm.currentInitResults
 }
 
 // DeleteStash deletes a stashed context.
@@ -587,12 +744,10 @@ func (pm *PromptManager) CreateNewContext(initialPrompt string, inheritPrefs boo
 		pm.promptHistory = append(pm.promptHistory, promptCopy)
 	}
 
-	// Save current context as stash if not empty
 	if len(pm.assistantContext.ConversationHistory) > 0 {
 		pm.saveStashLocked("Auto-stash before new context", []string{"auto", "pre-new-context"})
 	}
 
-	// Reset assistant context
 	prefs := make(map[string]string)
 	if inheritPrefs {
 		for k, v := range pm.assistantContext.UserPreferences {
@@ -606,8 +761,11 @@ func (pm *PromptManager) CreateNewContext(initialPrompt string, inheritPrefs boo
 		StashedContexts:     pm.stashedContexts,
 	}
 
-	pm.currentRequest = nil
 	pm.coderContext = nil
+	pm.currentIntentSet = nil
+	pm.currentInitPhase = nil
+	pm.currentInitResults = nil
+	pm.currentTasks = nil
 
 	if newPrompt != nil {
 		return &promptCopy
@@ -632,18 +790,34 @@ func (pm *PromptManager) GetUserPreference(key string) (string, bool) {
 
 // serializeContext serializes the current context for stashing.
 func (pm *PromptManager) serializeContext() string {
-	// In a real implementation, this would serialize to JSON
-	return fmt.Sprintf("Context with %d messages, task: %v", len(pm.assistantContext.ConversationHistory), pm.currentRequest)
+	if pm.currentIntentSet != nil {
+		return fmt.Sprintf("Context with %d messages, intents: %d", len(pm.assistantContext.ConversationHistory), len(pm.currentIntentSet.Intents))
+	}
+	return fmt.Sprintf("Context with %d messages", len(pm.assistantContext.ConversationHistory))
 }
 
-// GetSelectedContext returns the context selected for the current request using the context selector.
+// GetSelectedContext returns the context selected for the current tasks using the context selector.
 func (pm *PromptManager) GetSelectedContext(ctx context.Context) (string, error) {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
-	if pm.currentRequest == nil || pm.contextSelector == nil {
+	if pm.contextSelector == nil {
 		return "", nil
 	}
 
-	return pm.contextSelector.SelectContext(ctx, pm.currentRequest)
+	if pm.currentIntentSet != nil && len(pm.currentTasks) > 0 {
+		return pm.contextSelector.SelectContextForTasks(ctx, pm.currentTasks, pm.workingDir, pm.config.MaxTotalTokens)
+	}
+
+	return "", nil
+}
+
+// GetTaskState returns the task state store.
+func (pm *PromptManager) GetTaskState() *taskstate.Store {
+	return pm.taskState
+}
+
+// NotifyProgress exposes the progress hook externally.
+func (pm *PromptManager) NotifyProgress(stage, detail string) {
+	pm.notifyProgress(stage, detail)
 }

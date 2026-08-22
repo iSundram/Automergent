@@ -28,23 +28,7 @@ func TestDefaultAndApplyFlags(t *testing.T) {
 	}
 }
 
-func TestPromptSystemEnabledIsInSchema(t *testing.T) {
-	field, ok := DefaultSchema().Fields["promptSystemEnabled"]
-	if !ok {
-		t.Fatal("promptSystemEnabled missing from schema")
-	}
-	if field.Type != TypeBool || field.Default != true {
-		t.Fatalf("unexpected promptSystemEnabled schema: %+v", field)
-	}
 
-	cfg := Default()
-	if err := SetConfigField(cfg, "promptSystemEnabled", false); err != nil {
-		t.Fatal(err)
-	}
-	if cfg.PromptSystemEnabled {
-		t.Fatal("SetConfigField did not apply false")
-	}
-}
 
 func TestSaveIfLoadedDoesNotCreateMissingConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
