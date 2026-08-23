@@ -13,9 +13,13 @@ func TestExtractIntent_TruncatesCleanly(t *testing.T) {
 }
 
 func TestEngineProcessProducesPlan(t *testing.T) {
-	e := NewEngine(nil)
+	cfg := DefaultEngineConfig()
+	cfg.SkipVerification = true // no real workspace in unit tests
+	e := NewEngine(cfg)
 	e.GetExecutor().SetRunner(&mockTaskRunner{})
-	plan, err := e.Process(context.Background(), "Refactor entire project structure")
+	// NOTE: a low-confidence / project-wide request intentionally defers via
+	// shouldAskUser() before executing; use a confident single-file ask.
+	plan, err := e.Process(context.Background(), "Fix the typo in the login error message")
 	if err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}

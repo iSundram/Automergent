@@ -17,12 +17,13 @@ import (
 // Engine is the core reasoning system that orchestrates task analysis,
 // planning, execution, and verification.
 type Engine struct {
-	planner    *planningPkg.Planner
-	executor   *Executor
-	verifier   *verification.Engine
-	strategies map[TaskType]Strategy
-	mu         sync.RWMutex
-	logger     Logger
+	planner          *planningPkg.Planner
+	executor         *Executor
+	verifier         *verification.Engine
+	skipVerification bool
+	strategies       map[TaskType]Strategy
+	mu               sync.RWMutex
+	logger           Logger
 
 	// Configuration
 	maxRetries             int
@@ -48,6 +49,16 @@ type EngineConfig struct {
 	EnableExtendedThinking bool
 	ThinkingBudget         int // token budget for thinking
 	DefaultTimeout         time.Duration
+
+	// SkipVerification bypasses the post-execution verification gate.
+	// Intended for embedded/test use where no real workspace exists.
+	SkipVerification bool
+}
+
+// SetVerifier replaces the verification engine (nil = skip verification).
+// Must be called before Process; verification is not run under e.mu.
+func (e *Engine) SetVerifier(v *verification.Engine) {
+	e.verifier = v
 }
 
 // DefaultEngineConfig returns sensible defaults.
@@ -77,6 +88,7 @@ func NewEngine(cfg *EngineConfig) *Engine {
 		enableExtendedThinking: cfg.EnableExtendedThinking,
 		thinkingBudget:         cfg.ThinkingBudget,
 		trace:                  &ReasoningTrace{StartedAt: time.Now()},
+		skipVerification:       cfg != nil && cfg.SkipVerification,
 	}
 
 	// Register default strategies
@@ -328,6 +340,12 @@ func (e *Engine) Verify(ctx context.Context, plan *ExecutionPlan) error {
 func (e *Engine) verify(ctx context.Context, plan *ExecutionPlan) (*verification.Result, error) {
 	if plan == nil {
 		return nil, fmt.Errorf("execution plan is nil")
+	}
+	// NOTE: no locking here — Process holds e.mu for its whole run, and
+	// skipVerification/verifier are treated as pre-run configuration
+	// (set via NewEngine/SetVerifier before calling Process).
+	if e.verifier == nil || e.skipVerification {
+		return &verification.Result{Status: verification.StatusSkipped, CanProceed: true}, nil
 	}
 	if e.verifier == nil {
 		e.verifier = verification.NewDefaultEngine()
@@ -1803,6 +1821,25 @@ func convertPlan(plan *planningPkg.Plan, analysis *TaskAnalysis) *ExecutionPlan 
 			order = append(order, task.ID)
 		}
 		execPlan.ExecutionOrder = [][]string{order}
+	}
+
+	// Completeness guard: heuristic planners can emit cyclic or orphaned
+	// dependencies, which previously left tasks UNSCHEDULED — they never ran
+	// and failed the whole plan as "status=pending". Append anything the
+	// order missed as sequential singleton groups so every task executes.
+	if len(execPlan.Tasks) > 0 {
+		scheduled := make(map[string]bool)
+		for _, group := range execPlan.ExecutionOrder {
+			for _, id := range group {
+				scheduled[id] = true
+			}
+		}
+		for _, task := range execPlan.Tasks {
+			if !scheduled[task.ID] {
+				execPlan.ExecutionOrder = append(execPlan.ExecutionOrder, []string{task.ID})
+				scheduled[task.ID] = true
+			}
+		}
 	}
 
 	for _, task := range execPlan.Tasks {

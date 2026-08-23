@@ -190,6 +190,8 @@ type ExecutionState struct {
 	PlanID         string
 	CurrentPhase   Phase
 	CompletedTasks []string
+
+// SkipVerification mirrors EngineConfig.SkipVerification on the engine.
 	ActiveTasks    []string
 	FailedTasks    []string
 	Attempts       map[string]int // task ID -> attempt count
