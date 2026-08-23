@@ -44,6 +44,7 @@ type App struct {
 	reviewingProposal string
 	questionnaire     *components.Questionnaire
 	taskBoard         *components.TaskBoard
+	dock              *components.BottomDock
 	zenMode           bool
 	sendToProgram     func(tea.Msg)
 	pendingAsk        *pendingAsk
@@ -151,6 +152,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		statusBar:          components.NewStatusBar(styles),
 		toasts:             components.NewToasts(styles),
 		questionnaire:      components.NewQuestionnaire(styles),
+		dock:               components.NewBottomDock(styles),
 		taskBoard:          components.NewTaskBoard(styles),
 		spin:               components.NewSpinner(styles),
 		confirm:            components.NewConfirm(styles),
@@ -299,8 +301,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.questionnaire.SetSize(m.Width, m.Height)
 		}
 		a.taskBoard.SetSize(34, m.Height)
+		a.dock.SetWidth(m.Width)
 		return a, nil
 	case tea.KeyMsg:
+		// Bottom dock owns keys while focused.
+		if a.dockFocusActive() {
+			if a.handleDockKeys(m) {
+				return a, nil
+			}
+			a.unfocusDock()
+			return a, nil
+		}
+		// ↓ from the input drops into the background dock.
+		if m.String() == "down" && !a.confirm.Visible() && !a.browsing && a.focus == "input" && a.input.Value() == "" {
+			a.refreshDock()
+			if a.focusDock() {
+				return a, nil
+			}
+		}
 		// TaskBoard navigation/actions when visible and not typing.
 		if a.taskBoard.Visible() && !a.confirm.Visible() && !a.browsing && a.focus != "input" {
 			if a.handleTaskBoardKeys(m) {

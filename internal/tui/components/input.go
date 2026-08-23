@@ -30,7 +30,7 @@ func NewInput(styles *themes.Styles) Input {
 	ta.SetHeight(1)
 	ta.MaxHeight = 16
 	ta.CharLimit = 0
-	ta.Prompt = ""
+	ta.Prompt = "❯ "
 
 	// Inline look: accent prompt, muted placeholder, no boxes or highlights.
 	st := ta.Styles()
@@ -91,6 +91,16 @@ func (i *Input) Reset() {
 	i.ta.SetHeight(1)
 	i.histIdx = -1
 	i.pastedContent = ""
+}
+
+// SetPromptVisible toggles the ❯ prompt marker. The dock clears it while it
+// owns the keyboard so exactly one surface shows the cursor.
+func (i *Input) SetPromptVisible(v bool) {
+	if v {
+		i.ta.Prompt = "❯ "
+	} else {
+		i.ta.Prompt = ""
+	}
 }
 
 // Focus gives the input focus.

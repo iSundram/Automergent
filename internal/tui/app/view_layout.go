@@ -65,8 +65,15 @@ func (a *App) layout() {
 	if a.coAuthorConfirm.Visible() {
 		footerH += lipgloss.Height(a.coAuthorConfirm.View())
 	}
+	// Bottom dock (background shells/agents) renders under the input.
+	dockH := 0
+	if a.dock != nil && a.dock.HasContent() && !a.confirm.Visible() {
+		a.dock.SetWidth(a.width)
+		a.refreshDock()
+		dockH = lipgloss.Height(a.dock.View())
+	}
 
-	mainH := a.height - headerH - statusH - footerH
+	mainH := a.height - headerH - statusH - footerH - dockH
 	if mainH < 1 {
 		mainH = 1
 	}
@@ -209,6 +216,14 @@ func (a *App) View() tea.View {
 		footer = append(footer, a.coAuthorConfirm.View())
 	}
 	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, footer...))
+
+	// Bottom dock: background shells + agents, under the input.
+	if a.dock != nil && a.dock.HasContent() && !a.confirm.Visible() && !a.questionnaire.Visible() {
+		if dockView := a.dock.View(); dockView != "" {
+			sections = append(sections, dockView)
+		}
+	}
+
 	sections = append(sections, statusView)
 
 	fullView := lipgloss.JoinVertical(lipgloss.Left, sections...)

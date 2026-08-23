@@ -64,6 +64,9 @@ func (a *App) updateActiveTokens() {
 	if store := a.ag.EditReviewStore(); store != nil {
 		a.statusBar.SetPendingEdits(store.PendingCount())
 	}
+
+	// Keep the bottom dock live (background shells + agents).
+	a.refreshDock()
 }
 
 func (a *App) showContextDetail() {

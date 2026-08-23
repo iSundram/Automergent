@@ -407,6 +407,16 @@ type AgentSnapshot struct {
 	Elapsed string
 }
 
+// LastOutput returns the most recent turn output, falling back to Result.
+func (a *AgentInstance) LastOutput() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.Turns) > 0 {
+		return a.Turns[len(a.Turns)-1].Output
+	}
+	return a.Result
+}
+
 // Snapshot returns a locked copy of the instance state.
 func (a *AgentInstance) Snapshot() AgentSnapshot {
 	a.mu.Lock()
