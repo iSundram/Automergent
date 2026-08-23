@@ -18,7 +18,6 @@ import (
 	"github.com/iSundram/Automergent/internal/editreview"
 	"github.com/iSundram/Automergent/internal/errors"
 	promptpkg "github.com/iSundram/Automergent/internal/prompt"
-	"github.com/iSundram/Automergent/internal/reasoning"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/shared"
 	"github.com/iSundram/Automergent/internal/tools"
@@ -48,14 +47,10 @@ type Agent struct {
 	skills              []Skill
 	skillPaths          *skillTracker
 	editReview          *editreview.Store
-	reasoningPreAnalyze func(context.Context, string) (string, error)
-	currentComplexity   reasoning.Complexity
-	currentTaskType     reasoning.TaskType
 
 	// Persistent components
 	contextManager     *contextmgr.Manager
 	contextManagerRoot string
-	reasoningEngine    *reasoning.Engine
 	coordinator        *coordinator.Engine
 	coordinatorOnce    sync.Once
 	coordinatorCtx     context.Context
@@ -303,73 +298,52 @@ func (a *Agent) checkAndMarkFirstMessage() bool {
 	return isFirst
 }
 
-func (a *Agent) runReasoningPreAnalysis(ctx context.Context, prompt string) (string, error) {
-	if a.reasoningPreAnalyze != nil {
-		return a.reasoningPreAnalyze(ctx, prompt)
-	}
-
-	engine := reasoning.NewEngine(nil)
-	analysis, err := engine.Analyze(ctx, prompt)
-	if err != nil {
-		return "", err
-	}
-
-	a.mu.Lock()
-	a.currentTaskType = analysis.TaskType
-	a.currentComplexity = analysis.Complexity
-	a.mu.Unlock()
-
-	return fmt.Sprintf("%s/%s", analysis.TaskType, analysis.Scope), nil
-}
-
+// getThinkingBudget returns the Gemini thinking token budget.
+// Claude-style: this is USER configuration (effort level / explicit budget),
+// never inferred from keyword analysis of the prompt.
 func (a *Agent) getThinkingBudget() int {
-	a.mu.RLock()
-	complexity := a.currentComplexity
-	a.mu.RUnlock()
-
-	// Default budget
 	budget := 10000
-
-	switch complexity {
-	case reasoning.ComplexityTrivial:
-		budget = 2000
-	case reasoning.ComplexitySimple:
+	if a.cfg == nil {
+		return budget
+	}
+	if a.cfg.ThinkingBudget > 0 {
+		return a.cfg.ThinkingBudget
+	}
+	switch strings.ToLower(strings.TrimSpace(a.cfg.Effort)) {
+	case "minimal", "none":
+		budget = 0
+	case "low":
 		budget = 4000
-	case reasoning.ComplexityModerate:
+	case "medium":
 		budget = 8000
-	case reasoning.ComplexityComplex:
+	case "high":
 		budget = 16000
-	case reasoning.ComplexityMajor:
+	case "max", "ultra":
 		budget = 32000
 	}
-
-	// Override from config if explicitly set
 	if a.cfg.MaxContextTokens > 0 && budget > a.cfg.MaxContextTokens/4 {
 		budget = a.cfg.MaxContextTokens / 4
 	}
-
 	return budget
 }
 
+// getThinkingLevel returns the Gemini 3 thinking level from user effort config.
 func (a *Agent) getThinkingLevel() string {
-	a.mu.RLock()
-	complexity := a.currentComplexity
-	a.mu.RUnlock()
-
-	// Default level for Gemini 3 models
-	switch complexity {
-	case reasoning.ComplexityTrivial, reasoning.ComplexitySimple:
-		return "low"
-	case reasoning.ComplexityModerate:
-		return "medium"
-	case reasoning.ComplexityComplex, reasoning.ComplexityMajor:
+	if a.cfg == nil {
 		return "high"
+	}
+	switch strings.ToLower(strings.TrimSpace(a.cfg.Effort)) {
+	case "minimal", "none", "off":
+		return "low"
+	case "low":
+		return "low"
+	case "medium":
+		return "medium"
 	default:
 		return "high"
 	}
 }
 
-// Events returns the channel of agent events.
 func (a *Agent) Events() <-chan Event { return a.events }
 
 // Provider returns the AI provider.
@@ -443,18 +417,6 @@ func (a *Agent) SetSession(sess *session.Session) {
 // Run executes the agent loop for the given user prompt.
 func (a *Agent) Run(ctx context.Context, prompt string) error {
 	originalUserPrompt := prompt
-	if isCasualMessage(originalUserPrompt) {
-		userMsg := ai.NewTextMessage(ai.RoleUser, originalUserPrompt)
-		a.sess.AddMessage(userMsg)
-		a.recordToTranscript(userMsg)
-		response := "Hello! How can I help?"
-		assistantMsg := ai.NewTextMessage(ai.RoleAssistant, response)
-		a.sess.AddMessage(assistantMsg)
-		a.recordToTranscript(assistantMsg)
-		a.Emit(EventDone, response)
-		a.tryPersist()
-		return nil
-	}
 
 	// 1. Initial Triage Phase (Dynamic Workflow)
 	// If this is the very first message, we run a hidden triage loop
@@ -505,27 +467,6 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			a.Emit(EventStatus, "⚠ Not a git repository — edit mode requires git for safe rollback")
 		}
 	}
-
-	// Reasoning pre-analysis (if enabled)
-	if a.cfg != nil && a.cfg.ReasoningPreAnalysis {
-		a.Emit(EventStatus, "reasoning: pre-analyzing prompt")
-		if summary, err := a.runReasoningPreAnalysis(ctx, originalUserPrompt); err != nil {
-			a.Emit(EventStatus, "reasoning: unavailable, continuing")
-		} else if summary != "" {
-			a.Emit(EventStatus, fmt.Sprintf("reasoning: %s", summary))
-		}
-	}
-
-	// Load skills (user dir + project dir); project wins on conflicts.
-	a.skills = loadSkills(
-		func() string {
-			if a.cfg != nil {
-				return a.cfg.SkillsDir
-			}
-			return ""
-		}(),
-		filepath.Join(a.workDir, ".automergent", "skills"),
-	)
 
 	// Standard agent loop with legacy system prompt
 	firstStandardTurn := isFirstMessage
@@ -1568,21 +1509,6 @@ func (a *Agent) AdaptiveCalculator() *contextmgr.AdaptiveTokenCalculator {
 		return mgr.AdaptiveCalculator()
 	}
 	return nil
-}
-
-// ReasoningEngine returns the persistent reasoning engine, initializing it on first use.
-func (a *Agent) ReasoningEngine() *reasoning.Engine {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if a.reasoningEngine != nil {
-		return a.reasoningEngine
-	}
-
-	cfg := reasoning.DefaultEngineConfig()
-	cfg.DefaultTimeout = 5 * time.Minute
-	a.reasoningEngine = reasoning.NewEngine(cfg)
-	return a.reasoningEngine
 }
 
 func (a *Agent) convertCoordinatorConfig(cfg config.CoordinatorConfig) coordinator.CoordinatorConfig {

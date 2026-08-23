@@ -182,6 +182,7 @@ func flattenAnyMap(data map[string]any) map[string]any {
 		switch v := value.(type) {
 		case map[string]any:
 			for k, child := range v {
+				k = lowerFirst(k) // Config has no json tags: "Provider" -> "provider"
 				next := k
 				if prefix != "" {
 					next = prefix + "." + k
@@ -195,7 +196,7 @@ func flattenAnyMap(data map[string]any) map[string]any {
 		}
 	}
 	for k, v := range data {
-		walk(k, v)
+		walk(lowerFirst(k), v)
 	}
 	return out
 }
@@ -253,4 +254,16 @@ func formatValue(v any) string {
 		}
 		return strings.TrimSpace(string(encoded))
 	}
+}
+
+// lowerFirst lowercases the first rune of s (Go field name -> config key).
+func lowerFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	if r[0] >= 'A' && r[0] <= 'Z' {
+		r[0] = r[0] + ('a' - 'A')
+	}
+	return string(r)
 }

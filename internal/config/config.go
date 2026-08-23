@@ -43,7 +43,10 @@ type Config struct {
 	Quiet       bool   `mapstructure:"quiet" yaml:"quiet"`
 	Verbose     bool   `mapstructure:"verbose" yaml:"verbose"`
 
-	ReasoningPreAnalysis bool `mapstructure:"reasoningPreAnalysis" yaml:"reasoningPreAnalysis"`
+	// ThinkingBudget overrides the Gemini thinking token budget when > 0.
+	ThinkingBudget int `mapstructure:"thinkingBudget" yaml:"thinkingBudget,omitempty"`
+	// Effort sets the thinking effort level: minimal|low|medium|high|max.
+	Effort string `mapstructure:"effort" yaml:"effort,omitempty"`
 
 	// EditReview routes file mutations through the pending-review flow:
 	// proposals render in the diff pane and touch disk only on accept.

@@ -263,6 +263,7 @@ func categorizeFile(path string) CommitType {
 
 	// Test files
 	if strings.Contains(path, "_test.") || strings.Contains(path, ".test.") ||
+		strings.HasPrefix(path, "test/") || strings.HasPrefix(path, "tests/") ||
 		strings.Contains(path, "/test/") || strings.Contains(path, "/tests/") {
 		return CommitTypeTest
 	}

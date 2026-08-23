@@ -179,7 +179,7 @@ func DefaultSchema() *Schema {
 				Description: "Recent messages to keep when compressing",
 			},
 			"maxAutoReadFileSize": {
-				Type:        TypeSize,
+				Type:        TypeInt,
 				Default:     524288, // 512KB
 				Min:         &minZero,
 				Description: "Maximum file size for auto-read (bytes)",

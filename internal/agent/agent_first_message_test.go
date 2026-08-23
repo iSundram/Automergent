@@ -101,18 +101,17 @@ func TestRunFirstMessagePreservesOriginalPrompt(t *testing.T) {
 	}
 }
 
-func TestGreetingDoesNotCallProviderOrExposeTools(t *testing.T) {
+// Claude-style: there is NO rule-based bypass. Even greetings reach the
+// model so context, memory and tone stay coherent.
+func TestGreetingGoesThroughProvider(t *testing.T) {
 	provider := &firstMessageRecordingProvider{}
 	ag := newFirstMessageTestAgent(provider)
 
 	if err := ag.Run(context.Background(), "hi"); err != nil {
 		t.Fatalf("run failed: %v", err)
 	}
-	if len(provider.userPrompts) != 0 || len(provider.toolCounts) != 0 {
-		t.Fatalf("greeting reached provider: prompts=%v tools=%v", provider.userPrompts, provider.toolCounts)
-	}
-	if len(ag.sess.Messages) != 2 {
-		t.Fatalf("message count = %d, want user and assistant only", len(ag.sess.Messages))
+	if len(provider.userPrompts) == 0 {
+		t.Fatal("greeting must reach the provider — no keyword bypass allowed")
 	}
 	if got := ag.sess.Messages[0].TextContent(); got != "hi" {
 		t.Fatalf("stored greeting = %q", got)
