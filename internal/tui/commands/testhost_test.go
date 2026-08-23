@@ -1,0 +1,638 @@
+package commands
+
+import (
+	"context"
+	"errors"
+	"sync"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/iSundram/Automergent/internal/ai"
+	"github.com/iSundram/Automergent/internal/config"
+)
+
+// mockHost implements Host for testing command handlers.
+type mockHost struct {
+	mu sync.Mutex
+
+	// State
+	provider    string
+	model       string
+	providers   []string
+	models      []ai.Model
+	mode        string
+	theme       string
+	keybindings string
+	thinking    bool
+
+	// Call recording
+	systemMessages    []string
+	assistantMessages []string
+	statusMessages    []string
+	usageMessages     []string
+	errorMessages     []string
+
+	startAgentCalls     []string
+	cancelActiveRuns    []string
+	compactContextCalls int
+
+	switchProviderCalls []struct{ provider, model string }
+	fetchModelsCalls    int
+
+	ensureProviderConfigCalls []string
+	providerConfigs           map[string]config.ProviderConfig
+	persistProjectConfigCalls int
+
+	setModeCalls []string
+
+	toggleFileTreeCalls   int
+	toggleDiffPaneCalls   int
+	toggleLSPPanelCalls   int
+	toggleReviewModeCalls int
+	searchWorkspaceCalls  []string
+
+	exportConversationCalls []string
+	exportErr               error
+	handleApprovalsCalls    [][]string
+
+	newSessionCalls        int
+	showSessionsCalls      int
+	resumeSessionCalls     []string
+	clearConversationCalls int
+	resetHistoryCalls      int
+
+	reviewMode      bool
+	showingFileTree bool
+	diffPaneVisible bool
+	lspPanelVisible bool
+
+	// Environment & diagnostics state
+	workDir           string
+	sessionID         string
+	sessionTitle      string
+	renamedTitles     []string
+	version           string
+	sandboxKind       string
+	sandboxAvailable  bool
+	globalConfigPath  string
+	projectConfigPath string
+	configProblems    []string
+	storageErr        error
+	recap             RecapInfo
+
+	// History & workspace state
+	checkpoints   []CheckpointInfo
+	rewindToCalls []int
+	rewindErr     error
+	branchCalls   []string
+	branchErr     error
+	contextFiles  []string
+	addDirCalls   []string
+	addDirErr     error
+	extraDirs     []string
+	tokenSessions int
+	tokenTotalIn  int
+	tokenTotalOut int
+	secBlocked    []string
+	secAllowed    []string
+
+	rewindPickerCalls      int
+	permissionsPickerCalls int
+	settingsPickerCalls    int
+
+	showStatsCalls int
+	showHelpCalls  int
+
+	setThemeCalls      []string
+	setKeybindingCalls []string
+
+	ctx context.Context
+}
+
+// NewMockHost creates a new mock host for testing.
+func NewMockHost() *mockHost {
+	return &mockHost{
+		provider:         "google",
+		model:            "gemini-3.6-flash",
+		providers:        []string{"google"},
+		models:           []ai.Model{{ID: "gemini-3.6-flash", ContextLimit: 1000000}},
+		mode:             "edit",
+		theme:            "modern",
+		keybindings:      "default",
+		version:          "test-1.0",
+		sandboxKind:      "auto",
+		sandboxAvailable: true,
+		sessionID:        "sess-test",
+		providerConfigs: map[string]config.ProviderConfig{
+			"google": {APIKey: "test-key"},
+		},
+		ctx: context.Background(),
+	}
+}
+
+// Reset clears all recorded calls.
+func (m *mockHost) Reset() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.systemMessages = nil
+	m.assistantMessages = nil
+	m.statusMessages = nil
+	m.usageMessages = nil
+	m.errorMessages = nil
+	m.startAgentCalls = nil
+	m.cancelActiveRuns = nil
+	m.compactContextCalls = 0
+	m.switchProviderCalls = nil
+	m.fetchModelsCalls = 0
+	m.ensureProviderConfigCalls = nil
+	m.persistProjectConfigCalls = 0
+	m.setModeCalls = nil
+	m.toggleFileTreeCalls = 0
+	m.toggleDiffPaneCalls = 0
+	m.toggleLSPPanelCalls = 0
+	m.toggleReviewModeCalls = 0
+	m.searchWorkspaceCalls = nil
+	m.exportConversationCalls = nil
+	m.handleApprovalsCalls = nil
+	m.newSessionCalls = 0
+	m.showSessionsCalls = 0
+	m.resumeSessionCalls = nil
+	m.clearConversationCalls = 0
+	m.resetHistoryCalls = 0
+	m.showStatsCalls = 0
+	m.showHelpCalls = 0
+	m.setThemeCalls = nil
+	m.setKeybindingCalls = nil
+}
+
+// --- Host interface implementation ---
+
+func (m *mockHost) AddSystemMessage(text string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.systemMessages = append(m.systemMessages, text)
+}
+
+func (m *mockHost) AddAssistantMessage(text string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.assistantMessages = append(m.assistantMessages, text)
+}
+
+func (m *mockHost) SetStatus(status string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.statusMessages = append(m.statusMessages, status)
+}
+
+func (m *mockHost) CommandUsage(usage string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.usageMessages = append(m.usageMessages, usage)
+}
+
+func (m *mockHost) CommandError(message string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.errorMessages = append(m.errorMessages, message)
+}
+
+func (m *mockHost) StartAgent(prompt string) tea.Cmd {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.startAgentCalls = append(m.startAgentCalls, prompt)
+	return nil
+}
+
+func (m *mockHost) CancelActiveRun(status string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.cancelActiveRuns = append(m.cancelActiveRuns, status)
+}
+
+func (m *mockHost) Thinking() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.thinking
+}
+
+func (m *mockHost) CompactContext() tea.Cmd {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.compactContextCalls++
+	return nil
+}
+
+func (m *mockHost) Provider() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.provider
+}
+
+func (m *mockHost) Model() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.model
+}
+
+func (m *mockHost) Providers() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.providers
+}
+
+func (m *mockHost) SwitchProvider(provider, model string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.switchProviderCalls = append(m.switchProviderCalls, struct{ provider, model string }{provider, model})
+	m.provider = provider
+	if model != "" {
+		m.model = model
+	} else {
+		m.model = "gemini-3.6-flash"
+	}
+	return nil
+}
+
+func (m *mockHost) FetchModels() tea.Cmd {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.fetchModelsCalls++
+	return nil
+}
+
+func (m *mockHost) ModelsAvailable() []ai.Model {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.models
+}
+
+func (m *mockHost) InputTokens() int {
+	return 100
+}
+
+func (m *mockHost) OutputTokens() int {
+	return 50
+}
+
+func (m *mockHost) TotalCost() float64 {
+	return 0.001
+}
+
+func (m *mockHost) ShowContextDetail() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.systemMessages = append(m.systemMessages, "[detail] context detail")
+}
+
+func (m *mockHost) ActiveTokens() int {
+	return 150
+}
+
+func (m *mockHost) EnsureProviderConfig(provider string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.ensureProviderConfigCalls = append(m.ensureProviderConfigCalls, provider)
+	if _, ok := m.providerConfigs[provider]; !ok {
+		m.providerConfigs[provider] = config.ProviderConfig{}
+	}
+}
+
+func (m *mockHost) ProviderConfig(provider string) config.ProviderConfig {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.providerConfigs[provider]
+}
+
+func (m *mockHost) SetProviderConfig(provider string, pc config.ProviderConfig) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.providerConfigs[provider] = pc
+}
+
+func (m *mockHost) PersistProjectConfig() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.persistProjectConfigCalls++
+	return nil
+}
+
+func (m *mockHost) Mode() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.mode
+}
+
+func (m *mockHost) SetMode(mode string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setModeCalls = append(m.setModeCalls, mode)
+	m.mode = mode
+}
+
+func (m *mockHost) ToggleFileTree() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.toggleFileTreeCalls++
+}
+
+func (m *mockHost) ToggleDiffPane() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.toggleDiffPaneCalls++
+}
+
+func (m *mockHost) ToggleLSPPanel() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.toggleLSPPanelCalls++
+}
+
+func (m *mockHost) ToggleReviewMode() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.toggleReviewModeCalls++
+	m.reviewMode = !m.reviewMode
+}
+
+func (m *mockHost) IsReviewMode() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.reviewMode
+}
+
+func (m *mockHost) NewSession() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.newSessionCalls++
+}
+
+func (m *mockHost) ShowSessions() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.showSessionsCalls++
+}
+
+func (m *mockHost) ResumeSession(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resumeSessionCalls = append(m.resumeSessionCalls, id)
+	return nil
+}
+
+func (m *mockHost) ClearConversationView() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.clearConversationCalls++
+}
+
+func (m *mockHost) ResetSessionHistory() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.resetHistoryCalls++
+}
+
+func (m *mockHost) ShowingFileTree() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.showingFileTree
+}
+
+func (m *mockHost) DiffPaneVisible() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.diffPaneVisible
+}
+
+func (m *mockHost) LSPPanelVisible() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lspPanelVisible
+}
+
+func (m *mockHost) WorkDir() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.workDir
+}
+
+func (m *mockHost) SessionID() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sessionID
+}
+
+func (m *mockHost) SessionTitle() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sessionTitle
+}
+
+func (m *mockHost) RenameSession(title string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if title == "" {
+		return errors.New("title must not be empty")
+	}
+	m.renamedTitles = append(m.renamedTitles, title)
+	m.sessionTitle = title
+	return nil
+}
+
+func (m *mockHost) Version() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.version
+}
+
+func (m *mockHost) SandboxStatus() (string, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sandboxKind, m.sandboxAvailable
+}
+
+func (m *mockHost) GlobalConfigPath() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.globalConfigPath
+}
+
+func (m *mockHost) ProjectConfigPath() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.projectConfigPath
+}
+
+func (m *mockHost) ValidateConfig() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string{}, m.configProblems...)
+}
+
+func (m *mockHost) StorageHealth() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.storageErr
+}
+
+func (m *mockHost) RecapSnapshot() RecapInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.recap
+}
+
+func (m *mockHost) SearchWorkspace(query string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.searchWorkspaceCalls = append(m.searchWorkspaceCalls, query)
+	return "search results for: " + query
+}
+
+func (m *mockHost) ExportConversation(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.exportConversationCalls = append(m.exportConversationCalls, path)
+	return m.exportErr
+}
+
+func (m *mockHost) HandleApprovalsCommand(args []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.handleApprovalsCalls = append(m.handleApprovalsCalls, args)
+}
+
+func (m *mockHost) ShowStats() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.showStatsCalls++
+}
+
+func (m *mockHost) ShowHelp() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.showHelpCalls++
+}
+
+func (m *mockHost) SetTheme(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setThemeCalls = append(m.setThemeCalls, name)
+	m.theme = name
+	return nil
+}
+
+func (m *mockHost) AvailableThemes() []string {
+	return []string{"catppuccin", "dracula", "nord", "modern"}
+}
+
+func (m *mockHost) CurrentTheme() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.theme
+}
+
+func (m *mockHost) SetKeybindings(scheme string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setKeybindingCalls = append(m.setKeybindingCalls, scheme)
+	m.keybindings = scheme
+	return nil
+}
+
+func (m *mockHost) AvailableKeybindings() []string {
+	return []string{"default", "vim", "emacs"}
+}
+
+func (m *mockHost) CurrentKeybindings() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.keybindings
+}
+
+func (m *mockHost) Context() context.Context {
+	return m.ctx
+}
+
+func (m *mockHost) Checkpoints() []CheckpointInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]CheckpointInfo{}, m.checkpoints...)
+}
+
+func (m *mockHost) RewindTo(index int) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if index < 1 || index > len(m.checkpoints) {
+		return errors.New("checkpoint out of range")
+	}
+	m.rewindToCalls = append(m.rewindToCalls, index)
+	return m.rewindErr
+}
+
+func (m *mockHost) BranchSession(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if name == "" {
+		return errors.New("branch name must not be empty")
+	}
+	m.branchCalls = append(m.branchCalls, name)
+	return m.branchErr
+}
+
+func (m *mockHost) ContextFiles() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string{}, m.contextFiles...)
+}
+
+func (m *mockHost) AddSearchDir(path string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if path == "" {
+		return errors.New("path must not be empty")
+	}
+	for _, d := range m.extraDirs {
+		if d == path {
+			return errors.New("already added")
+		}
+	}
+	m.addDirCalls = append(m.addDirCalls, path)
+	m.extraDirs = append(m.extraDirs, path)
+	return m.addDirErr
+}
+
+func (m *mockHost) ExtraSearchDirs() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string{}, m.extraDirs...)
+}
+
+func (m *mockHost) SessionTokenTotals() (int, int, int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.tokenSessions, m.tokenTotalIn, m.tokenTotalOut
+}
+
+func (m *mockHost) SecurityPaths() ([]string, []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string{}, m.secBlocked...), append([]string{}, m.secAllowed...)
+}
+
+func (m *mockHost) OpenRewindPicker() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.rewindPickerCalls++
+}
+
+func (m *mockHost) OpenPermissionsPicker() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.permissionsPickerCalls++
+}
+
+func (m *mockHost) OpenSettingsPicker() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.settingsPickerCalls++
+}

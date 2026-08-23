@@ -272,6 +272,7 @@ func (m *SessionManager) NextID() string {
 
 // AsyncRunnerTool executes shell commands with async support.
 type AsyncRunnerTool struct {
+	tools.BaseTool
 	timeout          time.Duration
 	stripEnvPatterns []string
 }
@@ -293,6 +294,26 @@ func (t *AsyncRunnerTool) Description() string {
 - mode="async": Run in background, returns shell_id for read_shell/write_shell
 - detach=true: Process survives session shutdown (for servers)
 - Use initial_wait in sync mode to get early output before backgrounding`
+}
+
+// Meta documents bash in the system prompt.
+func (t *AsyncRunnerTool) Meta() *tools.ToolMeta {
+	return &tools.ToolMeta{
+		Category:    "shell",
+		DisplayName: "Run command",
+		InjectOrder: 10,
+		WhenToUse:   "Terminal operations: git, build tools, package managers, test runners, docker. Also the verification step after edits — run the narrowest relevant build/test command and fix what fails.",
+		WhenNotTo:   "Never for file reads/writes/edits/searches — the dedicated tools are better (read_file over cat; rg-style grep over hand-rolled find|grep pipelines).",
+		Usage: "Prefer sync mode with a tight timeout; escalate to mode=\"async\" only for long-running processes.\n" +
+			"Large outputs are preserved to a file rather than truncated — do not pre-truncate with head/tail.\n" +
+			"Compound commands run sandboxed per policy; split chains so only steps that truly need escalation get it.",
+		UsageByFamily: map[string]string{
+			"gemini3": "Gemini 3: keep one logical action per call — emit separate calls for configure/build/test instead of a single chained line, so failures localize.",
+		},
+		Examples: [][2]string{
+			{"bash {\"command\": \"go test ./internal/prompt/\"} to verify a prompt-package change", "bash {\"command\": \"cat internal/prompt/types.go\"} — use read_file instead"},
+		},
+	}
 }
 func (t *AsyncRunnerTool) RequiresConfirmation(mode string) bool {
 	return mode == "plan" || mode == "edit"

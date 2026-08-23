@@ -118,20 +118,6 @@ const (
 	maxPromptContextChars  = 1600
 )
 
-// buildSystemPrompt orchestrates the modular prompt construction with explicit cache policy boundaries.
-func buildSystemPrompt(cfg *config.Config, reg *tools.Registry, messages []ai.Message, cm *contextmgr.Manager) string {
-	sections := []promptSection{
-		{name: "identity", content: renderIdentity(), classifyAs: cache.ClassificationStatic},
-		{name: "task-protocol", content: renderTaskProtocol(), classifyAs: cache.ClassificationStatic},
-		{name: "safety", content: renderSafetyProtocols(), classifyAs: cache.ClassificationStatic},
-		{name: "collaboration", content: renderCollaborativeJudgment(), classifyAs: cache.ClassificationStatic},
-		{name: "efficiency", content: renderEfficiencyProtocols(reg), classifyAs: cache.ClassificationSemiStatic},
-		{name: "cache-break", isCacheBreak: true},
-		{name: "project-context", content: renderProjectContext(cfg, messages, cm), classifyAs: cache.ClassificationDynamic},
-	}
-	return assemblePromptSections(sections)
-}
-
 func renderIdentity() string {
 	return fmt.Sprintf("# Identity\nYou are Automergent %s, a senior lead software engineer and autonomous agent. You take full responsibility for the technical integrity, security, and maintainability of the workspace. You operate with precision, focusing on solving problems rather than just completing tickets.\n\n", version.Version)
 }

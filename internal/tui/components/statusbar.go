@@ -18,14 +18,22 @@ type StatusBar struct {
 	startTime      time.Time
 	permissionTool string
 	browsing       bool
+
+	// HUD segments (IDE chrome)
+	ctxPercent    float64 // context window usage, 0-100+
+	pendingEdits  int     // edits awaiting review
+	branch        string  // git branch (+ahead/behind suffix)
+	problems      int     // diagnostics introduced this session
+	showSegments  bool
 }
 
 // NewStatusBar creates a new StatusBar.
 func NewStatusBar(styles *themes.Styles) StatusBar {
 	return StatusBar{
-		styles:    styles,
-		status:    "Ready",
-		startTime: time.Now(),
+		styles:      styles,
+		status:      "Ready",
+		startTime:   time.Now(),
+		showSegments: true,
 	}
 }
 
@@ -34,6 +42,21 @@ func (s *StatusBar) SetWidth(w int) { s.width = w }
 
 // SetStatus updates the status message.
 func (s *StatusBar) SetStatus(msg string) { s.status = msg }
+
+// SetContextUsage records context-window usage as a percentage (0-100+).
+func (s *StatusBar) SetContextUsage(pct float64) { s.ctxPercent = pct }
+
+// SetPendingEdits records how many proposed edits await review.
+func (s *StatusBar) SetPendingEdits(n int) { s.pendingEdits = n }
+
+// SetGitBranch records the current branch label ("main", "main+2", …).
+func (s *StatusBar) SetGitBranch(b string) { s.branch = b }
+
+// SetProblems records the number of session-introduced diagnostics.
+func (s *StatusBar) SetProblems(n int) { s.problems = n }
+
+// SetSegmentsVisible toggles the IDE HUD segments (zen mode hides them).
+func (s *StatusBar) SetSegmentsVisible(v bool) { s.showSegments = v }
 
 func (s *StatusBar) SetPermission(tool string) {
 	s.permissionTool = tool
@@ -122,10 +145,15 @@ func (s StatusBar) View() string {
 	shortcutStyle := lipgloss.NewStyle().Foreground(s.styles.T.Muted)
 	center := shortcutStyle.Render(strings.Join(shortcuts, "  "))
 
-	// 3. Right Section: Clock & Session Timer
+	// 3. Right Section: HUD segments + Clock & Session Timer
+	segments := s.hudSegments()
 	clock := time.Now().Format("15:04")
 	timer := time.Since(s.startTime).Round(time.Minute).String()
-	right := lipgloss.NewStyle().Foreground(s.styles.T.Subtext).Render(fmt.Sprintf("%s │ %s ", timer, clock))
+	rightParts := segments
+	rightParts = append(rightParts,
+		lipgloss.NewStyle().Foreground(s.styles.T.Subtext).Render(fmt.Sprintf("%s │ %s", timer, clock)),
+	)
+	right := lipgloss.JoinHorizontal(lipgloss.Center, rightParts...)
 
 	// 4. Composition with Flex Gaps
 	leftWidth := lipgloss.Width(left)

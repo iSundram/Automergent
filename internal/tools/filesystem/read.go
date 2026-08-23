@@ -47,7 +47,9 @@ func isBinaryFile(path string) (bool, error) {
 }
 
 // ReadFileTool reads the contents of a file.
-type ReadFileTool struct{}
+type ReadFileTool struct {
+	tools.BaseTool
+}
 
 func (t *ReadFileTool) Name() string                               { return "read_file" }
 func (t *ReadFileTool) Description() string                        { return "Read the contents of a file from disk." }
@@ -57,6 +59,27 @@ func (t *ReadFileTool) IsReadOnly(args map[string]any) bool        { return true
 func (t *ReadFileTool) IsDestructive(args map[string]any) bool     { return false }
 func (t *ReadFileTool) EstimatedCost() tools.ToolCost {
 	return tools.ToolCost{TokensApprox: 100, LatencyMs: 50, RiskLevel: "low"}
+}
+
+// Meta documents read_file in the system prompt.
+func (t *ReadFileTool) Meta() *tools.ToolMeta {
+	return &tools.ToolMeta{
+		Category:     "read",
+		DisplayName:  "Read file",
+		InjectOrder:  10,
+		PartialParse: true,
+		UsageByFamily: map[string]string{
+			"gemini3": "Gemini 3 batches parallel calls well: issue several independent read_file calls in one turn instead of sequencing them.",
+		},
+		WhenToUse:    "Any time you need file contents: before editing, to trace symbols across files, or to verify an edit landed. Batch multiple independent reads in one turn.",
+		WhenNotTo:    "Do not use shell `cat`/`head`/`tail` for this. For binary files use `view`. Do not re-read a file listed under 'Contents already loaded'.",
+		Usage: "Returns numbered lines from `path`, optionally bounded by `start_line`/`end_line`.\n" +
+			"Prefer narrow ranges on huge files; results are ghosted when enormous.\n" +
+			"If the file exists but is empty you will receive 'File is empty'.",
+		Examples: [][2]string{
+			{"read_file {\"path\": \"internal/tools/tool.go\"} before editing it", "editing blind and hoping old_str matches"},
+		},
+	}
 }
 
 func (t *ReadFileTool) Schema() map[string]any {

@@ -14,7 +14,9 @@ import (
 )
 
 // GrepTool searches for a pattern in files.
-type GrepTool struct{}
+type GrepTool struct {
+	tools.BaseTool
+}
 
 func (t *GrepTool) Name() string { return "grep" }
 func (t *GrepTool) Description() string {
@@ -23,6 +25,22 @@ func (t *GrepTool) Description() string {
 - Use context_before/context_after (-B/-A) to show surrounding lines
 - Use glob to filter file types (e.g., "*.go", "*.{ts,tsx}")
 - Skips binary files, .git, node_modules, vendor directories`
+}
+
+// Meta documents grep in the system prompt.
+func (t *GrepTool) Meta() *tools.ToolMeta {
+	return &tools.ToolMeta{
+		Category:     "search",
+		DisplayName:  "Search content",
+		InjectOrder:  20,
+		PartialParse: true,
+		WhenToUse:    "Follow-up searches for exact strings: a symbol's call sites, an error message, an import path. Filter with glob to keep result counts sane.",
+		WhenNotTo:    "Not for broad discovery — start from `glob`/directory listing when you don't yet know what you're looking for.",
+		Usage:        "Regex syntax applies; anchor with \\b or ^ when hunting identifiers. Prefer output_mode=\"files_with_matches\" first, then narrow with \"content\".",
+		UsageByFamily: map[string]string{
+			"gemini3": "Gemini 3: escape regex metacharacters explicitly (\\., \\( ) — the schema passes patterns through verbatim.",
+		},
+	}
 }
 func (t *GrepTool) RequiresConfirmation(mode string) bool { return false }
 

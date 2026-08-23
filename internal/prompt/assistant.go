@@ -76,6 +76,15 @@ func (a *AssistantPrompts) BuildCategorizationPrompt(userPrompt string, workingD
 
 // BuildTaskDefinitionPrompt creates a prompt for defining the task and todos.
 func (a *AssistantPrompts) BuildTaskDefinitionPrompt(categorized *CategorizedRequest) *PromptPart {
+	if categorized == nil {
+		return &PromptPart{
+			Stage:    StageTaskDefinition,
+			Content:  "No categorized request provided. Using intent-based task generation.",
+			Tools:    ToolSetContextOnly,
+			Metadata: map[string]any{},
+		}
+	}
+
 	var sb strings.Builder
 
 	sb.WriteString("Define the task breakdown for this request.\n\n")
@@ -128,7 +137,7 @@ func (a *AssistantPrompts) BuildTaskDefinitionPrompt(categorized *CategorizedReq
 }
 
 // BuildContextManagementPrompt creates prompts for context operations.
-func (a *AssistantPrompts) BuildContextManagementPrompt(action ContextAction, context *AssistantContext, details string) *PromptPart {
+func (a *AssistantPrompts) BuildContextManagementPrompt(action ContextAction, context *TurnContext, details string) *PromptPart {
 	var sb strings.Builder
 
 	sb.WriteString("Context Management: ")
@@ -188,12 +197,18 @@ func (a *AssistantPrompts) BuildUserResponsePrompt(categorized *CategorizedReque
 	var sb strings.Builder
 
 	sb.WriteString("Respond to the user based on the completed work.\n\n")
-	sb.WriteString("Original Request: ")
-	sb.WriteString(categorized.OriginalPrompt)
-	sb.WriteString("\n")
-	sb.WriteString("Category: ")
-	sb.WriteString(string(categorized.Category))
-	sb.WriteString("\n")
+
+	if categorized != nil {
+		sb.WriteString("Original Request: ")
+		sb.WriteString(categorized.OriginalPrompt)
+		sb.WriteString("\n")
+		sb.WriteString("Category: ")
+		sb.WriteString(string(categorized.Category))
+		sb.WriteString("\n")
+	} else {
+		sb.WriteString("Original Request: (intent-based system)\n")
+	}
+
 	sb.WriteString("Result: ")
 	sb.WriteString(result)
 	sb.WriteString("\n\n")
@@ -213,18 +228,29 @@ func (a *AssistantPrompts) BuildSimpleTaskPrompt(categorized *CategorizedRequest
 	var sb strings.Builder
 
 	sb.WriteString("Execute this simple task directly.\n\n")
-	sb.WriteString("Request: ")
-	sb.WriteString(categorized.OriginalPrompt)
-	sb.WriteString("\n")
-	sb.WriteString("Allowed Tools: ")
-	sb.WriteString(string(categorized.AllowedTools))
-	sb.WriteString("\n\n")
+
+	if categorized != nil {
+		sb.WriteString("Request: ")
+		sb.WriteString(categorized.OriginalPrompt)
+		sb.WriteString("\n")
+		sb.WriteString("Allowed Tools: ")
+		sb.WriteString(string(categorized.AllowedTools))
+		sb.WriteString("\n\n")
+	} else {
+		sb.WriteString("Request: (intent-based system)\n\n")
+	}
+
 	sb.WriteString("Complete the task and provide the result. Do not over-engineer.")
+
+	tools := ToolSetContextOnly
+	if categorized != nil {
+		tools = categorized.AllowedTools
+	}
 
 	return &PromptPart{
 		Stage:    StageExecution,
 		Content:  sb.String(),
-		Tools:    categorized.AllowedTools,
+		Tools:    tools,
 		Metadata: map[string]any{"categorized": categorized},
 	}
 }

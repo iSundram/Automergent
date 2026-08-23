@@ -11,6 +11,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/iSundram/Automergent/internal/agent"
+	"github.com/iSundram/Automergent/internal/tui/render"
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
@@ -174,70 +175,9 @@ func (d *Diff) refresh() {
 		return
 	}
 
-	lines := strings.Split(d.rawContent, "\n")
-	contentW := d.viewport.Width()
-
-	// Colors
-	addBg := lipgloss.Color("#143d14")
-	delBg := lipgloss.Color("#3d1414")
-	addFg := lipgloss.Color("#a6e3a1")
-	delFg := lipgloss.Color("#f38ba8")
-	hunkFg := lipgloss.Color("#89b4fa")
-	fileFg := lipgloss.Color("#cba6f7")
-	numFg := lipgloss.Color("#6c7086")
-	ctxFg := lipgloss.Color("#9399b2")
-	prefixBg := lipgloss.Color("#1e3a5f") // Blue highlight for +/- prefix
-
-	var sb strings.Builder
-	lineNum := 0
-
-	for _, line := range lines {
-		pad := func(s string) string {
-			w := lipgloss.Width(s)
-			if w < contentW {
-				return s + strings.Repeat(" ", contentW-w)
-			}
-			return s
-		}
-
-		switch {
-		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
-			styled := lipgloss.NewStyle().Foreground(fileFg).Bold(true).Render(line)
-			sb.WriteString("     " + styled + "\n")
-
-		case strings.HasPrefix(line, "@@"):
-			styled := lipgloss.NewStyle().Foreground(hunkFg).Bold(true).Render(line)
-			sb.WriteString("\n     " + styled + "\n")
-			lineNum = 0
-
-		case strings.HasPrefix(line, "+"):
-			lineNum++
-			num := lipgloss.NewStyle().Foreground(numFg).Width(4).Align(lipgloss.Right).Render(fmt.Sprintf("%d", lineNum))
-			// Blue highlight on +, green on rest
-			prefix := lipgloss.NewStyle().Background(prefixBg).Foreground(addFg).Bold(true).Render("+")
-			rest := lipgloss.NewStyle().Background(addBg).Foreground(addFg).Render(pad(line[1:]))
-			sb.WriteString(num + " " + prefix + rest + "\n")
-
-		case strings.HasPrefix(line, "-"):
-			num := lipgloss.NewStyle().Foreground(numFg).Width(4).Align(lipgloss.Right).Render("-")
-			// Blue highlight on -, red on rest
-			prefix := lipgloss.NewStyle().Background(prefixBg).Foreground(delFg).Bold(true).Render("-")
-			rest := lipgloss.NewStyle().Background(delBg).Foreground(delFg).Render(pad(line[1:]))
-			sb.WriteString(num + " " + prefix + rest + "\n")
-
-		case line == "":
-			lineNum++
-			sb.WriteString("\n")
-
-		default:
-			lineNum++
-			num := lipgloss.NewStyle().Foreground(numFg).Width(4).Align(lipgloss.Right).Render(fmt.Sprintf("%d", lineNum))
-			content := lipgloss.NewStyle().Foreground(ctxFg).Render(line)
-			sb.WriteString(num + " " + content + "\n")
-		}
-	}
-
-	d.viewport.SetContent(sb.String())
+	// Single themed renderer: colors, line numbers and word-level markers all
+	// derive from the active theme (see render.SetTheme).
+	d.viewport.SetContent(render.DiffWithWidth(d.rawContent, d.viewport.Width()))
 }
 
 // Toggle visibility.

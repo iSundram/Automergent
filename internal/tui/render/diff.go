@@ -2,35 +2,48 @@ package render
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 )
 
-// Diff renders a unified diff with color highlighting and word-level changes.
+// Diff renders a unified diff with theme-derived colors, line numbers and
+// word-level «del»/‹ins› highlighting.
 func Diff(content string) string {
+	return DiffWithWidth(content, 0)
+}
+
+// DiffWithWidth renders like Diff but pads add/delete rows with their
+// background tint out to the given width so full rows highlight edge-to-edge.
+func DiffWithWidth(content string, padTo int) string {
+	p := Palette()
+
+	addStyle := lipgloss.NewStyle().Foreground(p.AddFg).Background(p.AddBg)
+	delStyle := lipgloss.NewStyle().Foreground(p.DelFg).Background(p.DelBg)
+	hunkStyle := lipgloss.NewStyle().Foreground(p.Hunk).Bold(true)
+	fileStyle := lipgloss.NewStyle().Foreground(p.File).Bold(true)
+	wordDelStyle := lipgloss.NewStyle().Foreground(p.DelFg).Background(p.WordDelBg).Strikethrough(true)
+	wordAddStyle := lipgloss.NewStyle().Foreground(p.AddFg).Background(p.WordAddBg).Underline(true).Bold(true)
+	lineNumStyle := lipgloss.NewStyle().Foreground(p.LineNum).Width(4).Align(lipgloss.Right)
+	contextStyle := lipgloss.NewStyle().Foreground(p.Context)
+
 	var sb strings.Builder
-	// Catppuccin colors
-	green := lipgloss.Color("#a6e3a1")
-	red := lipgloss.Color("#f38ba8")
-	blue := lipgloss.Color("#89b4fa")
-	magenta := lipgloss.Color("#cba6f7")
-	yellow := lipgloss.Color("#f9e2af")
-	surface := lipgloss.Color("#313244")
-	surfaceDark := lipgloss.Color("#1e1e2e")
-
-	addStyle := lipgloss.NewStyle().Foreground(green).Background(surface)
-	delStyle := lipgloss.NewStyle().Foreground(red).Background(surface)
-	hunkStyle := lipgloss.NewStyle().Foreground(blue).Bold(true)
-	fileStyle := lipgloss.NewStyle().Foreground(magenta).Bold(true)
-
-	// Word-level diff markers
-	wordDelStyle := lipgloss.NewStyle().Foreground(red).Background(surfaceDark).Strikethrough(true)
-	wordAddStyle := lipgloss.NewStyle().Foreground(green).Background(surfaceDark).Underline(true).Bold(true)
-	lineNumStyle := lipgloss.NewStyle().Foreground(yellow).Faint(true).Width(4).Align(lipgloss.Right)
-	contextStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#6c7086")) // Overlay0
-
 	lineNum := 0
+
+	// writeRow emits "NNNN body", optionally padding body's background to
+	// padTo columns.
+	writeRow := func(num string, body string, style lipgloss.Style, bg color.Color) {
+		sb.WriteString(num + " ")
+		sb.WriteString(style.Render(body))
+		if padTo > 0 && bg != nil {
+			if w := lipgloss.Width(body); w < padTo-5 {
+				pad := lipgloss.NewStyle().Background(lipgloss.Color(colorHex(bg)))
+				sb.WriteString(pad.Render(strings.Repeat(" ", padTo-5-w)))
+			}
+		}
+		sb.WriteByte('\n')
+	}
 
 	for _, line := range strings.Split(content, "\n") {
 		if line == "" {
@@ -38,72 +51,26 @@ func Diff(content string) string {
 			continue
 		}
 
-		// Render word-level markers if present
 		renderedLine := line
-		if strings.Contains(line, "«") || strings.Contains(line, "‹") {
-			renderedLine = renderWordDiff(line, wordDelStyle, wordAddStyle)
+		if strings.ContainsAny(line, "«»‹›") {
+			renderedLine = WordMarkers(line, wordDelStyle, wordAddStyle)
 		}
 
 		switch {
 		case strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---"):
-			// File headers - no line numbers
-			sb.WriteString("    " + fileStyle.Render(line) + "\n")
+			sb.WriteString("     " + fileStyle.Render(line) + "\n")
 		case strings.HasPrefix(line, "@@"):
-			// Hunk headers
-			sb.WriteString("\n    " + hunkStyle.Render(line) + "\n")
-			// Reset line number from hunk header if possible
+			sb.WriteString("\n     " + hunkStyle.Render(line) + "\n")
 			lineNum = 0
 		case strings.HasPrefix(line, "+"):
 			lineNum++
-			num := lineNumStyle.Render(fmt.Sprintf("%d", lineNum))
-			sb.WriteString(num + " " + addStyle.Render(renderedLine) + "\n")
+			writeRow(lineNumStyle.Render(fmt.Sprintf("%d", lineNum)), renderedLine[1:], addStyle, p.AddBg)
 		case strings.HasPrefix(line, "-"):
-			// Deleted lines don't increment line number
-			num := lineNumStyle.Render("  ")
-			sb.WriteString(num + " " + delStyle.Render(renderedLine) + "\n")
+			writeRow(lineNumStyle.Render("·"), renderedLine[1:], delStyle, p.DelBg)
 		default:
-			// Context lines
 			lineNum++
-			num := lineNumStyle.Render(fmt.Sprintf("%d", lineNum))
-			sb.WriteString(num + " " + contextStyle.Render(renderedLine) + "\n")
+			writeRow(lineNumStyle.Render(fmt.Sprintf("%d", lineNum)), renderedLine[1:], contextStyle, nil)
 		}
 	}
 	return strings.TrimSuffix(sb.String(), "\n")
-}
-
-// renderWordDiff processes word-level diff markers and applies styles
-func renderWordDiff(line string, delStyle, addStyle lipgloss.Style) string {
-	var result strings.Builder
-	i := 0
-	runes := []rune(line)
-
-	for i < len(runes) {
-		switch runes[i] {
-		case '«': // Start of deleted word
-			j := i + 1
-			for j < len(runes) && runes[j] != '»' {
-				j++
-			}
-			if j < len(runes) {
-				deleted := string(runes[i+1 : j])
-				result.WriteString(delStyle.Render(deleted))
-				i = j + 1
-				continue
-			}
-		case '‹': // Start of inserted word
-			j := i + 1
-			for j < len(runes) && runes[j] != '›' {
-				j++
-			}
-			if j < len(runes) {
-				inserted := string(runes[i+1 : j])
-				result.WriteString(addStyle.Render(inserted))
-				i = j + 1
-				continue
-			}
-		}
-		result.WriteRune(runes[i])
-		i++
-	}
-	return result.String()
 }

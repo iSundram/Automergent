@@ -27,9 +27,8 @@ type PromptManager struct {
 	contextSelector  *ContextSelector
 	toolExecutor     ToolExecutor
 
-	// State
-	assistantContext  *AssistantContext
-	coderContext      *CoderContext
+	// State — one unified context (no assistant/coder split)
+	turnCtx           *TurnContext
 	currentIntentSet  *shared.IntentSet
 	currentInitPhase  *InitPhase
 	currentInitResults *shared.InitResults
@@ -38,6 +37,7 @@ type PromptManager struct {
 	stashedContexts   []ContextStash
 	workingDir        string
 	progress          func(stage, detail string)
+	actionObserver    func(shared.InitActionEvent)
 	mu                sync.RWMutex
 
 	// Task state store for tools
@@ -59,12 +59,12 @@ func NewPromptManager(config *PromptConfig, contextManager *contextpkg.Manager, 
 		initExecutor:     NewInitPhaseExecutor(config),
 		taskPlanner:      NewLLMTaskPlanner(config, llmClient),
 		assistantPrompts: NewAssistantPrompts(config),
-		coderPrompts:     NewCoderPrompts(config),
+		coderPrompts:     NewTaskPrompts(config),
 		contextPrompts:   NewContextPrompts(config),
 		workflowPrompts:  NewWorkflowPrompts(config),
 		toolPrompts:      NewToolPrompts(config),
 		toolExecutor:     toolExecutor,
-		assistantContext: &AssistantContext{
+		turnCtx: &TurnContext{
 			ConversationHistory: []Message{},
 			UserPreferences:     make(map[string]string),
 			StashedContexts:     []ContextStash{},
@@ -87,7 +87,7 @@ func (pm *PromptManager) ProcessUserMessage(ctx context.Context, userMessage str
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	pm.assistantContext.ConversationHistory = append(pm.assistantContext.ConversationHistory, Message{
+	pm.turnCtx.ConversationHistory = append(pm.turnCtx.ConversationHistory, Message{
 		Role:      "user",
 		Content:   userMessage,
 		Timestamp: time.Now(),
@@ -104,7 +104,7 @@ func (pm *PromptManager) ProcessUserMessage(ctx context.Context, userMessage str
 		pm.currentInitResults = nil
 		pm.currentTasks = nil
 		pm.taskState = taskstate.NewStore()
-		pm.coderContext = nil
+		pm.turnCtx = nil
 		return pm.startNewIntentFlow(ctx, userMessage, workingDir, availableFiles)
 	}
 
@@ -130,9 +130,26 @@ func (pm *PromptManager) startNewIntentFlow(ctx context.Context, userMessage, wo
 
 	pm.taskState.SetIntentAndInit(intentSet, nil)
 
-	pm.initExecutor.OnAction = func(action InitAction, execErr error) {
+	pm.initExecutor.OnStart = func(action InitAction) {
+		pm.notifyAction(shared.InitActionEvent{
+			RawTool: action.Tool,
+			Tool:    NormalizeInitTool(action.Tool),
+			Target:  action.Target,
+			Running: true,
+		})
+	}
+
+	pm.initExecutor.OnAction = func(action InitAction, execErr error, duration time.Duration) {
+		evt := shared.InitActionEvent{
+			RawTool:  action.Tool,
+			Tool:     NormalizeInitTool(action.Tool),
+			Target:   action.Target,
+			Duration: duration,
+		}
 		if execErr != nil {
-			pm.notifyProgress("Init", fmt.Sprintf("%s %s — failed: %v", action.Tool, action.Target, execErr))
+			evt.Failed = true
+			evt.Err = execErr.Error()
+			pm.notifyAction(evt)
 			return
 		}
 		switch action.Tool {
@@ -141,12 +158,18 @@ func (pm *PromptManager) startNewIntentFlow(ctx context.Context, userMessage, wo
 			if strings.TrimSpace(action.Result) == "" {
 				lines = 0
 			}
-			pm.notifyProgress("Init", fmt.Sprintf("%s %s — %d results", action.Tool, action.Target, lines))
+			evt.Summary = fmt.Sprintf("%d results", lines)
 		case "read":
-			pm.notifyProgress("Init", fmt.Sprintf("read %s — %d chars", action.Target, len(action.Result)))
+			evt.Summary = fmt.Sprintf("%d chars", len(action.Result))
 		default:
-			pm.notifyProgress("Init", fmt.Sprintf("%s %s", action.Tool, action.Target))
+			if out := strings.TrimSpace(action.Result); out != "" {
+				if idx := strings.IndexByte(out, '\n'); idx >= 0 {
+					out = out[:idx]
+				}
+				evt.Summary = out
+			}
 		}
+		pm.notifyAction(evt)
 	}
 
 	intentPrompt := pm.buildIntentIdentificationPrompt(intentSet)
@@ -184,17 +207,7 @@ func (pm *PromptManager) startNewIntentFlow(ctx context.Context, userMessage, wo
 			pm.promptHistory = append(pm.promptHistory, tp)
 		}
 
-		if pm.requiresCoder(tasks) {
-			pm.coderContext = &CoderContext{
-				WorkingDir:        workingDir,
-				Files:             initResults.FilesFound,
-				CodeSnippets:      initResults.CodeSnippets,
-				Constraints:       []string{},
-				TodoItems:         pm.convertTasksToTodos(tasks),
-				SharedContext:     make(map[string]string),
-				ParentAssistantID: "assistant-main",
-			}
-		}
+		pm.attachTodos(workingDir, initResults.FilesFound, initResults.CodeSnippets, tasks)
 	} else {
 		tasks, err := pm.taskPlanner.PlanTasks(ctx, intentSet, &shared.InitResults{})
 		if err != nil {
@@ -211,17 +224,7 @@ func (pm *PromptManager) startNewIntentFlow(ctx context.Context, userMessage, wo
 			pm.promptHistory = append(pm.promptHistory, tp)
 		}
 
-		if pm.requiresCoder(tasks) {
-			pm.coderContext = &CoderContext{
-				WorkingDir:        workingDir,
-				Files:             []string{},
-				CodeSnippets:      make(map[string]string),
-				Constraints:       []string{},
-				TodoItems:         pm.convertTasksToTodos(tasks),
-				SharedContext:     make(map[string]string),
-				ParentAssistantID: "assistant-main",
-			}
-		}
+		pm.attachTodos(workingDir, nil, nil, tasks)
 	}
 
 	return parts, nil
@@ -257,13 +260,41 @@ func (pm *PromptManager) buildIntentIdentificationPrompt(intentSet *shared.Inten
 	}
 }
 
-func (pm *PromptManager) requiresCoder(tasks []shared.TaskSpec) bool {
+// requiresTodoTracking reports whether the plan contains implementation work
+// that should be tracked as todos on the unified turn context.
+func (pm *PromptManager) requiresTodoTracking(tasks []shared.TaskSpec) bool {
 	for _, task := range tasks {
-		if task.Role == "coder" {
+		switch task.Role {
+		case "coder", "implementer", "tester":
 			return true
 		}
 	}
 	return false
+}
+
+// attachTodos loads a planned task list onto the unified turn context without
+// discarding conversation state. This replaces the old behavior of spinning up
+// a separate "coder" context: one persona, one context, one loop.
+func (pm *PromptManager) attachTodos(workingDir string, files []string, snippets map[string]string, tasks []shared.TaskSpec) {
+	if pm.turnCtx == nil {
+		pm.turnCtx = &TurnContext{}
+	}
+	if workingDir != "" {
+		pm.turnCtx.WorkingDir = workingDir
+	}
+	if len(files) > 0 {
+		pm.turnCtx.Files = files
+	}
+	if len(snippets) > 0 {
+		pm.turnCtx.CodeSnippets = snippets
+	}
+	if pm.turnCtx.Constraints == nil {
+		pm.turnCtx.Constraints = []string{}
+	}
+	pm.turnCtx.TodoItems = pm.convertTasksToTodos(tasks)
+	if pm.turnCtx.SharedContext == nil {
+		pm.turnCtx.SharedContext = make(map[string]string)
+	}
 }
 
 func (pm *PromptManager) convertTasksToTodos(tasks []shared.TaskSpec) []shared.TodoItem {
@@ -292,7 +323,7 @@ func (pm *PromptManager) continueRequest(userMessage string) ([]PromptPart, erro
 
 	contextPrompt := *pm.assistantPrompts.BuildContextManagementPrompt(
 		ContextActionShare,
-		pm.assistantContext,
+		pm.turnCtx,
 		userMessage,
 	)
 	return []PromptPart{contextPrompt}, nil
@@ -303,16 +334,16 @@ func (pm *PromptManager) GetNextTodoPrompt() *PromptPart {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if pm.coderContext == nil || len(pm.coderContext.TodoItems) == 0 {
+	if pm.turnCtx == nil || len(pm.turnCtx.TodoItems) == 0 {
 		return nil
 	}
 
-	for i, todo := range pm.coderContext.TodoItems {
+	for i, todo := range pm.turnCtx.TodoItems {
 		if todo.Status == shared.TodoStatusPending {
 			depsMet := true
 			for _, depID := range todo.Dependencies {
 				found := false
-				for _, t := range pm.coderContext.TodoItems {
+				for _, t := range pm.turnCtx.TodoItems {
 					if t.ID == depID && t.Status == shared.TodoStatusCompleted {
 						found = true
 						break
@@ -324,8 +355,8 @@ func (pm *PromptManager) GetNextTodoPrompt() *PromptPart {
 				}
 			}
 			if depsMet {
-				pm.coderContext.TodoItems[i].Status = shared.TodoStatusInProgress
-				prompt := pm.coderPrompts.BuildExecutionPrompt(pm.coderContext, &pm.coderContext.TodoItems[i], nil)
+				pm.turnCtx.TodoItems[i].Status = shared.TodoStatusInProgress
+				prompt := pm.coderPrompts.BuildExecutionPrompt(pm.turnCtx, &pm.turnCtx.TodoItems[i], nil)
 				if prompt != nil {
 					promptCopy := *prompt
 					return &promptCopy
@@ -342,15 +373,15 @@ func (pm *PromptManager) InjectTodoContext(todoID, contextKey, contextValue stri
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if pm.coderContext == nil {
+	if pm.turnCtx == nil {
 		return nil
 	}
 
-	for i, todo := range pm.coderContext.TodoItems {
+	for i, todo := range pm.turnCtx.TodoItems {
 		if todo.ID == todoID && todo.InjectLater && !todo.Injected {
-			pm.coderContext.TodoItems[i].Injected = true
-			pm.coderContext.SharedContext[contextKey] = contextValue
-			prompt := pm.coderPrompts.BuildTodoInjectPrompt(pm.coderContext, &pm.coderContext.TodoItems[i], contextKey, contextValue)
+			pm.turnCtx.TodoItems[i].Injected = true
+			pm.turnCtx.SharedContext[contextKey] = contextValue
+			prompt := pm.coderPrompts.BuildTodoInjectPrompt(pm.turnCtx, &pm.turnCtx.TodoItems[i], contextKey, contextValue)
 			if prompt != nil {
 				promptCopy := *prompt
 				return &promptCopy
@@ -366,13 +397,13 @@ func (pm *PromptManager) DispatchParallelTodos(todoIDs []string) *PromptPart {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
-	if pm.coderContext == nil {
+	if pm.turnCtx == nil {
 		return nil
 	}
 
 	var todos []shared.TodoItem
 	for _, id := range todoIDs {
-		for _, todo := range pm.coderContext.TodoItems {
+		for _, todo := range pm.turnCtx.TodoItems {
 			if todo.ID == id && todo.Status == shared.TodoStatusPending {
 				todos = append(todos, todo)
 				break
@@ -384,7 +415,7 @@ func (pm *PromptManager) DispatchParallelTodos(todoIDs []string) *PromptPart {
 		return nil
 	}
 
-	prompt := pm.coderPrompts.BuildParallelDispatchPrompt(pm.coderContext, todos, pm.coderContext.SharedContext)
+	prompt := pm.coderPrompts.BuildParallelDispatchPrompt(pm.turnCtx, todos, pm.turnCtx.SharedContext)
 	if prompt != nil {
 		promptCopy := *prompt
 		if promptCopy.Metadata == nil {
@@ -401,13 +432,13 @@ func (pm *PromptManager) CompleteTodo(todoID string, result string) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if pm.coderContext == nil {
+	if pm.turnCtx == nil {
 		return
 	}
 
-	for i, todo := range pm.coderContext.TodoItems {
+	for i, todo := range pm.turnCtx.TodoItems {
 		if todo.ID == todoID {
-			pm.coderContext.TodoItems[i].Status = shared.TodoStatusCompleted
+			pm.turnCtx.TodoItems[i].Status = shared.TodoStatusCompleted
 			break
 		}
 	}
@@ -417,18 +448,18 @@ func (pm *PromptManager) CompleteTodo(todoID string, result string) {
 func (pm *PromptManager) CompleteActiveTodo(success bool) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	if pm.coderContext == nil {
+	if pm.turnCtx == nil {
 		return
 	}
 	status := shared.TodoStatusCompleted
 	if !success {
 		status = shared.TodoStatusBlocked
 	}
-	for i := range pm.coderContext.TodoItems {
-		if pm.coderContext.TodoItems[i].Status != shared.TodoStatusInProgress {
+	for i := range pm.turnCtx.TodoItems {
+		if pm.turnCtx.TodoItems[i].Status != shared.TodoStatusInProgress {
 			continue
 		}
-		pm.coderContext.TodoItems[i].Status = status
+		pm.turnCtx.TodoItems[i].Status = status
 		return
 	}
 }
@@ -438,7 +469,7 @@ func (pm *PromptManager) StashContext(reason string) *PromptPart {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	stashPrompt := pm.contextPrompts.BuildStashPrompt(pm.assistantContext, reason)
+	stashPrompt := pm.contextPrompts.BuildStashPrompt(pm.turnCtx, reason)
 	if stashPrompt != nil {
 		promptCopy := *stashPrompt
 		pm.promptHistory = append(pm.promptHistory, promptCopy)
@@ -467,7 +498,7 @@ func (pm *PromptManager) saveStashLocked(summary string, tags []string) *Context
 	}
 
 	pm.stashedContexts = append(pm.stashedContexts, stash)
-	pm.assistantContext.StashedContexts = pm.stashedContexts
+	pm.turnCtx.StashedContexts = pm.stashedContexts
 
 	return &stash
 }
@@ -489,7 +520,7 @@ func (pm *PromptManager) ResumeContext(stashID string) *PromptPart {
 		return nil
 	}
 
-	resumePrompt := pm.contextPrompts.BuildResumeContextPrompt(stash, pm.assistantContext)
+	resumePrompt := pm.contextPrompts.BuildResumeContextPrompt(stash, pm.turnCtx)
 	if resumePrompt != nil {
 		promptCopy := *resumePrompt
 		pm.promptHistory = append(pm.promptHistory, promptCopy)
@@ -516,7 +547,7 @@ func (pm *PromptManager) ApplyStash(stashID string, merge bool) error {
 	}
 
 	if !merge {
-		pm.assistantContext.ConversationHistory = []Message{}
+		pm.turnCtx.ConversationHistory = []Message{}
 	}
 
 	return nil
@@ -527,11 +558,11 @@ func (pm *PromptManager) ShareContextWithCoder(shareSpec string) *PromptPart {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if pm.coderContext == nil {
+	if pm.turnCtx == nil {
 		return nil
 	}
 
-	sharePrompt := pm.contextPrompts.BuildShareContextPrompt(pm.assistantContext, pm.coderContext, shareSpec)
+	sharePrompt := pm.contextPrompts.BuildShareContextPrompt(pm.turnCtx, shareSpec)
 	if sharePrompt != nil {
 		promptCopy := *sharePrompt
 		pm.promptHistory = append(pm.promptHistory, promptCopy)
@@ -545,31 +576,24 @@ func (pm *PromptManager) ApplySharedContext(keyValues map[string]string) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	if pm.coderContext == nil {
+	if pm.turnCtx == nil {
 		return
 	}
 
 	for k, v := range keyValues {
-		pm.coderContext.SharedContext[k] = v
+		pm.turnCtx.SharedContext[k] = v
 	}
 }
 
-// GetCoderContext returns the current coder context.
-func (pm *PromptManager) GetCoderContext() *CoderContext {
+// GetTurnContext returns the unified turn context.
+func (pm *PromptManager) GetTurnContext() *TurnContext {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-	return pm.coderContext
+	return pm.turnCtx
 }
 
-// GetAssistantContext returns the current assistant context.
-func (pm *PromptManager) GetAssistantContext() *AssistantContext {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
-	return pm.assistantContext
-}
-
-// CoderPrompts returns the coder prompt generator.
-func (pm *PromptManager) CoderPrompts() *CoderPrompts {
+// TaskPrompts returns the task execution prompt generator.
+func (pm *PromptManager) TaskPrompts() *TaskPrompts {
 	return pm.coderPrompts
 }
 
@@ -617,7 +641,7 @@ func (pm *PromptManager) CompleteRequest(result string) *PromptPart {
 		promptCopy := *responsePrompt
 		pm.promptHistory = append(pm.promptHistory, promptCopy)
 
-		pm.assistantContext.ConversationHistory = append(pm.assistantContext.ConversationHistory, Message{
+		pm.turnCtx.ConversationHistory = append(pm.turnCtx.ConversationHistory, Message{
 			Role:      "assistant",
 			Content:   result,
 			Timestamp: time.Now(),
@@ -628,7 +652,7 @@ func (pm *PromptManager) CompleteRequest(result string) *PromptPart {
 		pm.currentInitResults = nil
 		pm.currentTasks = nil
 		pm.taskState = taskstate.NewStore()
-		pm.coderContext = nil
+		pm.turnCtx = nil
 		pm.cleanupEphemeralPromptsLocked()
 
 		return &promptCopy
@@ -689,9 +713,32 @@ func (pm *PromptManager) SetProgress(fn func(stage, detail string)) {
 	pm.progress = fn
 }
 
+// SetActionObserver registers a callback receiving structured init-phase tool
+// events so the UI can render them as native tool-call log entries.
+func (pm *PromptManager) SetActionObserver(fn func(shared.InitActionEvent)) {
+	pm.actionObserver = fn
+}
+
 func (pm *PromptManager) notifyProgress(stage, detail string) {
 	if pm.progress != nil {
 		pm.progress(stage, detail)
+	}
+}
+
+func (pm *PromptManager) notifyAction(evt shared.InitActionEvent) {
+	if pm.actionObserver != nil {
+		pm.actionObserver(evt)
+	}
+}
+
+// NormalizeInitTool maps pipeline-side init tool names onto the native
+// registry tool names the UI renders cards for.
+func NormalizeInitTool(tool string) string {
+	switch tool {
+	case "read":
+		return "read_file"
+	default:
+		return tool
 	}
 }
 
@@ -725,7 +772,7 @@ func (pm *PromptManager) DeleteStash(stashID string) error {
 	for i, s := range pm.stashedContexts {
 		if s.ID == stashID {
 			pm.stashedContexts = append(pm.stashedContexts[:i], pm.stashedContexts[i+1:]...)
-			pm.assistantContext.StashedContexts = pm.stashedContexts
+			pm.turnCtx.StashedContexts = pm.stashedContexts
 			return nil
 		}
 	}
@@ -737,31 +784,29 @@ func (pm *PromptManager) CreateNewContext(initialPrompt string, inheritPrefs boo
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	newPrompt := pm.contextPrompts.BuildNewContextPrompt(pm.assistantContext, initialPrompt)
+	newPrompt := pm.contextPrompts.BuildNewContextPrompt(pm.turnCtx, initialPrompt)
 	var promptCopy PromptPart
 	if newPrompt != nil {
 		promptCopy = *newPrompt
 		pm.promptHistory = append(pm.promptHistory, promptCopy)
 	}
 
-	if len(pm.assistantContext.ConversationHistory) > 0 {
+	if len(pm.turnCtx.ConversationHistory) > 0 {
 		pm.saveStashLocked("Auto-stash before new context", []string{"auto", "pre-new-context"})
 	}
 
 	prefs := make(map[string]string)
 	if inheritPrefs {
-		for k, v := range pm.assistantContext.UserPreferences {
+		for k, v := range pm.turnCtx.UserPreferences {
 			prefs[k] = v
 		}
 	}
 
-	pm.assistantContext = &AssistantContext{
+	pm.turnCtx = &TurnContext{
 		ConversationHistory: []Message{},
 		UserPreferences:     prefs,
 		StashedContexts:     pm.stashedContexts,
 	}
-
-	pm.coderContext = nil
 	pm.currentIntentSet = nil
 	pm.currentInitPhase = nil
 	pm.currentInitResults = nil
@@ -777,23 +822,23 @@ func (pm *PromptManager) CreateNewContext(initialPrompt string, inheritPrefs boo
 func (pm *PromptManager) SetUserPreference(key, value string) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	pm.assistantContext.UserPreferences[key] = value
+	pm.turnCtx.UserPreferences[key] = value
 }
 
 // GetUserPreference gets a user preference.
 func (pm *PromptManager) GetUserPreference(key string) (string, bool) {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-	val, ok := pm.assistantContext.UserPreferences[key]
+	val, ok := pm.turnCtx.UserPreferences[key]
 	return val, ok
 }
 
 // serializeContext serializes the current context for stashing.
 func (pm *PromptManager) serializeContext() string {
 	if pm.currentIntentSet != nil {
-		return fmt.Sprintf("Context with %d messages, intents: %d", len(pm.assistantContext.ConversationHistory), len(pm.currentIntentSet.Intents))
+		return fmt.Sprintf("Context with %d messages, intents: %d", len(pm.turnCtx.ConversationHistory), len(pm.currentIntentSet.Intents))
 	}
-	return fmt.Sprintf("Context with %d messages", len(pm.assistantContext.ConversationHistory))
+	return fmt.Sprintf("Context with %d messages", len(pm.turnCtx.ConversationHistory))
 }
 
 // GetSelectedContext returns the context selected for the current tasks using the context selector.

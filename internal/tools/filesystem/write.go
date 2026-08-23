@@ -142,6 +142,25 @@ func NewEditFileTool(cfg *config.Config) *EditFileTool {
 
 func (t *EditFileTool) Name() string        { return "edit_file" }
 func (t *EditFileTool) Description() string { return "Replace a substring in a file." }
+
+// Meta documents edit_file in the system prompt.
+func (t *EditFileTool) Meta() *tools.ToolMeta {
+	return &tools.ToolMeta{
+		Category:    "edit",
+		DisplayName: "Edit",
+		InjectOrder: 10,
+		WhenToUse:   "Localized changes to an existing file you have already read. Preserve the exact indentation of the surrounding code.",
+		UsageByFamily: map[string]string{
+			"gemini3": "Gemini 3: emit old_str/new_str as plain strings — never JSON-escape the backslashes twice; verify uniqueness before relying on replace_all.",
+		},
+		WhenNotTo:   "Never write whole files with this; use `write_file` for full-content replacement or `create_file` for new paths. For several edits in one file, prefer `multi_edit` over repeated calls.",
+		Usage: "Performs exact string replacement: `old_str` must match the file content EXACTLY, once.\n" +
+			"The call FAILS if old_str is not unique — add more surrounding context to disambiguate, or set `replace_all` only when every occurrence should change.",
+		Examples: [][2]string{
+			{"edit_file {\"path\":\"a.go\",\"old_str\":\"func main() {\",\"new_str\":\"func main() {\\n\\tlog.SetFlags(0)\"}", "\"old_str\": \"{\" (matches dozens of places, call fails)"},
+		},
+	}
+}
 func (t *EditFileTool) RequiresConfirmation(mode string) bool {
 	return mode == "edit" || mode == "plan"
 }

@@ -27,6 +27,10 @@ func Dracula() *Theme {
 
 // Get returns a theme by name, defaulting to Catppuccin.
 func Get(name string) *Theme {
+	engine := NewThemeEngine()
+	if t, ok := engine.themes[name]; ok {
+		return t
+	}
 	switch name {
 	case "dracula":
 		return Dracula()

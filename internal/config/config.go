@@ -72,6 +72,9 @@ type Config struct {
 	Notifications NotificationConfig `mapstructure:"notifications" yaml:"notifications"`
 	// Coordinator holds multi-agent coordination settings.
 	Coordinator CoordinatorConfig `mapstructure:"coordinator" yaml:"coordinator"`
+
+	// Hooks holds PreToolUse/PostToolUse lifecycle hooks.
+	Hooks HooksConfig `mapstructure:"hooks" yaml:"hooks"`
 	// ConfirmationTimeout controls the default timeout for user confirmation dialogs (e.g., tool execution).
 	// Accepts any time.Duration string (e.g., "5m", "10m"). If empty, defaults to 10m.
 	ConfirmationTimeout string `mapstructure:"confirmationTimeout" yaml:"confirmationTimeout,omitempty"`
@@ -209,6 +212,23 @@ type SecurityConfig struct {
 	StripEnvVarPatterns    []string `mapstructure:"stripEnvVarPatterns" yaml:"stripEnvVarPatterns,omitempty"`
 	RequireGitForAutoModes bool     `mapstructure:"requireGitForAutoModes" yaml:"requireGitForAutoModes"`
 	RootRiskAcknowledged   bool     `mapstructure:"rootRiskAcknowledged" yaml:"rootRiskAcknowledged,omitempty"`
+}
+
+// Hook is one lifecycle hook: a shell command executed at a well-defined
+// point. Hooks receive context via env vars (AUTOMERGENT_TOOL_NAME,
+// AUTOMERGENT_TOOL_ARGS, AUTOMERGENT_TOOL_RESULT, AUTOMERGENT_PROJECT_DIR).
+type Hook struct {
+	Name    string `mapstructure:"name" yaml:"name"`
+	Command string `mapstructure:"command" yaml:"command"`
+	Timeout string `mapstructure:"timeout" yaml:"timeout,omitempty"` // Go duration, default 10s
+}
+
+// HooksConfig wires user hooks into the tool lifecycle.
+// PreToolUse: a non-zero exit VETOES the tool call (stderr becomes the reason).
+// PostToolUse: failures are logged, never fatal.
+type HooksConfig struct {
+	PreToolUse  []Hook `mapstructure:"preToolUse" yaml:"preToolUse,omitempty"`
+	PostToolUse []Hook `mapstructure:"postToolUse" yaml:"postToolUse,omitempty"`
 }
 
 // ToolConfig holds per-tool settings.

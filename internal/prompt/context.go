@@ -20,7 +20,7 @@ func NewContextPrompts(config *PromptConfig) *ContextPrompts {
 }
 
 // BuildStashPrompt creates a prompt for stashing context with summary.
-func (c *ContextPrompts) BuildStashPrompt(context *AssistantContext, reason string) *PromptPart {
+func (c *ContextPrompts) BuildStashPrompt(context *TurnContext, reason string) *PromptPart {
 	var sb strings.Builder
 
 	sb.WriteString("STASH CONTEXT\n\n")
@@ -76,7 +76,7 @@ func (c *ContextPrompts) BuildStashPrompt(context *AssistantContext, reason stri
 }
 
 // BuildSeparateContextPrompt creates a prompt for separating context.
-func (c *ContextPrompts) BuildSeparateContextPrompt(context *AssistantContext, splitCriteria string) *PromptPart {
+func (c *ContextPrompts) BuildSeparateContextPrompt(context *TurnContext, splitCriteria string) *PromptPart {
 	var sb strings.Builder
 
 	sb.WriteString("SEPARATE CONTEXT\n\n")
@@ -107,7 +107,7 @@ func (c *ContextPrompts) BuildSeparateContextPrompt(context *AssistantContext, s
 }
 
 // BuildDeleteContextPrompt creates a prompt for deleting context.
-func (c *ContextPrompts) BuildDeleteContextPrompt(context *AssistantContext, target string) *PromptPart {
+func (c *ContextPrompts) BuildDeleteContextPrompt(context *TurnContext, target string) *PromptPart {
 	var sb strings.Builder
 
 	sb.WriteString("DELETE CONTEXT\n\n")
@@ -142,7 +142,7 @@ sb.WriteString("\n- Specific stashed contexts? (by index or tag)")
 }
 
 // BuildNewContextPrompt creates a prompt for creating a new context.
-func (c *ContextPrompts) BuildNewContextPrompt(parentContext *AssistantContext, initialPrompt string) *PromptPart {
+func (c *ContextPrompts) BuildNewContextPrompt(parentContext *TurnContext, initialPrompt string) *PromptPart {
 	var sb strings.Builder
 
 	sb.WriteString("NEW CONTEXT\n\n")
@@ -181,7 +181,7 @@ func (c *ContextPrompts) BuildNewContextPrompt(parentContext *AssistantContext, 
 }
 
 // BuildResumeContextPrompt creates a prompt for resuming from stashed context.
-func (c *ContextPrompts) BuildResumeContextPrompt(stash *ContextStash, currentContext *AssistantContext) *PromptPart {
+func (c *ContextPrompts) BuildResumeContextPrompt(stash *ContextStash, currentContext *TurnContext) *PromptPart {
 	var sb strings.Builder
 
 	sb.WriteString("RESUME FROM STASHED CONTEXT\n\n")
@@ -216,37 +216,38 @@ func (c *ContextPrompts) BuildResumeContextPrompt(stash *ContextStash, currentCo
 	}
 }
 
-// BuildShareContextPrompt creates a prompt for sharing context with coder agent.
-func (c *ContextPrompts) BuildShareContextPrompt(assistantCtx *AssistantContext, coderCtx *CoderContext, shareSpec string) *PromptPart {
+// BuildShareContextPrompt creates a prompt for recording context into the
+// shared scratch space (used by the agent and its subagents).
+func (c *ContextPrompts) BuildShareContextPrompt(ctx *TurnContext, shareSpec string) *PromptPart {
 	var sb strings.Builder
 
-	sb.WriteString("SHARE CONTEXT WITH CODER AGENT\n\n")
+	sb.WriteString("SHARE CONTEXT\n\n")
 	sb.WriteString("Share Specification: ")
 	sb.WriteString(shareSpec)
 	sb.WriteString("\n\n")
 
-	sb.WriteString("Assistant Context (source):\n")
-	if assistantCtx.CurrentTask != nil {
-		sb.WriteString(fmt.Sprintf("  Task: %s (%s)\n", assistantCtx.CurrentTask.Category, assistantCtx.CurrentTask.Complexity))
-		sb.WriteString(fmt.Sprintf("  Original Prompt: %s\n", truncate(assistantCtx.CurrentTask.OriginalPrompt, 500)))
-		if len(assistantCtx.CurrentTask.WorkingAreas) > 0 {
-			sb.WriteString(fmt.Sprintf("  Working Areas: %s\n", strings.Join(assistantCtx.CurrentTask.WorkingAreas, ", ")))
+	sb.WriteString("Current Context:\n")
+	if ctx.CurrentTask != nil {
+		sb.WriteString(fmt.Sprintf("  Task: %s (%s)\n", ctx.CurrentTask.Category, ctx.CurrentTask.Complexity))
+		sb.WriteString(fmt.Sprintf("  Original Prompt: %s\n", truncate(ctx.CurrentTask.OriginalPrompt, 500)))
+		if len(ctx.CurrentTask.WorkingAreas) > 0 {
+			sb.WriteString(fmt.Sprintf("  Working Areas: %s\n", strings.Join(ctx.CurrentTask.WorkingAreas, ", ")))
 		}
-		if len(assistantCtx.CurrentTask.ContextNeeds) > 0 {
+		if len(ctx.CurrentTask.ContextNeeds) > 0 {
 			sb.WriteString("  Context Needs:\n")
-			for _, need := range assistantCtx.CurrentTask.ContextNeeds {
+			for _, need := range ctx.CurrentTask.ContextNeeds {
 				sb.WriteString(fmt.Sprintf("    - %s: %s (timing: %s)\n", need.Key, need.Description, need.InjectTiming))
 			}
 		}
 	}
 	sb.WriteString("\n")
 
-	sb.WriteString("Coder Context (target - current state):\n")
-	sb.WriteString(fmt.Sprintf("  Working Dir: %s\n", coderCtx.WorkingDir))
-	sb.WriteString(fmt.Sprintf("  Files: %d\n", len(coderCtx.Files)))
-	sb.WriteString(fmt.Sprintf("  Code Snippets: %d\n", len(coderCtx.CodeSnippets)))
-	sb.WriteString(fmt.Sprintf("  Todo Items: %d\n", len(coderCtx.TodoItems)))
-	sb.WriteString(fmt.Sprintf("  Shared Context Keys: %d\n", len(coderCtx.SharedContext)))
+	sb.WriteString("Working State:\n")
+	sb.WriteString(fmt.Sprintf("  Working Dir: %s\n", ctx.WorkingDir))
+	sb.WriteString(fmt.Sprintf("  Files: %d\n", len(ctx.Files)))
+	sb.WriteString(fmt.Sprintf("  Code Snippets: %d\n", len(ctx.CodeSnippets)))
+	sb.WriteString(fmt.Sprintf("  Todo Items: %d\n", len(ctx.TodoItems)))
+	sb.WriteString(fmt.Sprintf("  Shared Context Keys: %d\n", len(ctx.SharedContext)))
 	sb.WriteString("\n")
 
 	sb.WriteString("Determine what to share:\n")
@@ -267,7 +268,7 @@ sb.WriteString("- Code snippets and patterns\n")
 }
 
 // BuildContextSummaryPrompt creates a prompt for generating a context summary.
-func (c *ContextPrompts) BuildContextSummaryPrompt(context *AssistantContext, maxLength int) *PromptPart {
+func (c *ContextPrompts) BuildContextSummaryPrompt(context *TurnContext, maxLength int) *PromptPart {
 	var sb strings.Builder
 
 	sb.WriteString("Generate a concise context summary.\n\n")

@@ -26,8 +26,12 @@ func NewStats(styles *themes.Styles) Stats {
 func (s Stats) View() string {
 	elapsed := time.Since(s.StartTime).Round(time.Second)
 	totalTok := s.InputTokens + s.OutputTokens
+	cost := ""
+	if s.TotalCost > 0 {
+		cost = fmt.Sprintf("  cost:$%.4f", s.TotalCost)
+	}
 	return fmt.Sprintf(
-		"in:%d  out:%d  total:%d  tools:%d  elapsed:%s",
-		s.InputTokens, s.OutputTokens, totalTok, s.ToolCallCount, elapsed,
+		"in:%d  out:%d  total:%d  tools:%d%s  elapsed:%s",
+		s.InputTokens, s.OutputTokens, totalTok, s.ToolCallCount, cost, elapsed,
 	)
 }

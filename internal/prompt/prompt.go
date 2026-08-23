@@ -4,6 +4,7 @@ import (
 	"context"
 
 	contextpkg "github.com/iSundram/Automergent/internal/context"
+	"github.com/iSundram/Automergent/internal/shared"
 	"github.com/iSundram/Automergent/internal/taskstate"
 	"github.com/iSundram/Automergent/internal/tools"
 )
@@ -62,14 +63,9 @@ func (ps *PromptSystem) CreateFreshContext(initialPrompt string) *PromptPart {
 	return ps.Manager.CreateNewContext(initialPrompt, true)
 }
 
-// GetCoderContext returns the coder context for direct access.
-func (ps *PromptSystem) GetCoderContext() *CoderContext {
-	return ps.Manager.GetCoderContext()
-}
-
-// GetAssistantContext returns the assistant context for direct access.
-func (ps *PromptSystem) GetAssistantContext() *AssistantContext {
-	return ps.Manager.GetAssistantContext()
+// GetTurnContext returns the unified turn context for direct access.
+func (ps *PromptSystem) GetTurnContext() *TurnContext {
+	return ps.Manager.GetTurnContext()
 }
 
 // GetCurrentIntentSet returns the current intent set.
@@ -95,6 +91,12 @@ func (ps *PromptSystem) GetStashedContexts() []ContextStash {
 // GetInitResults returns the init phase results.
 func (ps *PromptSystem) GetInitResults() *InitResults {
 	return ps.Manager.GetInitResults()
+}
+
+// SetActionObserver registers a callback receiving structured init-phase tool
+// events for UI rendering as native log entries.
+func (ps *PromptSystem) SetActionObserver(fn func(shared.InitActionEvent)) {
+	ps.Manager.SetActionObserver(fn)
 }
 
 // GetSelectedContext returns the selected context for the current tasks.

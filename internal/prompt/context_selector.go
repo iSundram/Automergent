@@ -9,7 +9,7 @@ import (
 	contextpkg "github.com/iSundram/Automergent/internal/context"
 )
 
-// ContextSelector selects relevant context based on category profile and token budget.
+// ContextSelector selects relevant context based on task specs and token budget.
 type ContextSelector struct {
 	contextManager *contextpkg.Manager
 	workingDir     string
@@ -25,71 +25,108 @@ func NewContextSelector(mgr *contextpkg.Manager, workingDir string, config *Prom
 	}
 }
 
-// SelectContext selects relevant context for a categorized request.
-func (cs *ContextSelector) SelectContext(ctx context.Context, req *CategorizedRequest) (string, error) {
-	profile := GetContextProfile(req.Category)
-
+// SelectContextForTasks selects relevant context for a set of task specs.
+func (cs *ContextSelector) SelectContextForTasks(ctx context.Context, tasks []TaskSpec, workingDir string, tokenBudget int) (string, error) {
 	var parts []string
 	usedTokens := 0
 
 	// 1. Working directory context
-	if profile.IncludeProjectContext {
-		part := fmt.Sprintf("## Project Context\n- Working Directory: %s\n", cs.workingDir)
-		partTokens := estimateTokens(part)
-		if usedTokens+partTokens <= profile.TokenBudget {
-			parts = append(parts, part)
-			usedTokens += partTokens
+	part := fmt.Sprintf("## Project Context\n- Working Directory: %s\n", workingDir)
+	partTokens := estimateTokens(part)
+	if usedTokens+partTokens <= tokenBudget {
+		parts = append(parts, part)
+		usedTokens += partTokens
+	}
+
+	// 2. Collect all files from tasks
+	var allFiles []string
+	seen := make(map[string]bool)
+	for _, task := range tasks {
+		if files, ok := task.Context["files"].([]string); ok {
+			for _, f := range files {
+				if !seen[f] {
+					allFiles = append(allFiles, f)
+					seen[f] = true
+				}
+			}
+		}
+		if files, ok := task.Context["files_found"].([]string); ok {
+			for _, f := range files {
+				if !seen[f] {
+					allFiles = append(allFiles, f)
+					seen[f] = true
+				}
+			}
 		}
 	}
 
-	// 2. Working areas (always included if available)
-	if len(req.WorkingAreas) > 0 {
-		part := "## Working Areas\n"
-		for _, f := range req.WorkingAreas {
+	if len(allFiles) > 0 {
+		part := "## Relevant Files (from tasks)\n"
+		for _, f := range allFiles {
 			part += fmt.Sprintf("- %s\n", f)
 		}
 		partTokens := estimateTokens(part)
-		if usedTokens+partTokens <= profile.TokenBudget {
+		if usedTokens+partTokens <= tokenBudget {
 			parts = append(parts, part)
 			usedTokens += partTokens
 		}
 	}
 
-	// 3. Select relevant files using ranking
-	if profile.MaxFiles > 0 && cs.contextManager != nil {
-		relevantFiles, err := cs.selectRelevantFiles(ctx, req, profile)
+	// 3. Select relevant files using ranking (if context manager available)
+	if len(allFiles) > 0 && cs.contextManager != nil {
+		relevantFiles, err := cs.selectRelevantFilesFromList(ctx, allFiles, tokenBudget-usedTokens)
 		if err == nil && len(relevantFiles) > 0 {
-			fileContext := cs.buildFileContext(ctx, relevantFiles, profile)
+			fileContext := cs.buildFileContext(ctx, relevantFiles, tokenBudget-usedTokens)
 			partTokens := estimateTokens(fileContext)
-			if usedTokens+partTokens <= profile.TokenBudget {
+			if usedTokens+partTokens <= tokenBudget {
 				parts = append(parts, fileContext)
 				usedTokens += partTokens
 			}
 		}
 	}
 
-	// 4. Stashed context (for resumption)
-	if profile.IncludeStashedContext {
-		stashed := cs.getStashedContext(profile)
-		if stashed != "" {
-			partTokens := estimateTokens(stashed)
-			if usedTokens+partTokens <= profile.TokenBudget {
-				parts = append(parts, stashed)
-				usedTokens += partTokens
+	// 4. Code snippets from init results
+	var allSnippets map[string]string
+	for _, task := range tasks {
+		if snippets, ok := task.Context["code_snippets"].(map[string]string); ok {
+			if allSnippets == nil {
+				allSnippets = make(map[string]string)
+			}
+			for k, v := range snippets {
+				allSnippets[k] = v
 			}
 		}
 	}
 
-	// 5. Constraints
-	if len(req.ContextNeeds) > 0 {
+	if len(allSnippets) > 0 {
+		var sb strings.Builder
+		sb.WriteString("## Code Snippets\n")
+		for path, code := range allSnippets {
+			sb.WriteString(fmt.Sprintf("### %s\n%s\n\n", path, code))
+		}
+		snippetContext := sb.String()
+		partTokens := estimateTokens(snippetContext)
+		if usedTokens+partTokens <= tokenBudget {
+			parts = append(parts, snippetContext)
+			usedTokens += partTokens
+		}
+	}
+
+	// 5. Constraints from tasks
+	var allConstraints []string
+	for _, task := range tasks {
+		if constraints, ok := task.Context["constraints"].([]string); ok {
+			allConstraints = append(allConstraints, constraints...)
+		}
+	}
+
+	if len(allConstraints) > 0 {
 		constraints := "## Constraints\n"
-		for _, need := range req.ContextNeeds {
-			if need.InjectTiming != InjectTimingDeferred {
-				constraints += fmt.Sprintf("- %s: %s\n", need.Key, need.Description)
-			}
+		for _, c := range allConstraints {
+			constraints += fmt.Sprintf("- %s\n", c)
 		}
 		partTokens := estimateTokens(constraints)
-		if usedTokens+partTokens <= profile.TokenBudget {
+		if usedTokens+partTokens <= tokenBudget {
 			parts = append(parts, constraints)
 			usedTokens += partTokens
 		}
@@ -98,57 +135,36 @@ func (cs *ContextSelector) SelectContext(ctx context.Context, req *CategorizedRe
 	return strings.Join(parts, "\n"), nil
 }
 
-// selectRelevantFiles uses the ranking system to find relevant files.
-func (cs *ContextSelector) selectRelevantFiles(ctx context.Context, req *CategorizedRequest, profile ContextProfile) ([]string, error) {
-	// Get candidate files: recent + frequent + working areas
-	var candidates []string
-	seen := make(map[string]bool)
-
-	// Add working areas first (highest priority)
-	for _, f := range req.WorkingAreas {
-		if !seen[f] {
-			candidates = append(candidates, f)
-			seen[f] = true
-		}
-	}
-
-	// Add recent files
-	if profile.IncludeRecentFiles {
-		recent := cs.contextManager.RecentFiles(profile.MaxFiles * 2)
-		for _, f := range recent {
-			if !seen[f] {
-				candidates = append(candidates, f)
-				seen[f] = true
-			}
-		}
-	}
-
-	// Add frequent files
-	if profile.IncludeFrequentFiles {
-		frequent := cs.contextManager.FrequentFiles(profile.MaxFiles)
-		for _, f := range frequent {
-			if !seen[f] {
-				candidates = append(candidates, f)
-				seen[f] = true
-			}
-		}
-	}
-
+// selectRelevantFilesFromList uses the ranking system to find relevant files from a given list.
+func (cs *ContextSelector) selectRelevantFilesFromList(ctx context.Context, candidates []string, maxTokens int) ([]string, error) {
 	if len(candidates) == 0 {
 		return nil, nil
 	}
 
+	// Use a generic intent for ranking
+	intent := "understand codebase structure and implementation details"
+
 	// Rank files using the ranker
-	scores, err := cs.contextManager.RankFiles(ctx, candidates, req.UserIntent, profile.MaxFiles)
+	scores, err := cs.contextManager.RankFiles(ctx, candidates, intent, len(candidates))
 	if err != nil {
 		return nil, err
 	}
 
-	// Filter by minimum relevance score
+	// Filter by minimum relevance score and token budget
 	var result []string
+	usedTokens := 0
 	for _, score := range scores {
-		if score.Score >= profile.MinRelevanceScore {
-			result = append(result, score.Path)
+		if score.Score >= 0.3 { // MinRelevanceScore
+			// Estimate tokens for this file
+			content, err := cs.readFileWithBudget(score.Path, maxTokens-usedTokens)
+			if err != nil {
+				continue
+			}
+			fileTokens := estimateTokens(content)
+			if usedTokens+fileTokens <= maxTokens {
+				result = append(result, score.Path)
+				usedTokens += fileTokens
+			}
 		}
 	}
 
@@ -156,7 +172,7 @@ func (cs *ContextSelector) selectRelevantFiles(ctx context.Context, req *Categor
 }
 
 // buildFileContext builds context from selected files.
-func (cs *ContextSelector) buildFileContext(ctx context.Context, files []string, profile ContextProfile) string {
+func (cs *ContextSelector) buildFileContext(ctx context.Context, files []string, tokenBudget int) string {
 	if len(files) == 0 {
 		return ""
 	}
@@ -165,19 +181,16 @@ func (cs *ContextSelector) buildFileContext(ctx context.Context, files []string,
 	sb.WriteString("## Relevant Files\n")
 
 	for i, f := range files {
-		if i >= profile.MaxFiles {
+		if i >= 15 { // MaxFiles
 			break
 		}
 
-		content, err := cs.readFileWithBudget(f, profile.TokenBudget/2)
+		content, err := cs.readFileWithBudget(f, tokenBudget/2)
 		if err != nil {
 			continue
 		}
 
 		sb.WriteString(fmt.Sprintf("### %s\n", f))
-		if profile.IncludeSymbols {
-			// In a real implementation, extract symbols
-		}
 		sb.WriteString(content)
 		sb.WriteString("\n\n")
 	}
@@ -199,15 +212,7 @@ func (cs *ContextSelector) readFileWithBudget(path string, maxTokens int) (strin
 		content = content[:maxChars] + "\n... [truncated]"
 	}
 
-	return content, nil
-}
-
-// getStashedContext retrieves relevant stashed context.
-func (cs *ContextSelector) getStashedContext(profile ContextProfile) string {
-	// This would retrieve from the prompt manager's stashed contexts
-	// For now, return empty - will be filled by the manager
-	return ""
-}
+	return content, nil}
 
 // estimateTokens roughly estimates token count from text.
 func estimateTokens(text string) int {

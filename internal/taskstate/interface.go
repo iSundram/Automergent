@@ -14,6 +14,8 @@ type TaskStore interface {
 
 	// Todo
 	TodoItems() []shared.TodoItem
+	ReplaceTodos(todos []shared.TodoItem)
+	SetTodoStatus(id string, status shared.TodoStatus) bool
 
 	// Context buckets
 	CreateBucket(name string) error

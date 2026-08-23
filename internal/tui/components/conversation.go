@@ -1,14 +1,12 @@
 package components
 
 import (
-	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"charm.land/bubbles/v2/viewport"
-	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
@@ -32,9 +30,28 @@ type ConversationMsg struct {
 	Status      string // "running", "done", "error"
 }
 
+// msgRender caches the rendered output of one conversation row so unchanged
+// messages are never re-rendered (markdown/glamour and card assembly are the
+// expensive parts).
+type msgRender struct {
+	key      uint64
+	width    int
+	rendered string
+}
+
+// ExpandMode controls how much detail tool cards show.
+type ExpandMode int
+
+const (
+	ExpandAuto ExpandMode = iota // classic behavior (lightweight tools collapse)
+	ExpandCompact                // headers only
+	ExpandFull                   // everything, like review mode
+)
+
 type Conversation struct {
 	viewport   viewport.Model
 	messages   []ConversationMsg
+	cache      []msgRender
 	styles     *themes.Styles
 	width      int
 	height     int
@@ -42,9 +59,20 @@ type Conversation struct {
 	reviewMode bool
 	emptyState string
 	browsing   bool
+	expandMode ExpandMode
+	// dirty marks that streamed content changed but has not been rendered
+	// yet; rendering is coalesced onto a ~80ms tick by the App.
+	dirty       bool
+	dirtyFollow bool
+	styleEpoch  uint64 // bumped on theme/style changes to invalidate cache
 	// Builders used during streaming to avoid quadratic concatenation
 	currentBuilder        *strings.Builder
 	currentThoughtBuilder *strings.Builder
+	// Incremental markdown cache for the streaming message: the completed
+	// lines are expensive-rendered once and reused until they change.
+	streamMDKey   uint64
+	streamMDWidth int
+	streamMDOut   string
 }
 
 func (c *Conversation) refreshWithFollow(shouldFollow bool) {
@@ -70,6 +98,63 @@ func (c *Conversation) ensureViewport() {
 		vp.KeyMap.Down.SetKeys("down")
 		c.viewport = vp
 	}
+}
+
+// Invalidate drops all cached renders (call after a theme/style switch).
+func (c *Conversation) Invalidate() {
+	c.styleEpoch++
+	c.cache = nil
+	c.streamMDKey = 0
+	c.streamMDOut = ""
+	c.refresh()
+}
+
+// NeedsRender reports whether streamed content awaits a coalesced render.
+func (c *Conversation) NeedsRender() bool { return c.dirty }
+
+// RenderIfDirty flushes pending streamed content to the viewport at most once
+// per caller-driven tick instead of once per token.
+func (c *Conversation) RenderIfDirty() {
+	if !c.dirty {
+		return
+	}
+	follow := c.dirtyFollow
+	c.refresh()
+	if follow {
+		c.viewport.GotoBottom()
+	}
+	c.dirty = false
+}
+
+// CycleExpand moves between auto → compact → full tool-detail modes and
+// returns a human-readable label for the status bar.
+func (c *Conversation) CycleExpand() string {
+	switch c.expandMode {
+	case ExpandAuto:
+		c.expandMode = ExpandCompact
+	case ExpandCompact:
+		c.expandMode = ExpandFull
+	default:
+		c.expandMode = ExpandAuto
+	}
+	c.invalidateAll()
+	switch c.expandMode {
+	case ExpandCompact:
+		return "Tool cards: collapsed"
+	case ExpandFull:
+		return "Tool cards: expanded"
+	default:
+		return "Tool cards: auto"
+	}
+}
+
+// ExpandMode reports the current tool-detail mode.
+func (c Conversation) ExpandMode() ExpandMode { return c.expandMode }
+
+func (c *Conversation) invalidateAll() {
+	c.cache = nil
+	c.streamMDKey = 0
+	c.streamMDOut = ""
 }
 
 func (c *Conversation) SetSize(w, h int) {
@@ -169,23 +254,26 @@ func (c *Conversation) AddToolLifecycleStart(id, name, args, context string) {
 func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, duration time.Duration, result tools.Result, reviewMode bool) {
 	c.FinalizeStreaming()
 	shouldFollow := c.viewport.AtBottom()
+	apply := func(i int) {
+		c.messages[i].Status = "done"
+		if result.IsError {
+			c.messages[i].Status = "error"
+			c.messages[i].IsError = true
+		}
+		c.messages[i].Duration = duration
+		c.messages[i].Content = result.Content
+		if context != "" {
+			c.messages[i].ToolContext = context
+		}
+		if summary != "" {
+			c.messages[i].ToolSummary = summary
+		}
+		c.refreshWithFollow(shouldFollow)
+	}
 	if id != "" {
 		for i := len(c.messages) - 1; i >= 0; i-- {
 			if c.messages[i].Role == "tool_call" && c.messages[i].Status == "running" && c.messages[i].ToolID == id {
-				c.messages[i].Status = "done"
-				if result.IsError {
-					c.messages[i].Status = "error"
-					c.messages[i].IsError = true
-				}
-				c.messages[i].Duration = duration
-				c.messages[i].Content = result.Content
-				if context != "" {
-					c.messages[i].ToolContext = context
-				}
-				if summary != "" {
-					c.messages[i].ToolSummary = summary
-				}
-				c.refreshWithFollow(shouldFollow)
+				apply(i)
 				return
 			}
 		}
@@ -193,20 +281,7 @@ func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, d
 	// Fallback: match latest running tool call with same name.
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		if c.messages[i].Role == "tool_call" && c.messages[i].ToolName == name && c.messages[i].Status == "running" {
-			c.messages[i].Status = "done"
-			if result.IsError {
-				c.messages[i].Status = "error"
-				c.messages[i].IsError = true
-			}
-			c.messages[i].Duration = duration
-			c.messages[i].Content = result.Content
-			if context != "" {
-				c.messages[i].ToolContext = context
-			}
-			if summary != "" {
-				c.messages[i].ToolSummary = summary
-			}
-			c.refreshWithFollow(shouldFollow)
+			apply(i)
 			return
 		}
 	}
@@ -231,9 +306,11 @@ func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, d
 	c.refreshWithFollow(shouldFollow)
 }
 
+// AppendToken buffers streamed text. Rendering is deferred to RenderIfDirty
+// so a burst of tokens costs one paint, not one paint per token.
 func (c *Conversation) AppendToken(token string) {
 	c.ensureViewport()
-	shouldFollow := c.viewport.AtBottom()
+	c.dirtyFollow = c.viewport.AtBottom()
 	if len(c.messages) == 0 || !c.streaming {
 		c.messages = append(c.messages, ConversationMsg{
 			Role:      "assistant",
@@ -258,12 +335,13 @@ func (c *Conversation) AppendToken(token string) {
 			c.currentBuilder.WriteString(token)
 		}
 	}
-	c.refreshWithFollow(shouldFollow)
+	c.dirty = true
 }
 
+// AppendThought buffers streamed thinking text; see AppendToken.
 func (c *Conversation) AppendThought(thought string) {
 	c.ensureViewport()
-	shouldFollow := c.viewport.AtBottom()
+	c.dirtyFollow = c.viewport.AtBottom()
 	if len(c.messages) == 0 || !c.streaming {
 		c.messages = append(c.messages, ConversationMsg{
 			Role:      "assistant",
@@ -288,14 +366,17 @@ func (c *Conversation) AppendThought(thought string) {
 			c.currentThoughtBuilder.WriteString(thought)
 		}
 	}
-	c.refreshWithFollow(shouldFollow)
+	c.dirty = true
 }
 
 func (c *Conversation) Clear() {
 	c.messages = nil
+	c.cache = nil
 	c.streaming = false
 	c.currentBuilder = nil
 	c.currentThoughtBuilder = nil
+	c.streamMDKey = 0
+	c.streamMDOut = ""
 	c.refresh()
 }
 
@@ -324,6 +405,9 @@ func (c *Conversation) FinalizeStreamingWithContent(final string) {
 			c.currentThoughtBuilder = nil
 		}
 		c.streaming = false
+		c.dirty = false
+		c.streamMDKey = 0
+		c.streamMDOut = ""
 		c.refresh()
 	}
 }
@@ -331,6 +415,7 @@ func (c *Conversation) FinalizeStreamingWithContent(final string) {
 // SetReviewMode toggles detailed tool output rendering.
 func (c *Conversation) SetReviewMode(enabled bool) {
 	c.reviewMode = enabled
+	c.invalidateAll()
 	c.refresh()
 }
 
@@ -349,9 +434,28 @@ func (c *Conversation) UpdateToolContent(id, content string) {
 	}
 }
 
-func (c *Conversation) refresh() {
-	var sb strings.Builder
-	c.ensureViewport()
+// hashMessage computes the cache key for a rendered row: any field the
+// renderer reads participates, so mutations naturally invalidate.
+func hashMessage(epoch uint64, expand ExpandMode, review bool, m ConversationMsg, spanExtra string) uint64 {
+	h := fnv.New64a()
+	fmt.Fprintf(h, "%d|%d|%t|", epoch, expand, review)
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%d\x00%d",
+		m.Role, m.Content, m.Thought, m.ToolName, m.ToolArgs,
+		m.ToolContext, m.ToolSummary, m.IsError, m.Status,
+		m.Duration.Nanoseconds(), m.Timestamp.UnixNano())
+	if spanExtra != "" {
+		h.Write([]byte(spanExtra))
+	}
+	sum := h.Sum(nil)
+	var v uint64
+	for _, b := range sum {
+		v = v<<8 | uint64(b)
+	}
+	return v
+}
+
+// contentWidth computes the effective wrap width for message bodies.
+func (c *Conversation) contentWidth() int {
 	w := c.width
 	if w <= 0 {
 		w = 80
@@ -360,30 +464,61 @@ func (c *Conversation) refresh() {
 	// wrapped to the same width the viewport actually displays.
 	if c.browsing {
 		w--
-		if w < 1 {
-			w = 1
-		}
 	}
+	if w < 1 {
+		w = 1
+	}
+	return w
+}
+
+func (c *Conversation) refresh() {
+	var sb strings.Builder
+	c.ensureViewport()
+	w := c.contentWidth()
 	msgW := w - 10
 	if msgW < 20 {
 		msgW = 20
 	}
-	if len(c.messages) == 0 && c.emptyState != "" {
-		empty := lipgloss.NewStyle().
-			Width(w).
-			Align(lipgloss.Center).
-			Foreground(c.styles.T.Subtext).
-			PaddingTop(2).
-			Render(c.emptyState)
-		c.viewport.SetContent(empty)
+	if len(c.messages) == 0 {
+		if c.emptyState != "" {
+			empty := lipgloss.NewStyle().
+				Width(w).
+				Align(lipgloss.Center).
+				Foreground(c.styles.T.Subtext).
+				PaddingTop(2).
+				Render(c.emptyState)
+			c.viewport.SetContent(empty)
+		} else {
+			c.viewport.SetContent("")
+		}
+		c.cache = c.cache[:0]
 		return
 	}
 
 	lastIdx := len(c.messages) - 1
-	for i, m := range c.messages {
-		isLast := i == lastIdx
-		// If this is the active streaming assistant message, prefer builder content
-		if isLast && c.streaming && m.Role == "assistant" {
+	ci := 0
+
+	writeCached := func(key uint64, renderBlock func() string) {
+		for len(c.cache) <= ci {
+			c.cache = append(c.cache, msgRender{})
+		}
+		if ent := &c.cache[ci]; ent.key == key && ent.width == w && ent.rendered != "" {
+			sb.WriteString(ent.rendered)
+		} else {
+			out := renderBlock()
+			*ent = msgRender{key: key, width: w, rendered: out}
+			sb.WriteString(out)
+		}
+		ci++
+	}
+
+	i := 0
+	prevRole := ""
+	for i < len(c.messages) {
+		m := c.messages[i]
+
+		// Live streaming content overrides the stored message copy.
+		if i == lastIdx && c.streaming && m.Role == "assistant" {
 			if c.currentBuilder != nil {
 				m.Content = c.currentBuilder.String()
 			}
@@ -391,86 +526,197 @@ func (c *Conversation) refresh() {
 				m.Thought = c.currentThoughtBuilder.String()
 			}
 		}
-		switch m.Role {
-		case "user":
-			label := c.styles.UserLabel.Render(" You ")
-			content := c.styles.UserBubble.Width(msgW).Render(m.Content)
 
-			// Right alignment logic
-			fullWidth := lipgloss.Width(content)
-			labelWidth := lipgloss.Width(label)
-
-			// Spacer to push label right
-			labelSpacer := strings.Repeat(" ", w-labelWidth-2)
-			sb.WriteString(labelSpacer + label + "\n")
-
-			// Spacer to push bubble right
-			contentSpacer := strings.Repeat(" ", w-fullWidth-2)
-			for _, line := range strings.Split(content, "\n") {
-				if line != "" {
-					sb.WriteString(contentSpacer + line + "\n")
-				}
+		// Group consecutive finished calls of the same tool into one card.
+		if m.Role == "tool_call" && m.Status != "running" {
+			j := i + 1
+			for j < len(c.messages) &&
+				c.messages[j].Role == "tool_call" &&
+				c.messages[j].ToolName == m.ToolName &&
+				c.messages[j].Status == m.Status {
+				j++
 			}
-			sb.WriteString("\n")
-
-		case "assistant":
-			responseW := w - 2
-			if responseW < 1 {
-				responseW = 1
+			span := j - i
+			if span > 1 {
+				group := c.messages[i:j]
+				var spanKey strings.Builder
+				for _, g := range group {
+					spanKey.WriteString(fmt.Sprintf("\x01%s\x00%s\x00%s\x00%d", g.ToolContext, g.ToolSummary, g.Status, g.Duration.Nanoseconds()))
+				}
+				key := hashMessage(c.styleEpoch, c.expandMode, c.reviewMode, m, spanKey.String())
+				writeCached(key, func() string {
+					return c.renderGroupedToolCalls(group, msgW)
+				})
+				i = j
+				continue
 			}
-
-			// Render thinking separately (if present) without the Automergent label
-			if m.Thought != "" {
-				thinkingBox := c.renderThoughtBox(m.Thought, msgW)
-				sb.WriteString(thinkingBox + "\n")
-			}
-
-			// Render the main response bubble if there's actual content
-			if m.Content != "" || m.IsError {
-				if i > 0 && c.messages[i-1].Role == "tool_call" {
-					sb.WriteString("\n")
-				}
-				labelStr := " ⟡ Automergent "
-
-				if m.IsError {
-					labelStr = " ⟡ Automergent (Error) "
-				}
-
-				label := c.styles.AssistantLabel.Render(labelStr)
-
-				// Skip expensive markdown rendering during streaming for performance
-				var content string
-				if c.streaming && isLast {
-					// During streaming, just show raw text
-					content = ansi.Hardwrap(
-						ansi.Wordwrap(strings.TrimSpace(m.Content), responseW, ""),
-						responseW,
-						true,
-					)
-				} else {
-					// Render markdown for completed messages
-					content = render.MarkdownWithWidth(strings.TrimSpace(m.Content), responseW)
-				}
-				if m.IsError {
-					content = c.styles.Error.MaxWidth(responseW).Render(strings.TrimSpace(m.Content))
-				}
-				content = ansi.Hardwrap(content, responseW, true)
-
-				response := c.styles.AssistantBubble.MaxWidth(responseW).Render(indentLines(content, 1))
-				sb.WriteString(label + "\n" + response + "\n\n")
-			} else if m.Thought != "" {
-				// If we only have thinking (no response yet), add spacing
-				sb.WriteString("\n")
-			}
-
-		case "system":
-			sb.WriteString(c.styles.SystemMsg.Width(msgW).Render("  "+m.Content) + "\n\n")
-
-		case "tool_call":
-			sb.WriteString(c.renderToolCall(m, msgW) + "\n\n")
 		}
+
+		key := hashMessage(c.styleEpoch, c.expandMode, c.reviewMode, m, "")
+		mm := m // copy for closure
+		isLast := i == lastIdx
+		afterTool := prevRole == "tool_call"
+		writeCached(key, func() string {
+			switch mm.Role {
+			case "user":
+				return c.renderUser(mm, msgW, w)
+			case "assistant":
+				return c.renderAssistant(mm, isLast, afterTool, msgW, w)
+			case "system":
+				return c.styles.SystemMsg.Width(msgW).Render("  "+mm.Content) + "\n\n"
+			case "tool_call":
+				return c.renderToolCall(mm, msgW) + "\n\n"
+			default:
+				return ""
+			}
+		})
+		prevRole = m.Role
+		i++
+	}
+
+	// Drop stale cache entries beyond the visible rows.
+	if ci < len(c.cache) {
+		c.cache = c.cache[:ci]
 	}
 	c.viewport.SetContent(sb.String())
+}
+
+func (c *Conversation) renderUser(m ConversationMsg, msgW, w int) string {
+	label := c.styles.UserLabel.Copy().MarginBottom(0).Render(" You ")
+	content := c.styles.UserBubble.Width(msgW).Render(m.Content)
+
+	fullWidth := lipgloss.Width(content)
+	labelWidth := lipgloss.Width(label)
+
+	labelSpacer := strings.Repeat(" ", max(0, w-labelWidth-2))
+	sb := strings.Builder{}
+	sb.WriteString(labelSpacer + label + "\n")
+
+	contentSpacer := strings.Repeat(" ", max(0, w-fullWidth-2))
+	for _, line := range strings.Split(content, "\n") {
+		if line != "" {
+			sb.WriteString(contentSpacer + line + "\n")
+		}
+	}
+	sb.WriteString("\n")
+	return sb.String()
+}
+
+// renderAssistant builds one assistant row. During streaming the completed
+// portion is markdown-cached incrementally and only the trailing partial line
+// is rewrapped, so long responses stay smooth.
+func (c *Conversation) renderAssistant(m ConversationMsg, isLast bool, prevTool bool, msgW, w int) string {
+	responseW := w - 2
+	if responseW < 1 {
+		responseW = 1
+	}
+
+	liveStreaming := c.streaming && isLast
+
+	var sb strings.Builder
+	if m.Thought != "" {
+		if liveStreaming {
+			sb.WriteString(c.renderLiveThought(m.Thought, responseW) + "\n")
+		} else {
+			sb.WriteString(c.renderThoughtBox(m.Thought, msgW) + "\n")
+		}
+	}
+
+	if m.Content == "" && !m.IsError {
+		if m.Thought != "" {
+			sb.WriteString("\n")
+		}
+		return sb.String()
+	}
+
+	if prevTool {
+		sb.WriteString("\n")
+	}
+
+	labelStr := " ⟡ Automergent "
+	if m.IsError {
+		labelStr = " ⟡ Automergent (Error) "
+	}
+	label := c.styles.AssistantLabel.Render(labelStr)
+
+	var content string
+	switch {
+	case m.IsError:
+		content = c.styles.Error.MaxWidth(responseW).Render(strings.TrimSpace(m.Content))
+	case liveStreaming:
+		content = c.streamingBody(m.Content, responseW)
+	default:
+		content = render.MarkdownWithWidth(strings.TrimSpace(m.Content), responseW)
+	}
+	content = ansi.Hardwrap(content, responseW, true)
+
+	response := c.styles.AssistantBubble.MaxWidth(responseW).Render(indentLines(content, 1))
+	sb.WriteString(label + "\n" + response + "\n\n")
+	return sb.String()
+}
+
+// streamingBody renders partial assistant text: markdown for completed lines
+// (cached until they change), plain wrapping for the trailing fragment.
+func (c *Conversation) streamingBody(content string, width int) string {
+	text := strings.TrimSpace(content)
+	if text == "" {
+		return ""
+	}
+	trimmedLeading := strings.HasPrefix(content, " ") // irrelevant; kept simple
+	_ = trimmedLeading
+
+	idx := strings.LastIndexByte(content, '\n')
+	if idx < 0 {
+		// No completed line yet: cheap wrap only.
+		return wrapPlain(text, width)
+	}
+
+	stable := content[:idx]
+	tail := strings.TrimRight(content[idx+1:], " \t")
+
+	key := hashMessage(c.styleEpoch, 0, false, ConversationMsg{Content: stable}, fmt.Sprintf("mdw:%d", width))
+	if key != c.streamMDKey || c.streamMDWidth != width || c.streamMDOut == "" {
+		c.streamMDOut = render.MarkdownWithWidth(strings.TrimSpace(stable), width)
+		c.streamMDKey = key
+		c.streamMDWidth = width
+	}
+
+	out := c.streamMDOut
+	if tail != "" {
+		out += "\n" + wrapPlain(tail, width)
+	}
+	return out
+}
+
+func wrapPlain(s string, width int) string {
+	return ansi.Hardwrap(ansi.Wordwrap(s, width, ""), width, true)
+}
+
+// renderLiveThought shows in-flight thinking as lightweight wrapped text;
+// the markdown thought box is applied once the turn completes.
+func (c *Conversation) renderLiveThought(thought string, width int) string {
+	header := c.styles.Dim.Copy().Bold(true).Render("💭 Thinking")
+	body := c.styles.Dim.Copy().Italic(true).Render(truncateTail(thought, width, 6))
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(c.styles.T.BorderNormal).
+		Width(width).
+		Padding(0, 1).
+		Render(body)
+	return header + "\n" + box
+}
+
+// truncateTail keeps the last maxLines lines of growing text so the live
+// thought box stays a fixed height.
+func truncateTail(s string, width int, maxLines int) string {
+	lines := strings.Split(strings.TrimSpace(s), "\n")
+	if len(lines) > maxLines {
+		lines = lines[len(lines)-maxLines:]
+	}
+	for i, l := range lines {
+		lines[i] = ansi.Truncate(l, width-4, "…")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func indentLines(content string, spaces int) string {
@@ -519,373 +765,71 @@ func (c *Conversation) renderThoughtBox(thought string, width int) string {
 	return header + "\n" + box
 }
 
-func (c *Conversation) renderThought(thought string, width int) string {
-	if thought == "" {
-		return ""
-	}
-	maxWidth := width - 2
-	if maxWidth < 1 {
-		maxWidth = 1
-	}
-	trimmed := strings.TrimSpace(thought)
-	if trimmed == "" {
-		return ""
-	}
+// toolBranding returns the icon, accent color and display name for a tool.
+func (c *Conversation) toolBranding(name string) (icon string, accent colorAlias, pretty string) {
+	icon = "󰆍"
+	accent = c.styles.T.Accent
+	pretty = name
 
-	// Keep thought text visually aligned with assistant bubble theme.
-	body := c.styles.AssistantMsg.Copy().
-		Foreground(c.styles.T.Subtext).
-		Italic(true).
-		MaxWidth(maxWidth).
-		Render(trimmed)
-
-	header := c.styles.Dim.Copy().Bold(true).Render("Thinking")
-	return lipgloss.JoinVertical(lipgloss.Left, header, body)
-}
-
-func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
-	// 1. Status & Color Logic
-	statusColor := c.styles.T.Yellow
-	statusText := "󱓞 Running"
-	if m.Status == "done" {
-		statusColor = c.styles.T.Green
-		statusText = "󰄬 Completed"
-	} else if m.Status == "error" {
-		statusColor = c.styles.T.Red
-		statusText = "󰅙 Failed"
-	}
-
-	// 2. Tool-Specific Branding & Pretty Naming
-	icon := "󰆍"
-	accentColor := c.styles.T.Accent
-	prettyName := m.ToolName
-
-	switch m.ToolName {
+	switch name {
 	case "read_file", "view":
-		prettyName = "Readfile"
-		icon = "󰈔"
-		accentColor = c.styles.T.Blue
+		pretty, icon, accent = "Readfile", "󰈔", c.styles.T.Blue
 	case "write_file", "create_file":
-		prettyName = "Write"
-		icon = "󱇧"
-		accentColor = c.styles.T.Green
+		pretty, icon, accent = "Write", "󱇧", c.styles.T.Green
 	case "edit_file":
-		prettyName = "Edit"
-		icon = "󰛓"
-		accentColor = c.styles.T.Yellow
+		pretty, icon, accent = "Edit", "󰛓", c.styles.T.Yellow
 	case "delete_file":
-		prettyName = "Delete"
-		icon = "󰆴"
-		accentColor = c.styles.T.Red
+		pretty, icon, accent = "Delete", "󰆴", c.styles.T.Red
 	case "move_file":
-		prettyName = "Move"
-		icon = "󰪹"
-		accentColor = c.styles.T.Blue
+		pretty, icon, accent = "Move", "󰪹", c.styles.T.Blue
 	case "copy_file":
-		prettyName = "Copy"
-		icon = "󰪹"
-		accentColor = c.styles.T.Blue
+		pretty, icon, accent = "Copy", "󰪹", c.styles.T.Blue
 	case "list_directory":
-		prettyName = "List directory"
-		icon = "󰉋"
-		accentColor = c.styles.T.Blue
+		pretty, icon, accent = "List directory", "󰉋", c.styles.T.Blue
 	case "search":
-		prettyName = "Deep Search"
-		icon = "󰍉"
-		accentColor = c.styles.T.Magenta
+		pretty, icon, accent = "Deep Search", "󰍉", c.styles.T.Magenta
 	case "glob":
-		prettyName = "Glob"
-		icon = "󰈞"
-		accentColor = c.styles.T.Blue
+		pretty, icon, accent = "Glob", "󰈞", c.styles.T.Blue
 	case "grep", "grep_search":
-		prettyName = "Search"
-		icon = "󰍉"
-		accentColor = c.styles.T.Magenta
+		pretty, icon, accent = "Search", "󰍉", c.styles.T.Magenta
 	case "run_shell_command", "run_command", "bash":
-		prettyName = "Run"
-		icon = "󰆍"
-		accentColor = c.styles.T.Yellow
+		pretty, icon, accent = "Run", "󰆍", c.styles.T.Yellow
 	case "read_shell":
-		prettyName = "Read shell"
-		icon = "󰇯"
-		accentColor = c.styles.T.Yellow
+		pretty, icon, accent = "Read shell", "󰇯", c.styles.T.Yellow
 	case "write_shell":
-		prettyName = "Write shell"
-		icon = "󰇰"
-		accentColor = c.styles.T.Yellow
+		pretty, icon, accent = "Write shell", "󰇰", c.styles.T.Yellow
 	case "stop_shell":
-		prettyName = "Stop shell"
-		icon = "󰅙"
-		accentColor = c.styles.T.Red
+		pretty, icon, accent = "Stop shell", "󰅙", c.styles.T.Red
 	case "git_commit":
-		prettyName = "Git commit"
-		icon = "󰊢"
-		accentColor = c.styles.T.Red
+		pretty, icon, accent = "Git commit", "󰊢", c.styles.T.Red
 	case "git_add":
-		prettyName = "Git stage"
-		icon = "󰊢"
-		accentColor = c.styles.T.Green
+		pretty, icon, accent = "Git stage", "󰊢", c.styles.T.Green
 	case "git_checkout":
-		prettyName = "Git checkout"
-		icon = "󰊢"
-		accentColor = c.styles.T.Blue
+		pretty, icon, accent = "Git checkout", "󰊢", c.styles.T.Blue
 	case "git_branch":
-		prettyName = "Git branch"
-		icon = "󰊢"
-		accentColor = c.styles.T.Magenta
+		pretty, icon, accent = "Git branch", "󰊢", c.styles.T.Magenta
 	case "git_stash":
-		prettyName = "Git stash"
-		icon = "󰊢"
-		accentColor = c.styles.T.Yellow
+		pretty, icon, accent = "Git stash", "󰊢", c.styles.T.Yellow
 	case "git_status":
-		prettyName = "Git status"
-		icon = "󰊢"
-		accentColor = c.styles.T.Cyan
+		pretty, icon, accent = "Git status", "󰊢", c.styles.T.Cyan
 	case "git_diff":
-		prettyName = "Git diff"
-		icon = "󰊢"
-		accentColor = c.styles.T.Yellow
+		pretty, icon, accent = "Git diff", "󰊢", c.styles.T.Yellow
 	case "git_log":
-		prettyName = "Git log"
-		icon = "󰊢"
-		accentColor = c.styles.T.Blue
+		pretty, icon, accent = "Git log", "󰊢", c.styles.T.Blue
 	case "lsp_diagnostics", "lsp_symbols":
-		prettyName = "LSP"
-		icon = "󰘦"
-		accentColor = c.styles.T.Cyan
+		pretty, icon, accent = "LSP", "󰘦", c.styles.T.Cyan
 	case "web_fetch", "web_search":
-		prettyName = "Web"
-		icon = "󰖟"
-		accentColor = c.styles.T.Magenta
+		pretty, icon, accent = "Web", "󰖟", c.styles.T.Magenta
 	case "sql":
-		prettyName = "SQL"
-		icon = "󰆼"
-		accentColor = c.styles.T.Blue
+		pretty, icon, accent = "SQL", "󰆼", c.styles.T.Blue
 	case "secrets_scan":
-		prettyName = "Secrets scan"
-		icon = "󰦝"
-		accentColor = c.styles.T.Red
+		pretty, icon, accent = "Secrets scan", "󰦝", c.styles.T.Red
 	case "dependency_audit":
-		prettyName = "Audit"
-		icon = "󰒺"
-		accentColor = c.styles.T.Yellow
+		pretty, icon, accent = "Audit", "󰒺", c.styles.T.Yellow
 	case "task":
-		prettyName = "Task"
-		icon = "󰒋"
-		accentColor = c.styles.T.Accent
+		pretty, icon, accent = "Task", "󰒋", c.styles.T.Accent
 	case "read_agent":
-		prettyName = "Read agent"
-		icon = "󰒋"
-		accentColor = c.styles.T.Accent
+		pretty, icon, accent = "Read agent", "󰒋", c.styles.T.Accent
 	}
-
-	// 3. Styles
-	iconStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
-	statusStyle := lipgloss.NewStyle().Foreground(statusColor).Bold(true).Padding(0, 1)
-
-	// 4. Header Construction
-	nameStyled := c.styles.ToolName.Copy().Foreground(c.styles.T.Text).Render("  " + prettyName)
-	headerLeft := lipgloss.JoinHorizontal(lipgloss.Center, iconStyle.Render(icon), nameStyled, statusStyle.Render(statusText))
-
-	// Extract and Truncate Path for the right side
-	pathText := m.ToolContext
-	durationText := ""
-	if m.Duration > 0 {
-		durationText = " " + c.styles.ToolDuration.Render(m.Duration.Round(time.Millisecond).String())
-	}
-
-	availableWidth := width - 6
-	leftWidth := lipgloss.Width(headerLeft)
-	maxPathWidth := availableWidth - leftWidth - lipgloss.Width(durationText) - 2
-
-	if maxPathWidth > 5 && pathText != "" {
-		if utf8.RuneCountInString(pathText) > maxPathWidth {
-			runes := []rune(pathText)
-			pathText = "…" + string(runes[len(runes)-maxPathWidth+1:])
-		}
-		pathText = c.styles.Dim.Render(pathText)
-	} else {
-		pathText = ""
-	}
-
-	spacerWidth := availableWidth - leftWidth - lipgloss.Width(pathText) - lipgloss.Width(durationText)
-	if spacerWidth < 1 {
-		spacerWidth = 1
-	}
-	header := headerLeft + strings.Repeat(" ", spacerWidth) + pathText + durationText
-
-	// 5. Detailed Body Construction
-	var body strings.Builder
-	hasBody := false
-	appendField := func(label, value string, valueStyle lipgloss.Style) {
-		if strings.TrimSpace(value) == "" {
-			return
-		}
-		if !hasBody {
-			body.WriteString("\n\n")
-		} else {
-			body.WriteString("\n")
-		}
-		hasBody = true
-		labelWidth := 10
-		labelText := c.styles.Dim.Render(fmt.Sprintf("%-*s", labelWidth, label))
-		lines := strings.Split(strings.TrimSpace(value), "\n")
-		body.WriteString("  " + labelText + valueStyle.Render(lines[0]))
-		continuation := "  " + strings.Repeat(" ", labelWidth)
-		for _, line := range lines[1:] {
-			body.WriteString("\n" + continuation + valueStyle.Render(line))
-		}
-	}
-
-	isLightweight := m.ToolName == "read_file" || m.ToolName == "view" || m.ToolName == "list_directory"
-	showDetails := c.reviewMode || !isLightweight
-
-	// Section: Parameters
-	if showDetails && m.ToolArgs != "" && m.ToolArgs != "{}" {
-		var args map[string]any
-		if err := json.Unmarshal([]byte(m.ToolArgs), &args); err == nil {
-			for _, key := range []string{"path", "command", "pattern", "url", "query"} {
-				if value, ok := args[key]; ok {
-					appendField(strings.ToUpper(key[:1])+key[1:], fmt.Sprint(value), lipgloss.NewStyle().Foreground(c.styles.T.Text))
-				}
-			}
-		}
-		if c.reviewMode {
-			appendField("Details", render.Code(m.ToolArgs, "json"), lipgloss.NewStyle())
-		}
-	}
-
-	// Section: Output / Summary
-	if showDetails && (m.Status == "done" || m.Status == "error") {
-		if m.ToolSummary != "" {
-			appendField("Result", m.ToolSummary, c.styles.Dim.Copy().Italic(true))
-		}
-
-		if m.Content != "" {
-			resultText := m.Content
-			if !c.reviewMode {
-				lines := strings.Split(strings.TrimSpace(resultText), "\n")
-				if len(lines) > 3 {
-					resultText = strings.Join(lines[:3], "\n") + "\n  " + c.styles.Dim.Render("... (truncated, use Ctrl+R for full)")
-				}
-			}
-			appendField("Output", resultText, lipgloss.NewStyle().Foreground(c.styles.T.Subtext).Faint(true))
-		}
-	} else if m.Status == "running" && (m.ToolName == "write_file" || m.ToolName == "edit_file") && m.Content != "" {
-		appendField("Changes", "Proposed changes", c.styles.Dim.Copy())
-		lines := strings.Split(strings.TrimSpace(m.Content), "\n")
-
-		// Smart Fitting Logic:
-		// Calculate a limit based on screen height (e.g., 20% of viewport height, min 5, max 15)
-		limit := c.height / 5
-		if limit < 5 {
-			limit = 5
-		}
-		if limit > 15 {
-			limit = 15
-		}
-
-		for i, line := range lines {
-			if i >= limit {
-				body.WriteString(fmt.Sprintf("\n  %s", c.styles.Dim.Render(fmt.Sprintf("... (%d more lines, see Diff pane)", len(lines)-i))))
-				break
-			}
-			style := lipgloss.NewStyle().PaddingLeft(2)
-			if strings.HasPrefix(line, "+") {
-				style = style.Foreground(c.styles.T.Green)
-			} else if strings.HasPrefix(line, "-") {
-				style = style.Foreground(c.styles.T.Red)
-			} else {
-				style = style.Foreground(c.styles.T.Muted)
-			}
-			body.WriteString("\n" + style.Render(line))
-		}
-	}
-
-	// 6. Assembly
-	cardContent := header + body.String()
-
-	return lipgloss.NewStyle().
-		Border(lipgloss.ThickBorder(), false, false, false, true).
-		BorderForeground(accentColor).
-		Padding(0, 1).
-		MarginBottom(1).
-		Width(width - 2).
-		Render(cardContent)
-}
-
-func (c Conversation) Update(msg tea.Msg) (Conversation, tea.Cmd) {
-	// Forward mouse messages (including the mouse wheel) to the viewport so
-	// scroll mode supports mouse scrolling. The viewport ignores them unless
-	// MouseWheelEnabled is set, which browsing mode toggles on.
-	if _, ok := msg.(tea.MouseMsg); ok {
-		vp, cmd := c.viewport.Update(msg)
-		c.viewport = vp
-		return c, cmd
-	}
-	vp, cmd := c.viewport.Update(msg)
-	c.viewport = vp
-	return c, cmd
-}
-
-func (c Conversation) View() string {
-	content := c.viewport.View()
-	if !c.browsing || c.viewport.TotalLineCount() <= c.viewport.VisibleLineCount() {
-		return content
-	}
-	trackHeight := c.viewport.Height()
-	total := c.viewport.TotalLineCount()
-	visible := c.viewport.VisibleLineCount()
-	thumbHeight := visible * trackHeight / total
-	if thumbHeight < 1 {
-		thumbHeight = 1
-	}
-	maxOffset := total - visible
-	maxTop := trackHeight - thumbHeight
-	thumbTop := 0
-	if maxOffset > 0 {
-		thumbTop = c.viewport.YOffset() * maxTop / maxOffset
-	}
-	bar := make([]string, trackHeight)
-	for i := range bar {
-		bar[i] = "░"
-		if i >= thumbTop && i < thumbTop+thumbHeight {
-			bar[i] = "█"
-		}
-	}
-	trackStyle := lipgloss.NewStyle().Foreground(c.styles.T.Muted)
-	thumbStyle := lipgloss.NewStyle().Foreground(c.styles.T.Accent)
-	for i := range bar {
-		if bar[i] == "█" {
-			bar[i] = thumbStyle.Render(bar[i])
-		} else {
-			bar[i] = trackStyle.Render(bar[i])
-		}
-	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, content, strings.Join(bar, "\n"))
-}
-
-// MessageCount returns the number of conversation entries.
-func (c Conversation) MessageCount() int {
-	return len(c.messages)
-}
-
-// LastMessage returns the most recent conversation entry.
-func (c Conversation) LastMessage() (ConversationMsg, bool) {
-	if len(c.messages) == 0 {
-		return ConversationMsg{}, false
-	}
-	return c.messages[len(c.messages)-1], true
-}
-
-func truncateContent(s string, reviewMode bool) string {
-	if reviewMode {
-		return s
-	}
-	const maxRunes = 220
-	if utf8.RuneCountInString(s) <= maxRunes {
-		return s
-	}
-	runes := []rune(s)
-	return string(runes[:maxRunes]) + " … [truncated, press Ctrl+R for full review mode]"
+	return
 }

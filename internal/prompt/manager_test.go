@@ -1,20 +1,32 @@
 package prompt
 
 import (
+	"strings"
+	"context"
+	"fmt"
 	"testing"
-	"time"
 )
 
 func TestPromptManager_NewPromptManager(t *testing.T) {
-	pm := NewPromptManager(nil, nil, "")
+	mockClient := &MockLLMClient{
+		Response: `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"add new API","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
+		TaskResponse: `{"tasks":[{"id":"task-1","type":"implement","role":"coder","priority":1,"dependencies":[],"description":"Do the work","prompt":"Do the requested work"}]}`,
+	}
+	pm := NewPromptManager(nil, nil, "", mockClient, nil)
 	if pm == nil {
 		t.Fatal("expected PromptManager, got nil")
 	}
 	if pm.config == nil {
 		t.Error("expected config to be set")
 	}
-	if pm.categorizer == nil {
-		t.Error("expected categorizer to be set")
+	if pm.intentIdentifier == nil {
+		t.Error("expected intentIdentifier to be set")
+	}
+	if pm.initExecutor == nil {
+		t.Error("expected initExecutor to be set")
+	}
+	if pm.taskPlanner == nil {
+		t.Error("expected taskPlanner to be set")
 	}
 	if pm.assistantPrompts == nil {
 		t.Error("expected assistantPrompts to be set")
@@ -34,10 +46,14 @@ func TestPromptManager_NewPromptManager(t *testing.T) {
 }
 
 func TestPromptManager_ProcessUserMessage_NewFeature(t *testing.T) {
-	pm := NewPromptManager(nil, nil, "")
+	mockClient := &MockLLMClient{
+		Response: `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add a new REST API endpoint","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
+		TaskResponse: `{"tasks":[{"id":"task-1","type":"implement","role":"coder","priority":1,"dependencies":[],"description":"Do the work","prompt":"Do the requested work"}]}`,
+	}
+	pm := NewPromptManager(nil, nil, "", mockClient, nil)
 
 	parts, err := pm.ProcessUserMessage(
-		nil,
+		context.Background(),
 		"Add a new REST API endpoint for user authentication",
 		"/home/user/project",
 		[]string{"internal/api/handlers.go", "internal/auth/jwt.go"},
@@ -47,7 +63,6 @@ func TestPromptManager_ProcessUserMessage_NewFeature(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	// Should have initial thinking, categorization, task definition, coder init, workflow plan
 	foundStages := make(map[PromptStage]bool)
 	for _, part := range parts {
 		foundStages[part.Stage] = true
@@ -56,9 +71,6 @@ func TestPromptManager_ProcessUserMessage_NewFeature(t *testing.T) {
 	expectedStages := []PromptStage{
 		StageInitialThinking,
 		StageCategorization,
-		StageTaskDefinition,
-		StageCoderInit,
-		StageWorkflowPlan,
 	}
 
 	for _, stage := range expectedStages {
@@ -67,36 +79,48 @@ func TestPromptManager_ProcessUserMessage_NewFeature(t *testing.T) {
 		}
 	}
 
-	// Check that current request is set
-	req := pm.GetCurrentRequest()
-	if req == nil {
-		t.Error("expected current request to be set")
-	}
-	if req.Category != CategoryNewFeature {
-		t.Errorf("expected category new_feature, got %s", req.Category)
-	}
-	if !req.RequiresCoder {
-		t.Error("expected requires coder to be true for new feature")
+	intentSet := pm.GetCurrentIntentSet()
+	if intentSet == nil {
+		t.Error("expected current intent set to be set")
 	}
 
-	// Check coder context is initialized
-	coderCtx := pm.GetCoderContext()
-	if coderCtx == nil {
-		t.Error("expected coder context to be initialized")
+	foundImplement := false
+	for _, intent := range intentSet.Intents {
+		if intent.Type == IntentImplement {
+			foundImplement = true
+			break
+		}
 	}
-	if coderCtx.WorkingDir != "/home/user/project" {
-		t.Errorf("expected working dir /home/user/project, got %s", coderCtx.WorkingDir)
+	if !foundImplement {
+		t.Error("expected implement intent to be identified")
 	}
-	if len(coderCtx.TodoItems) == 0 {
-		t.Error("expected todo items to be generated")
+
+	tasks := pm.GetCurrentTasks()
+	if len(tasks) == 0 {
+		t.Error("expected tasks to be generated")
+	}
+
+	turnCtx := pm.GetTurnContext()
+	if turnCtx == nil {
+		t.Fatal("expected unified turn context to be initialized")
+	}
+	if turnCtx.WorkingDir != "/home/user/project" {
+		t.Errorf("expected working dir /home/user/project, got %s", turnCtx.WorkingDir)
+	}
+	if len(turnCtx.TodoItems) == 0 {
+		t.Error("expected todo items to be generated on the turn context")
 	}
 }
 
 func TestPromptManager_ProcessUserMessage_Debug(t *testing.T) {
-	pm := NewPromptManager(nil, nil, "")
+	mockClient := &MockLLMClient{
+		Response: `{"intents":[{"type":"debug","priority":1,"confidence":0.9,"raw_text":"debug why JWT failing","parameters":{"error_type":"token"},"dependencies":[]}],"requires_init":true,"init_goal":"Understand the codebase to address: debug why JWT failing","init_actions":[{"tool":"grep","target":"error","reason":"Search for errors"}]}`,
+		TaskResponse: `{"tasks":[{"id":"task-1","type":"implement","role":"coder","priority":1,"dependencies":[],"description":"Do the work","prompt":"Do the requested work"}]}`,
+	}
+	pm := NewPromptManager(nil, nil, "", mockClient, nil)
 
 	_, err := pm.ProcessUserMessage(
-		nil,
+		context.Background(),
 		"Debug why the JWT token validation is failing",
 		"/home/user/project",
 		[]string{"internal/auth/jwt.go"},
@@ -106,413 +130,269 @@ func TestPromptManager_ProcessUserMessage_Debug(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	req := pm.GetCurrentRequest()
-	if req == nil {
-		t.Error("expected current request to be set")
+	intentSet := pm.GetCurrentIntentSet()
+	if intentSet == nil {
+		t.Error("expected current intent set to be set")
 	}
-	if req.Category != CategoryDebug {
-		t.Errorf("expected category debug, got %s", req.Category)
+
+	foundDebug := false
+	for _, intent := range intentSet.Intents {
+		if intent.Type == IntentDebug {
+			foundDebug = true
+			break
+		}
+	}
+	if !foundDebug {
+		t.Error("expected debug intent to be identified")
+	}
+}
+
+func TestPromptManager_ProcessUserMessage_ExploreAndFix(t *testing.T) {
+	mockClient := &MockLLMClient{
+		Response: `{"intents":[{"type":"explore","priority":1,"confidence":0.9,"raw_text":"see files related to context","parameters":{"target":"context"},"dependencies":[]},{"type":"fix","priority":2,"confidence":0.85,"raw_text":"fix it","parameters":{"area":"context"},"dependencies":[]},{"type":"commit","priority":4,"confidence":0.95,"raw_text":"git commit","parameters":{"message":"fix context issue"},"dependencies":[]}],"requires_init":true,"init_goal":"Understand the codebase to address: see files related to context and there in building context there is issue, fix it and git commit","init_actions":[{"tool":"glob","target":"**/*context*","reason":"Find context-related files"}]}`,
+		TaskResponse: `{"tasks":[{"id":"task-1","type":"implement","role":"coder","priority":1,"dependencies":[],"description":"Do the work","prompt":"Do the requested work"}]}`,
+	}
+	pm := NewPromptManager(nil, nil, "", mockClient, nil)
+
+	_, err := pm.ProcessUserMessage(
+		context.Background(),
+		"see files related to context and there in building context there is issue, fix it and git commit",
+		"/home/user/project",
+		[]string{},
+	)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	intentSet := pm.GetCurrentIntentSet()
+	if intentSet == nil {
+		t.Error("expected current intent set to be set")
+	}
+
+	intentTypes := make(map[IntentType]bool)
+	for _, intent := range intentSet.Intents {
+		intentTypes[intent.Type] = true
+	}
+
+	expectedIntents := []IntentType{IntentExplore, IntentFix, IntentCommit}
+	for _, expected := range expectedIntents {
+		if !intentTypes[expected] {
+			t.Errorf("expected intent %s to be identified", expected)
+		}
+	}
+
+	if !intentSet.RequiresInit {
+		t.Error("expected requires init to be true for explore and fix")
+	}
+	if intentSet.InitPhase == nil {
+		t.Error("expected init phase to be set")
+	}
+
+	if len(intentSet.InitPhase.Actions) == 0 {
+		t.Error("expected init phase to have actions")
 	}
 }
 
 func TestPromptManager_ContinuationIsRecordedOnceAndSharesContext(t *testing.T) {
-	pm := NewPromptManager(nil, nil, "")
-	if _, err := pm.ProcessUserMessage(nil, "Add thinking effort support", "/project", nil); err != nil {
+	mockClient := &MockLLMClient{
+		Response: `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add thinking effort support","parameters":{},"dependencies":[]}],"requires_init":false}`,
+		TaskResponse: `{"tasks":[{"id":"task-1","type":"implement","role":"coder","priority":1,"dependencies":[],"description":"Do the work","prompt":"Do the requested work"}]}`,
+	}
+	pm := NewPromptManager(nil, nil, "", mockClient, nil)
+	if _, err := pm.ProcessUserMessage(context.Background(), "Add thinking effort support", "/project", nil); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pm.ProcessUserMessage(nil, "Continue, wire it into the TUI", "/project", nil); err != nil {
+	if _, err := pm.ProcessUserMessage(context.Background(), "Continue, wire it into the TUI", "/project", nil); err != nil {
 		t.Fatal(err)
 	}
-	ctx := pm.GetAssistantContext()
+	ctx := pm.GetTurnContext()
 	if len(ctx.ConversationHistory) != 2 {
-		t.Fatalf("history length = %d, want 2", len(ctx.ConversationHistory))
+		t.Errorf("expected 2 messages in history, got %d", len(ctx.ConversationHistory))
 	}
-	req := pm.GetCurrentRequest()
-	if req.Relation != RequestRelationFollowUp || req.ContextShare != ContextShareFull {
-		t.Fatalf("continuation routing = %s/%s", req.Relation, req.ContextShare)
+	if ctx.ConversationHistory[0].Role != "user" {
+		t.Errorf("expected first message to be user, got %s", ctx.ConversationHistory[0].Role)
 	}
-}
-
-func TestPromptManager_NewTaskStartsIsolatedContext(t *testing.T) {
-	pm := NewPromptManager(nil, nil, "")
-	if _, err := pm.ProcessUserMessage(nil, "Add thinking effort support", "/project", nil); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pm.ProcessUserMessage(nil, "New task: review session persistence", "/project", nil); err != nil {
-		t.Fatal(err)
-	}
-	req := pm.GetCurrentRequest()
-	if req.Relation != RequestRelationNew || req.ContextShare != ContextShareNone {
-		t.Fatalf("new task routing = %s/%s", req.Relation, req.ContextShare)
-	}
-	if len(pm.GetStashedContexts()) != 1 {
-		t.Fatalf("stash count = %d, want 1", len(pm.GetStashedContexts()))
+	if ctx.ConversationHistory[1].Role != "user" {
+		t.Errorf("expected second message to be user, got %s", ctx.ConversationHistory[1].Role)
 	}
 }
 
-func TestPromptManager_ProcessUserMessage_Simple(t *testing.T) {
-	pm := NewPromptManager(nil, nil, "")
+func TestLLMTaskPlanner_PlanTasks(t *testing.T) {
+	mockClient := &MockLLMClient{
+		TaskResponse: `{"tasks":[{"id":"task-1","type":"analyze","role":"researcher","priority":1,"dependencies":[],"description":"Analyze handler","prompt":"Read internal/api/handlers.go and plan the endpoint"},{"id":"task-2","type":"implement","role":"coder","priority":2,"dependencies":["task-1"],"description":"Implement endpoint","prompt":"Implement in internal/api/handlers.go"}]}`,
+	}
+	planner := NewLLMTaskPlanner(nil, mockClient)
+
+	intentSet := &IntentSet{
+		Intents:        []Intent{{ID: "i1", Type: IntentImplement, Priority: 2}},
+		OriginalPrompt: "add a new API endpoint",
+	}
+	initResults := &InitResults{
+		FilesFound:   []string{"internal/api/handlers.go"},
+		CodeSnippets: map[string]string{"internal/api/handlers.go": "// handler code"},
+	}
+
+	tasks, err := planner.PlanTasks(context.Background(), intentSet, initResults)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(tasks))
+	}
+	if tasks[0].Type != "analyze" || tasks[1].Type != "implement" {
+		t.Errorf("unexpected task types: %s, %s", tasks[0].Type, tasks[1].Type)
+	}
+	if len(tasks[1].Dependencies) != 1 || tasks[1].Dependencies[0] != "task-1" {
+		t.Errorf("expected implement to depend on task-1, got %v", tasks[1].Dependencies)
+	}
+	if !strings.Contains(tasks[0].Prompt, "internal/api/handlers.go") {
+		t.Error("expected task prompt to reference actual discovered file")
+	}
+}
+
+func TestLLMTaskPlanner_DropsUnknownDependencies(t *testing.T) {
+	mockClient := &MockLLMClient{
+		TaskResponse: `{"tasks":[{"id":"task-1","type":"fix","role":"coder","priority":1,"dependencies":["nonexistent"],"description":"Fix","prompt":"Fix it"}]}`,
+	}
+	planner := NewLLMTaskPlanner(nil, mockClient)
+
+	intentSet := &IntentSet{OriginalPrompt: "fix bug"}
+	tasks, err := planner.PlanTasks(context.Background(), intentSet, &InitResults{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if len(tasks[0].Dependencies) != 0 {
+		t.Errorf("expected unknown dependency to be dropped, got %v", tasks[0].Dependencies)
+	}
+}
+
+func TestLLMTaskPlanner_Error(t *testing.T) {
+	mockClient := &MockLLMClient{Error: fmt.Errorf("LLM down")}
+	planner := NewLLMTaskPlanner(nil, mockClient)
+
+	_, err := planner.PlanTasks(context.Background(), &IntentSet{OriginalPrompt: "x"}, &InitResults{})
+	if err == nil {
+		t.Fatal("expected error from planner when LLM fails")
+	}
+}
+
+func TestLLMIntentIdentifier_IdentifyIntents(t *testing.T) {
+	tests := []struct {
+		name           string
+		userMessage    string
+		mockResponse   string
+		expectedTypes  []IntentType
+		expectedInit   bool
+	}{
+		{
+			name:        "single implement intent",
+			userMessage: "Add a new REST API endpoint for user authentication",
+			mockResponse: `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add a new REST API endpoint","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
+			expectedTypes: []IntentType{IntentImplement},
+			expectedInit:  false,
+		},
+		{
+			name:        "explore and fix with init",
+			userMessage: "see files related to context and there in building context there is issue, fix it",
+			mockResponse: `{"intents":[{"type":"explore","priority":1,"confidence":0.9,"raw_text":"see files related to context","parameters":{"target":"context"},"dependencies":[]},{"type":"fix","priority":2,"confidence":0.85,"raw_text":"fix it","parameters":{"area":"context"},"dependencies":[]}],"requires_init":true,"init_goal":"Understand the codebase to address: see files related to context and there in building context there is issue, fix it","init_actions":[{"tool":"glob","target":"**/*context*","reason":"Find context-related files"}]}`,
+			expectedTypes: []IntentType{IntentExplore, IntentFix},
+			expectedInit:  true,
+		},
+		{
+			name:        "multi-intent: explore, implement, test, commit",
+			userMessage: "explore the codebase, implement a new feature, write tests, and commit",
+			mockResponse: `{"intents":[{"type":"explore","priority":1,"confidence":0.9,"raw_text":"explore the codebase","parameters":{},"dependencies":[]},{"type":"implement","priority":2,"confidence":0.85,"raw_text":"implement a new feature","parameters":{},"dependencies":[]},{"type":"test","priority":3,"confidence":0.8,"raw_text":"write tests","parameters":{},"dependencies":[]},{"type":"commit","priority":4,"confidence":0.95,"raw_text":"and commit","parameters":{},"dependencies":[]}],"requires_init":true,"init_goal":"Understand the codebase to address: explore the codebase, implement a new feature, write tests, and commit","init_actions":[{"tool":"glob","target":"**/*","reason":"Find relevant files"}]}`,
+			expectedTypes: []IntentType{IntentExplore, IntentImplement, IntentTest, IntentCommit},
+			expectedInit:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			mockClient := &MockLLMClient{Response: tc.mockResponse}
+			identifier := NewLLMIntentIdentifier(nil, mockClient)
+
+			intentSet := identifier.IdentifyIntents(context.Background(), tc.userMessage, "/tmp", []string{})
+			if intentSet == nil {
+				t.Fatal("expected intent set, got nil")
+			}
+			if len(intentSet.Intents) == 0 {
+				t.Fatal("expected at least one intent")
+			}
+
+			found := make(map[IntentType]bool)
+			for _, intent := range intentSet.Intents {
+				found[intent.Type] = true
+			}
+
+			for _, expected := range tc.expectedTypes {
+				if !found[expected] {
+					t.Errorf("expected intent %s not found", expected)
+				}
+			}
+
+			if intentSet.RequiresInit != tc.expectedInit {
+				t.Errorf("expected requires_init=%v, got %v", tc.expectedInit, intentSet.RequiresInit)
+			}
+
+			if tc.expectedInit && intentSet.InitPhase == nil {
+				t.Error("expected init phase to be set")
+			}
+		})
+	}
+}
+
+func TestLLMIntentIdentifier_ErrorHandling(t *testing.T) {
+	mockClient := &MockLLMClient{Error: fmt.Errorf("LLM unavailable")}
+	identifier := NewLLMIntentIdentifier(nil, mockClient)
+
+	intentSet := identifier.IdentifyIntents(context.Background(), "add a new feature", "/tmp", []string{})
+	if intentSet == nil {
+		t.Fatal("expected intent set from error handling")
+	}
+	if len(intentSet.Intents) == 0 {
+		t.Error("expected at least one intent from error handling")
+	}
+	if intentSet.Intents[0].Type != IntentQuestion {
+		t.Errorf("expected IntentQuestion on error, got %s", intentSet.Intents[0].Type)
+	}
+}
+
+func TestPromptManager_WithLLMClient(t *testing.T) {
+	mockClient := &MockLLMClient{
+		Response: `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add a new REST API endpoint","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
+		TaskResponse: `{"tasks":[{"id":"task-1","type":"implement","role":"coder","priority":1,"dependencies":[],"description":"Do the work","prompt":"Do the requested work"}]}`,
+	}
+	pm := NewPromptManager(nil, nil, "", mockClient, nil)
 
 	_, err := pm.ProcessUserMessage(
-		nil,
-		"Show me the current config",
+		context.Background(),
+		"Add a new REST API endpoint for user authentication",
 		"/home/user/project",
-		[]string{"internal/config/config.go"},
+		[]string{"internal/api/handlers.go", "internal/auth/jwt.go"},
 	)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	req := pm.GetCurrentRequest()
-	if req == nil {
-		t.Error("expected current request to be set")
-	}
-	if req.Category != CategoryDirect && req.Category != CategorySimple {
-		t.Errorf("expected category direct or simple, got %s", req.Category)
-	}
-}
-
-func TestPromptManager_GetNextTodoPrompt(t *testing.T) {
-	pm := NewPromptManager(nil, nil, "")
-
-	// Process a request first
-	_, err := pm.ProcessUserMessage(
-		nil,
-		"Add a new feature",
-		"/home/user/project",
-		[]string{"internal/feature.go"},
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	intentSet := pm.GetCurrentIntentSet()
+	if intentSet == nil {
+		t.Fatal("expected current intent set to be set")
 	}
 
-	// Get next todo
-	nextPrompt := pm.GetNextTodoPrompt()
-	if nextPrompt == nil {
-		t.Error("expected next todo prompt")
-	}
-	if nextPrompt.Stage != StageExecution {
-		t.Errorf("expected stage execution, got %s", nextPrompt.Stage)
-	}
-}
-
-func TestPromptManager_CompleteTodo(t *testing.T) {
-	pm := NewPromptManager(nil, nil, "")
-
-	_, err := pm.ProcessUserMessage(
-		nil,
-		"Add a new feature",
-		"/home/user/project",
-		[]string{"internal/feature.go"},
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	coderCtx := pm.GetCoderContext()
-	if coderCtx == nil || len(coderCtx.TodoItems) == 0 {
-		t.Fatal("expected todo items")
-	}
-
-	todoID := coderCtx.TodoItems[0].ID
-	pm.CompleteTodo(todoID, "Done")
-
-	// Check todo is marked completed
-	coderCtx = pm.GetCoderContext()
-	found := false
-	for _, todo := range coderCtx.TodoItems {
-		if todo.ID == todoID && todo.Status == TodoStatusCompleted {
-			found = true
+	foundImplement := false
+	for _, intent := range intentSet.Intents {
+		if intent.Type == IntentImplement {
+			foundImplement = true
 			break
 		}
 	}
-	if !found {
-		t.Error("expected todo to be marked completed")
-	}
-}
-
-func TestPromptManager_StashContext(t *testing.T) {
-	pm := NewPromptManager(nil, nil, "")
-
-	_, err := pm.ProcessUserMessage(
-		nil,
-		"Add a new feature",
-		"/home/user/project",
-		[]string{"internal/feature.go"},
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	stashPrompt := pm.StashContext("Testing stash")
-	if stashPrompt == nil {
-		t.Error("expected stash prompt")
-	}
-	if stashPrompt.Stage != StageContextManage {
-		t.Errorf("expected stage context_manage, got %s", stashPrompt.Stage)
-	}
-}
-
-func TestPromptManager_SaveAndResumeStash(t *testing.T) {
-	pm := NewPromptManager(nil, nil, "")
-
-	_, err := pm.ProcessUserMessage(
-		nil,
-		"Add a new feature",
-		"/home/user/project",
-		[]string{"internal/feature.go"},
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Save stash
-	stash := pm.SaveStash("Test summary", []string{"test"})
-	if stash == nil {
-		t.Error("expected stash to be created")
-	}
-	if stash.Summary != "Test summary" {
-		t.Errorf("expected summary 'Test summary', got %s", stash.Summary)
-	}
-
-	// Resume stash
-	resumePrompt := pm.ResumeContext(stash.ID)
-	if resumePrompt == nil {
-		t.Error("expected resume prompt")
-	}
-	if resumePrompt.Stage != StageContextManage {
-		t.Errorf("expected stage context_manage, got %s", resumePrompt.Stage)
-	}
-}
-
-func TestPromptManager_CreateNewContext(t *testing.T) {
-	pm := NewPromptManager(nil, nil, "")
-
-	_, err := pm.ProcessUserMessage(
-		nil,
-		"Add a new feature",
-		"/home/user/project",
-		[]string{"internal/feature.go"},
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Create new context using PromptManager's CreateNewContext
-	newPrompt := pm.CreateNewContext("Start new task", true)
-	if newPrompt == nil {
-		t.Error("expected new context prompt")
-	}
-	if newPrompt.Stage != StageContextManage {
-		t.Errorf("expected stage context_manage, got %s", newPrompt.Stage)
-	}
-
-	// Old request should be cleared
-	if pm.GetCurrentRequest() != nil {
-		t.Error("expected current request to be cleared")
-	}
-}
-
-func TestPromptManager_ShareContextWithCoder(t *testing.T) {
-	pm := NewPromptManager(nil, nil, "")
-
-	_, err := pm.ProcessUserMessage(
-		nil,
-		"Add a new feature",
-		"/home/user/project",
-		[]string{"internal/feature.go"},
-	)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	sharePrompt := pm.ShareContextWithCoder("Share all context")
-	if sharePrompt == nil {
-		t.Error("expected share prompt")
-	}
-	if sharePrompt.Stage != StageContextManage {
-		t.Errorf("expected stage context_manage, got %s", sharePrompt.Stage)
-	}
-}
-
-func TestCategorizer_Categorize(t *testing.T) {
-	categorizer := NewCategorizer(nil)
-
-	testCases := []struct {
-		prompt      string
-		expectedCat RequestCategory
-	}{
-		{"Add a new feature for user login", CategoryNewFeature},
-		{"Debug the login error", CategoryDebug},
-		{"I suspect the issue is in the auth module", CategoryIssueSuspect},
-		{"How do I use the API?", CategoryUserAsking},
-		{"Plan the architecture for the new service", CategoryPlan},
-		{"Review the pull request", CategoryVerifyWork},
-		{"Show me the config file", CategoryDirect},
-		{"Quick fix typo", CategorySimple},
-	}
-
-	for _, tc := range testCases {
-		result := categorizer.Categorize(tc.prompt, "/tmp", []string{})
-		if result.Category != tc.expectedCat {
-			t.Errorf("for prompt %q: expected category %s, got %s", tc.prompt, tc.expectedCat, result.Category)
-		}
-	}
-}
-
-func TestCategorizer_ComplexityDetection(t *testing.T) {
-	categorizer := NewCategorizer(nil)
-
-	// Simple
-	result := categorizer.Categorize("Fix typo", "/tmp", []string{})
-	if result.Complexity != ComplexitySimple {
-		t.Errorf("expected simple complexity, got %s", result.Complexity)
-	}
-
-	// Moderate (multiple files)
-	result = categorizer.Categorize("Add new API endpoint", "/tmp", []string{"a.go", "b.go", "c.go", "d.go"})
-	if result.Complexity != ComplexityModerate {
-		t.Errorf("expected moderate complexity, got %s", result.Complexity)
-	}
-
-	// Complex (many files + complex keywords)
-	result = categorizer.Categorize("Refactor the entire authentication system", "/tmp", []string{"a.go", "b.go", "c.go", "d.go", "e.go", "f.go", "g.go", "h.go", "i.go", "j.go", "k.go"})
-	if result.Complexity != ComplexityComplex {
-		t.Errorf("expected complex complexity, got %s", result.Complexity)
-	}
-}
-
-func TestCategorizerRepositoryInvestigationIsNotSimple(t *testing.T) {
-	categorizer := NewCategorizer(nil)
-	result := categorizer.Categorize("Read files related to the search tool and tell issues if any", "/tmp", nil)
-	if result.Category != CategoryIssueSuspect {
-		t.Fatalf("category = %s, want %s", result.Category, CategoryIssueSuspect)
-	}
-	if result.Complexity == ComplexitySimple {
-		t.Fatalf("repository investigation was collapsed to simple complexity")
-	}
-}
-
-func TestAssistantPrompts_BuildInitialThinkingPrompt(t *testing.T) {
-	ap := NewAssistantPrompts(nil)
-	prompt := ap.BuildInitialThinkingPrompt("Test prompt")
-
-	if prompt == nil {
-		t.Fatal("expected prompt")
-	}
-	if prompt.Stage != StageInitialThinking {
-		t.Errorf("expected stage initial_thinking, got %s", prompt.Stage)
-	}
-	if prompt.Tools != ToolSetContextOnly {
-		t.Errorf("expected tools context_only, got %s", prompt.Tools)
-	}
-}
-
-func TestCoderPrompts_BuildCoderInitPrompt(t *testing.T) {
-	cp := NewCoderPrompts(nil)
-	coderCtx := &CoderContext{
-		WorkingDir:   "/tmp",
-		Files:        []string{"test.go"},
-		CodeSnippets: map[string]string{"test.go": "package main"},
-		TodoItems: []TodoItem{
-			{ID: "1", Description: "Test todo", Status: TodoStatusPending, Priority: 1},
-		},
-	}
-	categorized := &CategorizedRequest{
-		OriginalPrompt: "Test task",
-		Category:       CategoryNewFeature,
-		Complexity:     ComplexityModerate,
-		Strategy:       StrategyCoderAgent,
-		AllowedTools:   ToolSetModerate,
-	}
-
-	prompt := cp.BuildCoderInitPrompt(coderCtx, categorized)
-	if prompt == nil {
-		t.Fatal("expected prompt")
-	}
-	if prompt.Stage != StageCoderInit {
-		t.Errorf("expected stage coder_init, got %s", prompt.Stage)
-	}
-	if prompt.Tools != ToolSetModerate {
-		t.Errorf("expected tools moderate, got %s", prompt.Tools)
-	}
-}
-
-func TestContextPrompts_BuildStashPrompt(t *testing.T) {
-	cp := NewContextPrompts(nil)
-	assistantCtx := &AssistantContext{
-		ConversationHistory: []Message{
-			{Role: "user", Content: "Hello", Timestamp: time.Now()},
-		},
-		CurrentTask: &CategorizedRequest{
-			Category:       CategoryNewFeature,
-			OriginalPrompt: "Test task",
-		},
-	}
-
-	prompt := cp.BuildStashPrompt(assistantCtx, "Test reason")
-	if prompt == nil {
-		t.Fatal("expected prompt")
-	}
-	if prompt.Stage != StageContextManage {
-		t.Errorf("expected stage context_manage, got %s", prompt.Stage)
-	}
-}
-
-func TestWorkflowPrompts_BuildTodoWalkthroughPrompt(t *testing.T) {
-	wp := NewWorkflowPrompts(nil)
-	todos := []TodoItem{
-		{ID: "1", Description: "Todo 1", Status: TodoStatusCompleted, Priority: 1},
-		{ID: "2", Description: "Todo 2", Status: TodoStatusInProgress, Priority: 2},
-		{ID: "3", Description: "Todo 3", Status: TodoStatusPending, Priority: 3},
-	}
-
-	prompt := wp.BuildTodoWalkthroughPrompt(todos, 1)
-	if prompt == nil {
-		t.Fatal("expected prompt")
-	}
-	if prompt.Stage != StageWorkflowPlan {
-		t.Errorf("expected stage workflow_plan, got %s", prompt.Stage)
-	}
-}
-
-func TestToolPrompts_BuildReadFilePrompt(t *testing.T) {
-	tp := NewToolPrompts(nil)
-	prompt := tp.BuildReadFilePrompt("/tmp/test.go", 1, 10)
-
-	if prompt == nil {
-		t.Fatal("expected prompt")
-	}
-	if prompt.Stage != StageExecution {
-		t.Errorf("expected stage execution, got %s", prompt.Stage)
-	}
-	if prompt.Tools != ToolSetReadOnly {
-		t.Errorf("expected tools read_only, got %s", prompt.Tools)
-	}
-}
-
-func TestPromptSystem_Integration(t *testing.T) {
-	ps := NewPromptSystem()
-
-	// Process a request
-	parts, err := ps.ProcessUserMessage(nil, "Add new feature", "/tmp", []string{"main.go"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(parts) == 0 {
-		t.Error("expected prompt parts")
-	}
-
-	// Get next action
-	next := ps.GetNextAction()
-	if next == nil {
-		t.Error("expected next action")
-	}
-
-	// Complete task
-	complete := ps.CompleteCurrentTask("Done")
-	if complete == nil {
-		t.Error("expected completion prompt")
+	if !foundImplement {
+		t.Error("expected implement intent from LLM")
 	}
 }

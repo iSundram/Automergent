@@ -1,6 +1,8 @@
 package taskstate
 
 import (
+	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +40,9 @@ type Store struct {
 
 	// Todo items extracted from plan (for todo-style workflow)
 	todoItems []shared.TodoItem
+
+	// Optional callback fired on todo mutations (UI event source).
+	todoListener func([]shared.TodoItem)
 }
 
 // NewStore creates an empty store.
@@ -167,9 +172,62 @@ func (s *Store) GetAllRecords() []*TaskRecord {
 func (s *Store) TodoItems() []shared.TodoItem {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	items := make([]shared.TodoItem, len(s.todoItems))
-	copy(items, s.todoItems)
-	return items
+	out := make([]shared.TodoItem, len(s.todoItems))
+	copy(out, s.todoItems)
+	return out
+}
+
+// SetTodoListener registers a callback fired (with the new snapshot) whenever
+// todos are mutated. Used by the agent to emit UI events; the store stays
+// UI-agnostic.
+func (s *Store) SetTodoListener(fn func([]shared.TodoItem)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.todoListener = fn
+}
+
+// ReplaceTodos swaps the full todo list (plan records are left untouched).
+// IDs are generated for entries that lack one.
+func (s *Store) ReplaceTodos(todos []shared.TodoItem) {
+	s.mu.Lock()
+	for i := range todos {
+		if strings.TrimSpace(todos[i].ID) == "" {
+			todos[i].ID = fmt.Sprintf("todo-%d", i+1)
+		}
+	}
+	s.todoItems = todos
+	listener, snapshot := s.todoListener, s.todoSnapshotLocked()
+	s.mu.Unlock()
+	if listener != nil {
+		listener(snapshot)
+	}
+}
+
+// SetTodoStatus updates one todo's status by ID.
+// Reports whether the todo existed.
+func (s *Store) SetTodoStatus(id string, status shared.TodoStatus) bool {
+	s.mu.Lock()
+	found := false
+	for i := range s.todoItems {
+		if s.todoItems[i].ID == id {
+			s.todoItems[i].Status = status
+			found = true
+			break
+		}
+	}
+	listener, snapshot := s.todoListener, s.todoSnapshotLocked()
+	s.mu.Unlock()
+	if found && listener != nil {
+		listener(snapshot)
+	}
+	return found
+}
+
+// todoSnapshotLocked copies the todo list; caller must hold mu.
+func (s *Store) todoSnapshotLocked() []shared.TodoItem {
+	out := make([]shared.TodoItem, len(s.todoItems))
+	copy(out, s.todoItems)
+	return out
 }
 
 // Bucket operations

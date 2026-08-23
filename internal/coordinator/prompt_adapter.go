@@ -18,7 +18,20 @@ func NewPromptAdapter(manager *prompt.PromptManager) *PromptAdapter {
 
 // BuildRolePrompt builds a role-specific prompt for a coordinator task using the new prompt system.
 func (pa *PromptAdapter) BuildRolePrompt(role AgentRole, task *Task) string {
-	// Adapt the coordinator task to our categorized request
+	// Try to use the new TaskSpec-based approach first
+	if pa.manager != nil {
+		currentTasks := pa.manager.GetCurrentTasks()
+		if len(currentTasks) > 0 {
+			// Find matching task spec
+			for _, ts := range currentTasks {
+				if ts.ID == task.ID || ts.IntentID == task.ID {
+					return pa.buildTaskSpecPrompt(role, &ts)
+				}
+			}
+		}
+	}
+
+	// Fallback to legacy CategorizedRequest adapter
 	categorized := CoordinatorTaskAdapter(task)
 
 	// Build appropriate prompt based on role
@@ -36,6 +49,41 @@ func (pa *PromptAdapter) BuildRolePrompt(role AgentRole, task *Task) string {
 	default:
 		return pa.buildGenericPrompt(categorized)
 	}
+}
+
+func (pa *PromptAdapter) buildTaskSpecPrompt(role AgentRole, taskSpec *prompt.TaskSpec) string {
+	var sb strings.Builder
+
+	sb.WriteString("You are a ")
+	sb.WriteString(taskSpec.Role)
+	sb.WriteString(" agent.\n\n")
+
+	sb.WriteString("Task: ")
+	sb.WriteString(taskSpec.Description)
+	sb.WriteString("\n\n")
+
+	sb.WriteString("Full Prompt:\n")
+	sb.WriteString(taskSpec.Prompt)
+	sb.WriteString("\n\n")
+
+	if len(taskSpec.Context) > 0 {
+		sb.WriteString("Context:\n")
+		for k, v := range taskSpec.Context {
+			sb.WriteString("- ")
+			sb.WriteString(k)
+			sb.WriteString(": ")
+			sb.WriteString(formatContextValue(v))
+			sb.WriteString("\n")
+		}
+	}
+
+	if len(taskSpec.Dependencies) > 0 {
+		sb.WriteString("\nDependencies: ")
+		sb.WriteString(strings.Join(taskSpec.Dependencies, ", "))
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
 }
 
 func (pa *PromptAdapter) buildGenericPrompt(categorized *prompt.CategorizedRequest) string {
@@ -238,4 +286,24 @@ func (pa *PromptAdapter) buildDocumenterPrompt(categorized *prompt.CategorizedRe
 	}
 
 	return sb.String()
+}
+
+func formatContextValue(v any) string {
+	switch val := v.(type) {
+	case string:
+		if len(val) > 200 {
+			return val[:200] + "..."
+		}
+		return val
+	case []string:
+		return strings.Join(val, ", ")
+	case map[string]string:
+		var parts []string
+		for k, v := range val {
+			parts = append(parts, k+"="+v)
+		}
+		return strings.Join(parts, "; ")
+	default:
+		return "complex_value"
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -18,9 +19,13 @@ import (
 	promptpkg "github.com/iSundram/Automergent/internal/prompt"
 	"github.com/iSundram/Automergent/internal/reasoning"
 	"github.com/iSundram/Automergent/internal/session"
+	"github.com/iSundram/Automergent/internal/shared"
 	"github.com/iSundram/Automergent/internal/tools"
 	subagent "github.com/iSundram/Automergent/internal/tools/agent"
-	"github.com/iSundram/Automergent/internal/version"
+	toolsFS "github.com/iSundram/Automergent/internal/tools/filesystem"
+	gitpkg "github.com/iSundram/Automergent/internal/tools/git"
+	toolsInteraction "github.com/iSundram/Automergent/internal/tools/interaction"
+	toolsShell "github.com/iSundram/Automergent/internal/tools/shell"
 )
 
 // Agent is the core AI coding agent.
@@ -39,6 +44,8 @@ type Agent struct {
 	workDir             string
 	firstMessageHandled bool
 	decisionRecords     []ToolDecisionRecord
+	skills              []Skill
+	skillPaths          *skillTracker
 	reasoningPreAnalyze func(context.Context, string) (string, error)
 	currentComplexity   reasoning.Complexity
 	currentTaskType     reasoning.TaskType
@@ -157,7 +164,14 @@ type ToolDoneEvent struct {
 	Decision   ToolDecisionRecord
 }
 
+// TodoEvent carries a todo snapshot/update to the UI.
 type TodoEvent struct {
+	Items []shared.TodoItem
+}
+
+// notifyTodos emits a todo snapshot event; safe to call from any goroutine.
+func (a *Agent) notifyTodos(items []shared.TodoItem) {
+	a.emitTodoEvent(context.Background(), EventTodoSnapshot, TodoEvent{Items: items})
 }
 
 type toolCallBatch struct {
@@ -191,6 +205,7 @@ const (
 	EventCompacted = "compacted"
 	EventTodoSnapshot = "todo_snapshot"
 	EventTodoUpdate = "todo_update"
+	EventInitAction = "init_action"
 )
 
 const (
@@ -210,6 +225,7 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 		events:              make(chan Event, 8192),
 		sessionAllowedTools: make(map[string]bool),
 		approvalSource:      "tui",
+		skillPaths:          newSkillTracker(12),
 	}
 
 	if cfg != nil && cfg.NoTUI {
@@ -234,6 +250,12 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 			"title":   stage,
 			"message": detail,
 		})
+	})
+
+	// Surface init-phase tool executions as structured events so the TUI can
+	// render them as native tool-call cards inside the conversation log.
+	agent.promptSystem.SetActionObserver(func(evt shared.InitActionEvent) {
+		agent.Emit(EventInitAction, evt)
 	})
 
 	// Seed always-allow approvals persisted in the session so resumed runs
@@ -490,8 +512,20 @@ if a.toolProfile != nil {
 		}
 	}
 
+	// Load skills (user dir + project dir); project wins on conflicts.
+	a.skills = loadSkills(
+		func() string {
+			if a.cfg != nil {
+				return a.cfg.SkillsDir
+			}
+			return ""
+		}(),
+		filepath.Join(a.workDir, ".automergent", "skills"),
+	)
+
 	// Standard agent loop with legacy system prompt
 	firstStandardTurn := isFirstMessage
+	runMeta := &runMetadata{}
 	for {
 		provider := a.Provider()
 		a.sess.SetMessages(ai.RepairMissingToolResults(a.sess.Messages))
@@ -587,6 +621,9 @@ if a.toolProfile != nil {
 		}
 
 		if stop != ai.StopReasonTools || len(toolCalls) == 0 {
+			if continueTurn := a.injectLongRunContext(runMeta, false); continueTurn {
+				continue // anti-stall: nudge injected, loop again
+			}
 			a.Emit(EventDone, text)
 			a.tryPersist()
 			if firstStandardTurn {
@@ -619,6 +656,22 @@ if a.toolProfile != nil {
 		resultMsg := buildToolResultMessage(toolCalls, executedCalls)
 		a.sess.AddMessage(resultMsg)
 		a.recordToTranscript(resultMsg)
+		a.injectLongRunContext(runMeta, true)
+
+		// The finish tool is the structured completion signal: end the turn
+		// chain with its summary instead of looping back to the provider.
+		for _, executed := range executedCalls {
+			if executed.call.Name != "finish" {
+				continue
+			}
+			finalText := executed.result.Summary
+			if finalText == "" || finalText == "completed" || finalText == "blocked" {
+				finalText = executed.result.Content
+			}
+			a.Emit(EventDone, finalText)
+			a.tryPersist()
+			return nil
+		}
 	}
 }
 
@@ -801,11 +854,29 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 	if !ok {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("unknown tool: %s", tc.Name)}, nil
 	}
+
+	// Pre-tool hooks may veto before any approval or execution work happens.
+	if blocked, reason := a.runPreToolHooks(ctx, tc); blocked {
+		return tools.Result{IsError: true, Content: reason}, nil
+	}
+
+	// Finish gate: unevidenced completion is denied while work remains.
+	if tc.Name == "finish" && a.promptSystem != nil {
+		summary, _ := tools.StringArg(tc.Args, "summary")
+		evidence, _ := tools.StringArg(tc.Args, "evidence")
+		if allowed, reason := a.finishGate(summary, evidence); !allowed {
+			return tools.Result{IsError: true, Content: reason}, nil
+		}
+	}
+
 	approvalScope := a.scopedToolApprovalKey(tc, t)
 	legacyScope := legacyToolApprovalScope(tc, t)
 
 	a.mu.RLock()
 	allowed := a.sessionAllowedTools[approvalScope] || a.sessionAllowedTools[legacyScope]
+	if !allowed {
+		allowed = a.shellGrantMatches(approvalScope)
+	}
 	a.mu.RUnlock()
 
 	if !allowed && t.RequiresConfirmation(a.cfg.Mode) {
@@ -828,7 +899,19 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 		}
 	}
 
-	return t.Execute(ctx, tc.Args)
+	// Per-tool timeout from metadata; zero keeps the caller's deadline.
+	if meta := tools.MetaOf(t); meta.Timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, meta.Timeout)
+		defer cancel()
+	}
+
+	result, err := t.Execute(ctx, tc.Args)
+	a.runPostToolHooks(ctx, tc, result)
+	if path := toolAccessedPath(tc.Name, tc.Args); path != "" && a.skillPaths != nil {
+		a.skillPaths.record(path)
+	}
+	return result, err
 }
 
 func toolApprovalScope(tc ai.ToolCall, t tools.Tool) string {
@@ -841,7 +924,7 @@ func toolApprovalScope(tc ai.ToolCall, t tools.Tool) string {
 // never apply in another. When the work dir is unknown the plain scope is
 // used so lookups stay consistent within a session.
 func (a *Agent) scopedToolApprovalKey(tc ai.ToolCall, t tools.Tool) string {
-	scope := toolApprovalScope(tc, t)
+	scope := a.buildApprovalScope(tc, t)
 	if a.workDir == "" {
 		return scope
 	}
@@ -1017,10 +1100,13 @@ func buildToolSchemas(reg *tools.Registry) []ai.ToolSchema {
 
 func (a *Agent) buildActiveToolSchemas() []ai.ToolSchema {
 	all := buildToolSchemas(a.tools)
+	var schemas []ai.ToolSchema
 	if a.toolProfile != nil {
-		return filterToolSchemas(all, a.toolProfile)
+		schemas = filterToolSchemas(all, a.toolProfile)
+	} else {
+		schemas = all
 	}
-	return all
+	return applyModeMask(schemas, a.currentMode())
 }
 
 func (a *Agent) selectToolProfile(ctx context.Context, userPrompt string) map[string]bool {
@@ -1151,6 +1237,7 @@ func readOnlyToolNames() map[string]bool {
 		"lsp_diagnostics": true, "list_shells": true, "read_shell": true,
 		"list_agents": true, "read_agent": true,
 		"web_search": true, "web_fetch": true,
+		"git_status": true, "git_diff": true, "git_log": true,
 	}
 	for name := range contextToolNames() {
 		names[name] = true
@@ -1163,6 +1250,9 @@ func verificationToolNames() map[string]bool {
 	names["bash"] = true
 	names["write_shell"] = true
 	names["stop_shell"] = true
+	names["finish"] = true
+	names["todo_write"] = true
+	names["wait"] = true
 	return names
 }
 
@@ -1333,117 +1423,37 @@ func (a *Agent) RegisterContextTools() ContextToolRegistration {
 			"context_bucket_create", "context_bucket_list", "context_bucket_get",
 			"context_bucket_set", "context_bucket_delete", "context_list_buckets",
 			"context_get_intent", "context_get_init",
-			"todo_list", "todo_next",
+			"todo_list", "todo_next", "todo_write",
 		)
+
+		// Surface model-driven todo mutations as UI events.
+		a.promptSystem.GetTaskState().SetTodoListener(a.notifyTodos)
 	} else if a.tools == nil {
 		return ContextToolRegistration{Enabled: false, Reason: "tool registry unavailable"}
 	} else {
 		reason = "prompt state tools registered"
 	}
 
+	// Register the builtin expansion suite: git, wait, multi_edit, finish.
+	if a.tools != nil {
+		gitpkg.RegisterAll(a.tools)
+		a.tools.Register(toolsShell.NewWaitTool())
+		a.tools.Register(toolsFS.NewMultiEditTool(a.cfg))
+		a.tools.Register(toolsInteraction.NewFinishTool())
+		subagent.RegisterControlTool(a.tools)
+		names = append(names,
+			"git_status", "git_diff", "git_log", "git_add", "git_commit",
+			"git_branch", "git_checkout", "git_stash",
+			"wait", "multi_edit", "finish", "agent_control",
+		)
+
+		// Load user-defined agents from .agents/*.md in the workspace.
+		if loaded, err := subagent.LoadAgentDefinitions(filepath.Join(a.workDir, ".agents")); err == nil && len(loaded) > 0 {
+			a.Emit(EventStatus, fmt.Sprintf("loaded %d custom agent(s): %s", len(loaded), strings.Join(loaded, ", ")))
+		}
+	}
+
 	return ContextToolRegistration{Enabled: len(names) > 0, Names: names, Reason: reason}
-}
-
-// runCoordinatorIfNeeded runs the coordinator for complex tasks that benefit from multi-agent execution.
-// Returns (result string, error). If result is non-nil and error is nil, the task is complete.
-func (a *Agent) runCoordinatorIfNeeded(ctx context.Context, prompt string) (string, error) {
-	// Only use coordinator for complex tasks when enabled
-	if !a.cfg.Coordinator.Enabled {
-		return "", nil
-	}
-
-	// Use reasoning engine to analyze and plan
-	re := a.ReasoningEngine()
-	if re == nil {
-		return "", fmt.Errorf("reasoning engine not available")
-	}
-
-	// Analyze the request with a timeout.
-	analyzeCtx, analyzeCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer analyzeCancel()
-
-	analysis, err := re.Analyze(analyzeCtx, prompt)
-	if err != nil {
-		return "", fmt.Errorf("analysis failed: %w", err)
-	}
-
-	// Only use coordinator for moderate+ complexity tasks
-	complexityOrder := map[reasoning.Complexity]int{
-		reasoning.ComplexityTrivial:  0,
-		reasoning.ComplexitySimple:   1,
-		reasoning.ComplexityModerate: 2,
-		reasoning.ComplexityComplex:  3,
-		reasoning.ComplexityMajor:    4,
-	}
-	if complexityOrder[analysis.Complexity] < complexityOrder[reasoning.ComplexityModerate] {
-		return "", nil // Let standard loop handle simple tasks
-	}
-
-	a.Emit(EventStatus, fmt.Sprintf("Coordinator: analyzing task (complexity: %s)", analysis.Complexity))
-
-	// Create execution plan with a timeout (directory walks can be slow on large repos).
-	planCtx, planCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer planCancel()
-
-	execPlan, err := re.Plan(planCtx, analysis)
-	if err != nil {
-		return "", fmt.Errorf("planning failed: %w", err)
-	}
-
-	a.Emit(EventStatus, fmt.Sprintf("Coordinator: plan created with %d tasks, %d phases", len(execPlan.Tasks), len(execPlan.ExecutionOrder)))
-
-	// Convert to coordinator plan
-	coordPlan, err := coordinator.FromReasoningPlan(ctx, execPlan)
-	if err != nil {
-		return "", fmt.Errorf("plan conversion failed: %w", err)
-	}
-
-	a.Emit(EventStatus, fmt.Sprintf("Coordinator: converted plan with %d tasks, %d phases", len(coordPlan.Tasks), len(coordPlan.Phases)))
-
-	// Get coordinator engine
-	coord := a.Coordinator()
-	if coord == nil {
-		return "", fmt.Errorf("coordinator not available")
-	}
-
-	a.Emit(EventStatus, fmt.Sprintf("Coordinator: executing plan with %d phases", len(coordPlan.Phases)))
-
-	// Execute the plan with a timeout to prevent blocking forever.
-	coordCtx, coordCancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer coordCancel()
-
-	result, err := coord.Execute(coordCtx, coordPlan)
-	if err != nil {
-		return "", fmt.Errorf("coordinator execution failed: %w", err)
-	}
-
-	// Format result
-	if result != nil && result.FinalOutput != "" {
-		return fmt.Sprintf("## Coordinator Result\n\n%s", result.FinalOutput), nil
-	}
-
-	return "Coordinator completed task", nil
-}
-
-// processFirstMessageWithPromptSystem processes the first user message through the new prompt system.
-// Returns the categorized request, initial prompt parts to send to the provider, and any error.
-func (a *Agent) processFirstMessageWithPromptSystem(ctx context.Context, userPrompt string) (*promptpkg.CategorizedRequest, []promptpkg.PromptPart, error) {
-	// Get available files from context manager
-	mgr := a.ContextManager()
-	var availableFiles []string
-	if mgr != nil {
-		availableFiles = mgr.RecentFiles(20)
-	}
-
-	// Process through the new prompt system
-	parts, err := a.promptSystem.ProcessUserMessage(ctx, userPrompt, a.workDir, availableFiles)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	// Get the categorized request
-	categorized := a.promptSystem.Manager.GetCurrentRequest()
-	return categorized, parts, nil
 }
 
 // initializeCoordinatorWithPromptSystem initializes the coordinator with the prompt system.
@@ -1470,31 +1480,26 @@ func (a *Agent) initializeCoordinatorWithPromptSystem() error {
 	return nil
 }
 
-// getSystemPrompt returns the system prompt using the new prompt system.
-// Falls back to legacy buildSystemPrompt if prompt system is not available or exhausted.
+// getSystemPrompt returns THE system prompt. There is a single builder —
+// no legacy fallback, no assistant/coder split (see systemprompt.go).
 func (a *Agent) getSystemPrompt(ctx context.Context, provider ai.Provider) string {
-	if a.promptSystem != nil {
-		return a.buildPromptSystemPrompt(ctx, provider)
-	}
-
-	// Fallback to legacy buildSystemPrompt
-	return buildSystemPrompt(a.cfg, a.tools, a.sess.Messages, a.ContextManager())
+	return a.buildUnifiedSystemPrompt(ctx, provider)
 }
 
 // getNextTodoPrompt gets the next todo execution prompt from the prompt system
 func (a *Agent) getNextTodoPrompt() *promptpkg.PromptPart {
-	coderCtx := a.promptSystem.GetCoderContext()
-	if coderCtx == nil || len(coderCtx.TodoItems) == 0 {
+	turnCtx := a.promptSystem.GetTurnContext()
+	if turnCtx == nil || len(turnCtx.TodoItems) == 0 {
 		return nil
 	}
 
-	for i, todo := range coderCtx.TodoItems {
+	for i, todo := range turnCtx.TodoItems {
 		if todo.Status == promptpkg.TodoStatusPending {
 			// Check dependencies
 			depsMet := true
 			for _, depID := range todo.Dependencies {
 				found := false
-				for _, t := range coderCtx.TodoItems {
+				for _, t := range turnCtx.TodoItems {
 					if t.ID == depID && t.Status == promptpkg.TodoStatusCompleted {
 						found = true
 						break
@@ -1507,184 +1512,14 @@ func (a *Agent) getNextTodoPrompt() *promptpkg.PromptPart {
 			}
 			if depsMet {
 				// Mark as in progress
-				coderCtx.TodoItems[i].Status = promptpkg.TodoStatusInProgress
-				return a.promptSystem.Manager.CoderPrompts().BuildExecutionPrompt(coderCtx, &coderCtx.TodoItems[i], nil)
+				turnCtx.TodoItems[i].Status = promptpkg.TodoStatusInProgress
+				return a.promptSystem.Manager.TaskPrompts().BuildExecutionPrompt(turnCtx, &turnCtx.TodoItems[i], nil)
 			}
 		}
 	}
 	return nil
 }
 
-// buildPromptSystemPrompt builds a system prompt using the new prompt system
-func (a *Agent) buildPromptSystemPrompt(ctx context.Context, provider ai.Provider) string {
-	var sb strings.Builder
-
-	// Identity
-	sb.WriteString("# Identity\n")
-	sb.WriteString(fmt.Sprintf("You are Automergent %s, a senior lead software engineer and autonomous agent.\n\n", version.Version))
-
-	// Init phase results from the prompt system (files already explored)
-	if initResults := a.promptSystem.GetInitResults(); initResults != nil && len(initResults.FilesFound) > 0 {
-		sb.WriteString("## Pre-Explored Context (init phase ALREADY executed — exploration is DONE)\n")
-		sb.WriteString("IMPORTANT: The codebase was already explored for this request. Do NOT call glob, list_directory, or broad search tools — they are disabled for this request.\n")
-		sb.WriteString("START by reading the most relevant files below with read_file.\n\n")
-		sb.WriteString(fmt.Sprintf("Discovered files (%d):\n", len(initResults.FilesFound)))
-		for i, f := range initResults.FilesFound {
-			if i >= 30 {
-				sb.WriteString(fmt.Sprintf("- ... and %d more\n", len(initResults.FilesFound)-30))
-				break
-			}
-			sb.WriteString(fmt.Sprintf("- %s\n", f))
-		}
-		if len(initResults.CodeSnippets) > 0 {
-			sb.WriteString("\nContents already loaded (no need to re-read):\n")
-			for path := range initResults.CodeSnippets {
-				sb.WriteString(fmt.Sprintf("- %s\n", path))
-			}
-		}
-		if len(initResults.Errors) > 0 {
-			sb.WriteString(fmt.Sprintf("\n(init phase had %d failed actions — ignore those targets)\n", len(initResults.Errors)))
-		}
-		sb.WriteString("\n")
-	}
-
-	// Current task context
-	if intentSet := a.promptSystem.GetCurrentIntentSet(); intentSet != nil {
-		sb.WriteString(fmt.Sprintf("## Current Request\n%s\n\n", intentSet.OriginalPrompt))
-
-		// Show intents
-		sb.WriteString("## Identified Intents\n")
-		for _, intent := range intentSet.Intents {
-			sb.WriteString(fmt.Sprintf("- %s (priority: %d)\n", intent.Type, intent.Priority))
-		}
-		sb.WriteString("\n")
-
-		// Todo progress from tasks
-		tasks := a.promptSystem.GetCurrentTasks()
-		if len(tasks) > 0 {
-			sb.WriteString("## Task Progress\n")
-			for _, task := range tasks {
-				sb.WriteString(fmt.Sprintf("⏳ %s (priority: %d)\n", task.Description, task.Priority))
-			}
-			sb.WriteString("\n")
-		}
-
-		// Working areas
-		var workingAreas []string
-		for _, task := range tasks {
-			if files, ok := task.Context["files_found"].([]string); ok {
-				workingAreas = append(workingAreas, files...)
-			}
-		}
-		if len(workingAreas) > 0 {
-			sb.WriteString("## Working Areas\n")
-			for _, f := range workingAreas {
-				sb.WriteString(fmt.Sprintf("- %s\n", f))
-			}
-			sb.WriteString("\n")
-		}
-
-		// Constraints from tasks
-		var allContextNeeds []promptpkg.ContextNeed
-		for _, task := range tasks {
-			if needs, ok := task.Context["context_needs"].([]promptpkg.ContextNeed); ok {
-				allContextNeeds = append(allContextNeeds, needs...)
-			}
-		}
-		if len(allContextNeeds) > 0 {
-			sb.WriteString("## Context Requirements\n")
-			for _, need := range allContextNeeds {
-				if need.InjectTiming != promptpkg.InjectTimingDeferred {
-					sb.WriteString(fmt.Sprintf("- %s: %s\n", need.Key, need.Description))
-				}
-			}
-			sb.WriteString("\n")
-		}
-	}
-
-	sb.WriteString("## Tool Policy\nUse only the native tools exposed for this request. Do not invent unavailable tools.\n\n")
-	sb.WriteString(renderLiveToolContract(a.tools))
-
-	// Safety protocols (abbreviated)
-	sb.WriteString("## Safety & Blast Radius\n")
-	sb.WriteString("- **Safe:** Reading, searching, local tests\n")
-	sb.WriteString("- **Moderate:** Creating/editing files, adding deps\n")
-	sb.WriteString("- **Destructive:** Deleting, force push, rm -rf, drop tables\n")
-	sb.WriteString("  - MUST describe risk and wait for confirmation\n\n")
-
-	// Project context
-	if mgr := a.ContextManager(); mgr != nil {
-		cwd, _ := os.Getwd()
-		sb.WriteString(fmt.Sprintf("## Project Context\n- Working Directory: %s\n", cwd))
-
-		// Recent files
-		if files := mgr.RecentFiles(10); len(files) > 0 {
-			sb.WriteString("- Recent Files:\n")
-			for _, f := range files {
-				sb.WriteString(fmt.Sprintf("  - %s\n", f))
-			}
-		}
-		sb.WriteString("\n")
-	}
-
-	// Conversation summary if long
-	if len(a.sess.Messages) > 15 {
-		sb.WriteString("[Note: Conversation history is long. Focus on recent state and established plan.]\n\n")
-	}
-
-	return sb.String()
-}
-
-// renderLiveToolContract gives the model an actionable contract for the
-// native file and verification tools. Schemas describe arguments, but this
-// explains sequencing and prevents the model from silently skipping edits.
-func renderLiveToolContract(reg *tools.Registry) string {
-	if reg == nil { return "" }
-	available := func(name string) bool { _, ok := reg.Get(name); return ok }
-	var sb strings.Builder
-	sb.WriteString("## Native Tool Contract\n")
-	sb.WriteString("Use tools to inspect and change the repository; never claim a change was made without a successful tool result. Read the current file before editing it.\n")
-	if available("read_file") || available("view") {
-		sb.WriteString("- Read: use `read_file` (or `view`) with `path`; use `start_line`/`end_line` when supported.\n")
-	}
-	if available("search") || available("grep") || available("glob") {
-		sb.WriteString("- Explore: use `search`/`grep` for symbols and `glob` for file discovery before choosing files.\n")
-	}
-	if available("edit_file") {
-		sb.WriteString("- Edit existing files: use `edit_file` with `path`, exact `old_str`, and `new_str`; set `replace_all` only when every match should change.\n")
-	}
-	if available("write_file") {
-		sb.WriteString("- Replace or create complete content: use `write_file` with `path` and `content`; prefer `edit_file` for localized changes.\n")
-	}
-	if available("create_file") {
-		sb.WriteString("- New file: use `create_file` with `path` and `content`; do not use an unavailable editor or shell redirection.\n")
-	}
-	if available("bash") || available("run_command") {
-		sb.WriteString("- Verify: after edits, run the narrowest relevant build/test command with `bash`/`run_command`, then fix failures or report them.\n")
-	}
-	sb.WriteString("Tool calls are grouped under the active todo. Keep exploration, implementation, and verification evidence in their respective context buckets.\n\n")
-	return sb.String()
-}
-
-func (a *Agent) convertCoordinatorConfig(cfg config.CoordinatorConfig) coordinator.CoordinatorConfig {
-	return coordinator.CoordinatorConfig{
-		MaxWorkers:         10,
-		WorkersPerRole:     map[coordinator.AgentRole]int{},
-		ModelOverrides:     map[coordinator.AgentRole]string{},
-		DefaultTimeout:     5 * time.Minute,
-		MaxRetries:         3,
-		EnableWorkStealing: true,
-		QualityThreshold:   0.7,
-		ConsensusThreshold: 2,
-		ResourceLimits: coordinator.ResourceLimits{
-			MaxTokensPerTask:   100000,
-			MaxConcurrentTasks: 5,
-			MaxMemoryMB:        512,
-			RateLimitPerMinute: 60,
-		},
-		EventsBufferSize: 1024,
-	}
-}
 
 // ContextManager returns the persistent context manager, initializing it on first use.
 func (a *Agent) ContextManager() *contextmgr.Manager {
@@ -1741,6 +1576,26 @@ func (a *Agent) ReasoningEngine() *reasoning.Engine {
 	cfg.DefaultTimeout = 5 * time.Minute
 	a.reasoningEngine = reasoning.NewEngine(cfg)
 	return a.reasoningEngine
+}
+
+func (a *Agent) convertCoordinatorConfig(cfg config.CoordinatorConfig) coordinator.CoordinatorConfig {
+	return coordinator.CoordinatorConfig{
+		MaxWorkers:         10,
+		WorkersPerRole:     map[coordinator.AgentRole]int{},
+		ModelOverrides:     map[coordinator.AgentRole]string{},
+		DefaultTimeout:     5 * time.Minute,
+		MaxRetries:         3,
+		EnableWorkStealing: true,
+		QualityThreshold:   0.7,
+		ConsensusThreshold: 2,
+		ResourceLimits: coordinator.ResourceLimits{
+			MaxTokensPerTask:   100000,
+			MaxConcurrentTasks: 5,
+			MaxMemoryMB:        512,
+			RateLimitPerMinute: 60,
+		},
+		EventsBufferSize: 1024,
+	}
 }
 
 // runPromptSystemPipeline runs the new internal/prompt system pipeline for a user request.

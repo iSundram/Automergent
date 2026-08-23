@@ -16,11 +16,12 @@ type Header struct {
 	model          string
 	provider       string
 	mode           string
-	phase          string // "research", "plan", "execute"
-	activeTokens   int    // tokens in current prompt (active context)
-	totalTokens    int    // cumulative session tokens
+	phase          string  // "research", "plan", "execute"
+	activeTokens   int     // tokens in current prompt (active context)
+	totalTokens    int     // cumulative session tokens
 	maxTokens      int
 	adaptiveWeight float64 // learned token estimation weight (1.0 = perfect)
+	cost           float64 // session cost in USD
 }
 
 // NewHeader creates a new Header component.
@@ -40,6 +41,7 @@ func (h *Header) SetTokens(n int)             { h.totalTokens = n }
 func (h *Header) SetActiveTokens(n int)       { h.activeTokens = n }
 func (h *Header) SetMaxTokens(n int)          { h.maxTokens = n }
 func (h *Header) SetAdaptiveWeight(w float64) { h.adaptiveWeight = w }
+func (h *Header) SetCost(usd float64)         { h.cost = usd }
 
 func (h *Header) getPhaseStyle() lipgloss.Style {
 	base := lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(h.styles.T.Background)
@@ -80,17 +82,19 @@ func (h *Header) renderProgressBar(width int) string {
 	}
 	blocks := int(float64(width) * ratio)
 
-	barStyle := lipgloss.NewStyle().Foreground(h.styles.T.Accent)
+	barColor := h.styles.T.Accent
 	if ratio > 0.8 {
-		barStyle = lipgloss.NewStyle().Foreground(h.styles.T.Red)
+		barColor = h.styles.T.Red
 	} else if ratio > 0.5 {
-		barStyle = lipgloss.NewStyle().Foreground(h.styles.T.Yellow)
+		barColor = h.styles.T.Yellow
 	}
 
+	barStyle := lipgloss.NewStyle().Foreground(barColor)
 	full := strings.Repeat("█", blocks)
 	empty := strings.Repeat("░", width-blocks)
 
-	return barStyle.Render(full) + lipgloss.NewStyle().Foreground(h.styles.T.Muted).Render(empty)
+	pct := lipgloss.NewStyle().Foreground(barColor).Bold(true).Render(fmt.Sprintf("%2.0f%%", ratio*100))
+	return barStyle.Render(full) + lipgloss.NewStyle().Foreground(h.styles.T.Muted).Render(empty) + " " + pct
 }
 
 // View renders the header bar as an adaptive modern HUD.
@@ -139,24 +143,25 @@ func (h Header) View() string {
 		lipgloss.NewStyle().Foreground(h.styles.T.Text).Render(modelStr),
 	)
 
-	// 3. Right Section: Tokens, Adaptive Weight & Bar
-	// Always show active/total format
+	// 3. Right Section: Cost, Tokens, Adaptive Weight & Bar
 	tokenStr := fmt.Sprintf("%s/%s", formatTokens(h.activeTokens), formatTokens(h.totalTokens))
-	var usageInfo string
+	usageInfo := lipgloss.NewStyle().Foreground(h.styles.T.Subtext).Render(tokenStr)
+	if h.cost > 0 {
+		costStyle := lipgloss.NewStyle().Foreground(h.styles.T.Green)
+		usageInfo = costStyle.Render(fmt.Sprintf("$%.4f", h.cost)) + " │ " + usageInfo
+	}
 	if h.adaptiveWeight > 0 {
 		weightStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)
 		if h.adaptiveWeight < 0.8 || h.adaptiveWeight > 1.2 {
 			weightStyle = lipgloss.NewStyle().Foreground(h.styles.T.Yellow)
 		}
-		usageInfo = lipgloss.NewStyle().Foreground(h.styles.T.Subtext).Render(tokenStr) + " " + weightStyle.Render(fmt.Sprintf("w:%.2f", h.adaptiveWeight))
-	} else {
-		usageInfo = lipgloss.NewStyle().Foreground(h.styles.T.Subtext).Render(tokenStr)
+		usageInfo += " " + weightStyle.Render(fmt.Sprintf("w:%.2f", h.adaptiveWeight))
 	}
 
 	barWidth := 0
-	if h.width > 120 {
+	if h.width > 130 {
 		barWidth = 15
-	} else if h.width > 90 {
+	} else if h.width > 100 {
 		barWidth = 10
 	}
 

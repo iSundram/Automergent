@@ -8,8 +8,11 @@ import (
 )
 
 func main() {
-	// Create a new prompt system
-	ps := prompt.NewPromptSystem()
+	// Create a new prompt system with mock LLM client
+	mockClient := &prompt.MockLLMClient{
+		Response: `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add a new REST API endpoint","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
+	}
+	ps := prompt.NewPromptSystemWithLLM(prompt.DefaultPromptConfig(), nil, "/home/user/project", mockClient, nil)
 
 	// Example 1: Process a new feature request
 	fmt.Println("=== Example 1: New Feature Request ===")
@@ -33,7 +36,12 @@ func main() {
 
 	// Example 2: Process a debug request
 	fmt.Println("\n=== Example 2: Debug Request ===")
-	parts2, err := ps.ProcessUserMessage(
+	mockClient2 := &prompt.MockLLMClient{
+		Response: `{"intents":[{"type":"debug","priority":1,"confidence":0.9,"raw_text":"Debug why JWT failing","parameters":{"error_type":"token"},"dependencies":[]}],"requires_init":true,"init_goal":"Understand...","init_actions":[{"tool":"grep","target":"error","reason":"Find errors"}]}`,
+	}
+	ps2 := prompt.NewPromptSystemWithLLM(prompt.DefaultPromptConfig(), nil, "/home/user/project", mockClient2, nil)
+
+	parts2, err := ps2.ProcessUserMessage(
 		context.Background(),
 		"Debug why the JWT token validation is failing with 'token expired' error",
 		"/home/user/project",
@@ -62,9 +70,9 @@ func main() {
 
 	// Example 4: Complete a todo and inject context
 	fmt.Println("\n=== Example 4: Complete Todo & Inject Context ===")
-	coderCtx := ps.GetCoderContext()
-	if coderCtx != nil && len(coderCtx.TodoItems) > 0 {
-		todoID := coderCtx.TodoItems[0].ID
+	turnCtx := ps.GetTurnContext()
+	if turnCtx != nil && len(turnCtx.TodoItems) > 0 {
+		todoID := turnCtx.TodoItems[0].ID
 		ps.CompleteCurrentTask("") // We need a different way to complete todo
 		// Actually use the manager directly for this demo
 		_ = todoID

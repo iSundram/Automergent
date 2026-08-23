@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"image/color"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,10 +27,12 @@ import (
 	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/debug"
 	"github.com/iSundram/Automergent/internal/session"
+	"github.com/iSundram/Automergent/internal/shared"
 	"github.com/iSundram/Automergent/internal/tools"
-	"github.com/iSundram/Automergent/internal/tui/command"
+	"github.com/iSundram/Automergent/internal/tui/commands"
 	"github.com/iSundram/Automergent/internal/tui/components"
 	"github.com/iSundram/Automergent/internal/tui/keys"
+	"github.com/iSundram/Automergent/internal/tui/render"
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
@@ -37,6 +40,7 @@ type agentEventMsg struct{ ev agent.Event }
 type modelsFetchedMsg []ai.Model
 type clearCtrlCStatusMsg struct{}
 type hideDiffPaneMsg struct{} // Message to safely hide diff pane from main loop
+type streamTickMsg struct{}   // Coalesced streaming render tick (~80ms)
 type sessionsLoadedMsg struct {
 	sessions []*session.Session
 }
@@ -65,6 +69,8 @@ type App struct {
 	confirm           components.Confirm
 	coAuthorConfirm   components.CoAuthorConfirm
 	sessionBrowser    components.SessionBrowser
+	selector          components.SelectorOverlay
+	selectorAction    func(index int)
 	lspPanel          components.LSPPanel
 	stats             components.Stats
 	helpOverlay       components.HelpOverlay
@@ -75,11 +81,24 @@ type App struct {
 	thinking          bool
 	showSessionPicker bool
 	workDir           string
-	// swallowNextKey drops the next key event delivered to overlays (session
-	// browser, confirm dialogs) so the key that triggered a command cannot be
-	// misinterpreted as a selection inside the overlay it just opened.
+	// swallowNextKey drops the next key event delivered to the session browser
+	// so the key that opened it (ctrl+s, or /sessions from the palette) cannot
+	// be misinterpreted as a selection inside it.
 	swallowNextKey bool
 	statusMsg      string
+
+	// commands is the app-wide command registry: the single source of truth
+	// for slash-command dispatch, palette items and help documentation.
+	commands *commands.Registry
+
+	// Custom command hot-reload state (see refreshCustomCommands).
+	customCmdCount int
+	customWarnKey  string
+
+	// Conversation rewind points (captured per agent turn) and extra
+	// read-only search roots added via /add-dir.
+	checkpoints     []conversationCheckpoint
+	extraSearchDirs []string
 
 	showFileTree  bool
 	showHelp      bool
@@ -105,11 +124,18 @@ type App struct {
 	pendingCommitReplyCh  chan agent.ConfirmationResponse
 	pendingProjectPath    string
 	projectApprovalCh     chan agent.ConfirmationResponse
+
+	// Streaming render coalescing + live telemetry.
+	streamTickPending bool
+	runTokens         int       // token events observed in the current run
+	runStart          time.Time // when the current run started
+	tokRate           int       // smoothed tokens/sec shown while thinking
 }
 
 func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, persist *session.PersistenceManager, initialPrompt string, showSessionPicker bool) *App {
 	theme := themes.Get(cfg.Theme)
 	styles := themes.NewStyles(theme)
+	render.SetTheme(theme)
 	kb := keys.Get(cfg.Keybindings)
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -132,6 +158,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		confirm:            components.NewConfirm(styles),
 		coAuthorConfirm:    components.NewCoAuthorConfirm(styles, cfg),
 		sessionBrowser:     components.NewSessionBrowser(styles),
+		selector:           components.NewSelectorOverlay(styles),
 		lspPanel:           components.NewLSPPanel(styles),
 		stats:              components.NewStats(styles),
 		helpOverlay:        components.NewHelpOverlay(styles),
@@ -144,8 +171,27 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		statusMsg:          "Ready",
 		focus:              "input",
 		availableProviders: []string{"google"},
+		commands:           commands.Default(),
 	}
 	sort.Strings(app.availableProviders)
+	if wd, err := os.Getwd(); err == nil {
+		app.workDir = wd
+	}
+	// Load markdown custom commands (project + user roots) before help rows
+	// are derived, so they appear in the palette and help overlay.
+	if n, warnings := commands.LoadProjectAndUserCommands(app.commands, app.workDir); n > 0 || len(warnings) > 0 {
+		var msg string
+		switch {
+		case n > 0 && len(warnings) > 0:
+			msg = fmt.Sprintf("Loaded %d custom command(s), %d skipped:\n%s", n, len(warnings), strings.Join(warnings, "\n"))
+		case n > 0:
+			msg = fmt.Sprintf("Loaded %d custom command(s) from .automergent/commands", n)
+		default:
+			msg = "Custom command problems:\n" + strings.Join(warnings, "\n")
+		}
+		app.conversation.AddMessage("system", msg, false)
+	}
+	app.helpOverlay.SetSlashCommands(app.commands.HelpRows())
 	app.header.SetModel(cfg.Model)
 	app.header.SetProvider(cfg.Provider)
 	app.header.SetMode(cfg.Mode)
@@ -153,9 +199,6 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	app.header.SetTokens(sess.TotalInputTokens + sess.TotalOutputTokens)
 	app.stats.InputTokens = sess.TotalInputTokens
 	app.stats.OutputTokens = sess.TotalOutputTokens
-	if wd, err := os.Getwd(); err == nil {
-		app.workDir = wd
-	}
 	if len(sess.Messages) > 0 {
 		// Direct CLI resume (`automergent -s <id>`) loads the session before
 		// the TUI starts, so replay it here just as picker-based resume does.
@@ -179,6 +222,8 @@ func (a *App) Init() tea.Cmd {
 		a.input.Focus(),
 		a.spin.Tick(),
 		a.fileTree.Load("."),
+		// Detect the terminal's background color so the theme can adapt.
+		func() tea.Msg { return tea.RequestBackgroundColor() },
 	}
 
 	if a.showSessionPicker && a.storage != nil {
@@ -243,12 +288,18 @@ func (a *App) waitForCoordinatorEvent() tea.Cmd {
 }
 
 func (a *App) startAgent(prompt string) tea.Cmd {
+	// Checkpoint the pre-turn conversation so /rewind can return here.
+	a.captureCheckpoint(prompt)
 	prompt = a.expandPrompt(prompt)
 	if strings.HasPrefix(prompt, "!") {
 		return a.runShellPassthrough(prompt[1:])
 	}
 	a.thinking = true
 	a.streamedReply = false
+	a.runTokens = 0
+	a.runStart = time.Now()
+	a.tokRate = 0
+	a.spin.SetLabel("thinking")
 	a.spin.Start()
 	a.conversation.AddMessage("user", prompt, false)
 	a.updateActiveTokens()
@@ -256,6 +307,13 @@ func (a *App) startAgent(prompt string) tea.Cmd {
 	a.layout() // Adjust for thinking spinner
 	go func() { _ = a.ag.Run(a.ctx, prompt) }()
 	return a.waitForAgentEvent()
+}
+
+// scheduleStreamTick arms the coalesced streaming render timer.
+func scheduleStreamTick() tea.Cmd {
+	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg {
+		return streamTickMsg{}
+	})
 }
 
 func (a *App) expandPrompt(prompt string) string {
@@ -369,6 +427,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		sp, cmd := a.spin.Update(msg)
 		a.spin = sp
 		cmds = append(cmds, cmd)
+	case streamTickMsg:
+		a.streamTickPending = false
+		a.conversation.RenderIfDirty()
+		if a.thinking && !a.runStart.IsZero() {
+			if elapsed := time.Since(a.runStart).Seconds(); elapsed > 0.5 && a.runTokens > 0 {
+				rate := int(float64(a.runTokens) / elapsed)
+				// Smooth so the number doesn't flicker.
+				a.tokRate = (a.tokRate + rate) / 2
+				a.spin.SetLabel(fmt.Sprintf("thinking · %d tok/s", a.tokRate))
+			}
+		}
+		if a.conversation.NeedsRender() {
+			a.streamTickPending = true
+			cmds = append(cmds, scheduleStreamTick())
+		}
 	case components.FileTreeLoadedMsg:
 		a.fileTree.SetItems(m.Items)
 	case components.SessionSelectedMsg:
@@ -376,6 +449,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if err := a.restoreSession(m.Session); err != nil {
 				a.statusBar.SetStatus("Session loaded (provider switch failed: " + err.Error() + ")")
 			}
+		}
+	case components.SelectorSelectedMsg:
+		if a.selectorAction != nil {
+			a.selectorAction(m.Index)
+			a.layout()
 		}
 	case modelsFetchedMsg:
 		a.availableModels = m
@@ -426,6 +504,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.diffPane.Toggle()
 			a.layout()
 		}
+	case tea.BackgroundColorMsg:
+		a.handleBackgroundColor(m.Color)
 	}
 	if a.sessionBrowser.Visible() {
 		if a.swallowNextKey {
@@ -438,6 +518,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.layout()
 			}
 		}
+	}
+	if a.selector.Visible() {
+		if km, ok := msg.(tea.KeyMsg); ok && km.String() == "enter" {
+			if reason := a.selector.SelectedDisabledReason(); reason != "" {
+				a.statusBar.SetStatus(reason)
+			}
+		}
+		sel, cmd := a.selector.Update(msg)
+		a.selector = sel
+		cmds = append(cmds, cmd)
+		if !a.selector.Visible() {
+			a.layout()
+		}
+		return a, tea.Batch(cmds...)
 	}
 	if a.confirm.Visible() {
 		c, cmd := a.confirm.Update(msg)
@@ -486,18 +580,16 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 				}
 				trigger := a.input.TriggerType()
 				if trigger == "command" || trigger == "help" {
-					definition, known := lookupSlashCommand(sel.Value)
+					definition, known := a.commands.Lookup(sel.Value)
 					if known && definition.Immediate {
 						a.input.Reset()
 						a.palette.Hide()
 						a.layout()
 						return a.handleSlashCommand("/" + sel.Value)
 					}
-					// Commands that need a sub-palette (model, provider, etc.)
-					needsSubPalette := map[string]bool{
-						"model": true, "provider": true, "mode": true,
-					}
-					if needsSubPalette[sel.Value] {
+					// Argument sub-palettes (model/provider/mode) are declared in
+					// components.SlashSubPalettes — the same source TriggerType uses.
+					if components.SlashSubPalettes[sel.Value] {
 						a.input.InsertValue(sel.Value)
 						a.updatePalette()
 						a.palette.Show(a.palette.Items(), a.input.TriggerValue())
@@ -544,52 +636,31 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		a.cancel()
 		return tea.Quit
 	case "ctrl+d":
-		a.diffPane.Toggle()
-		a.layout()
-		return nil
+		return a.dispatchByName("diff")
 	case "ctrl+l":
 		a.lspPanel.Toggle()
 		a.layout()
 		return nil
 	case "ctrl+s":
-		if a.storage != nil {
-			sessions, err := a.storage.List()
-			if err != nil {
-				a.statusBar.SetStatus(fmt.Sprintf("Error listing sessions: %v", err))
-				return nil
-			}
-			a.sessionBrowser.SetSessions(a.projectSessions(sessions))
-		} else {
-			a.sessionBrowser.SetSessions([]*session.Session{a.sess})
-		}
-		a.sessionBrowser.SetCurrent(a.sess.ID)
-		a.sessionBrowser.Show()
-		a.swallowNextKey = true
-		a.layout()
+		// Same flow as /sessions: list, show browser, swallow the opening key.
+		a.showSessions()
 		return nil
 	case "ctrl+r":
-		a.conversation.SetReviewMode(!a.conversation.ReviewMode())
-		if a.conversation.ReviewMode() {
-			a.statusBar.SetStatus("Review mode enabled: full tool output")
-		} else {
-			a.statusBar.SetStatus("Review mode disabled: truncated tool output")
-		}
-		return nil
+		return a.dispatchByName("review-mode")
 	case "ctrl+u":
 		a.input.SetValue("")
 		a.updateActiveTokens()
 		return nil
+	case "ctrl+e":
+		label := a.conversation.CycleExpand()
+		a.statusBar.SetStatus(label)
+		return nil
 	case "ctrl+t":
-		a.showFileTree = !a.showFileTree
-		a.layout()
-		return nil
+		return a.dispatchByName("tree")
 	case "f1":
-		a.showHelp = true
-		return nil
+		return a.dispatchByName("help")
 	case "f2":
-		a.diffPane.Toggle()
-		a.layout()
-		return nil
+		return a.dispatchByName("diff")
 	case "tab":
 		if !a.palette.Visible() {
 			switch a.focus {
@@ -652,6 +723,11 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		a.updateActiveTokens()
 		trigger := a.input.TriggerType()
 		if trigger != "" {
+			// Opening the palette is the natural moment to pick up custom
+			// command files edited mid-session (hot reload).
+			if !a.palette.Visible() && (trigger == "command" || trigger == "help") {
+				a.refreshCustomCommands()
+			}
 			a.updatePalette()
 			a.palette.Show(a.palette.Items(), a.input.TriggerValue())
 			a.layout()
@@ -687,25 +763,8 @@ func (a *App) updatePalette() {
 	var items []components.PaletteItem
 	switch trigger {
 	case "help", "command":
-		allCmds := commandPaletteItems()
-		for i := range allCmds {
-			switch allCmds[i].Value {
-			case "cancel":
-				allCmds[i].Disabled = !a.thinking
-				if allCmds[i].Disabled {
-					allCmds[i].DisabledReason = "No active request"
-				}
-			case "review":
-				allCmds[i].Current = a.conversation.ReviewMode()
-			case "tree":
-				allCmds[i].Current = a.showFileTree
-			case "diff":
-				allCmds[i].Current = a.diffPane.Visible()
-			case "lsp":
-				allCmds[i].Current = a.lspPanel.Visible()
-			}
-		}
-		items = a.fuzzyFilter(allCmds, filter)
+		// Decorations (Current/Disabled) come from the registry definitions.
+		items = a.fuzzyFilter(a.commands.PaletteItems(a), filter)
 
 	case "model":
 		var modelItems []components.PaletteItem
@@ -753,6 +812,41 @@ func (a *App) updatePalette() {
 			{Label: "plan", Description: "Plan and inspect without edits", Value: "plan", Icon: "󰈙", Category: "Modes", Current: a.cfg.Mode == "plan"},
 		}
 		items = a.fuzzyFilter(modeItems, filter)
+
+	case "theme":
+		var themeItems []components.PaletteItem
+		for _, t := range a.AvailableThemes() {
+			themeItems = append(themeItems, components.PaletteItem{
+				Label: t, Description: "UI theme", Value: t, Icon: "󰏘", Category: "Themes",
+				Current: t == a.cfg.Theme,
+			})
+		}
+		items = a.fuzzyFilter(themeItems, filter)
+
+	case "keybindings":
+		var keyItems []components.PaletteItem
+		for _, k := range a.AvailableKeybindings() {
+			keyItems = append(keyItems, components.PaletteItem{
+				Label: k, Description: "Keybinding scheme", Value: k, Icon: "󰌌", Category: "Keybindings",
+				Current: k == a.cfg.Keybindings,
+			})
+		}
+		items = a.fuzzyFilter(keyItems, filter)
+
+	case "effort":
+		pc := a.ProviderConfig(a.Provider())
+		currentEffort := pc.Effort
+		if currentEffort == "" {
+			currentEffort = pc.ThinkingLevel
+		}
+		var effortItems []components.PaletteItem
+		for _, e := range []string{"minimal", "low", "medium", "high"} {
+			effortItems = append(effortItems, components.PaletteItem{
+				Label: e, Description: "Thinking effort", Value: e, Icon: "󰓅", Category: "Effort",
+				Current: e == currentEffort,
+			})
+		}
+		items = a.fuzzyFilter(effortItems, filter)
 
 	case "file":
 		var fileItems []components.PaletteItem
@@ -887,9 +981,15 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.conversation.AppendToken(tok)
 			if strings.TrimSpace(tok) != "" {
 				a.streamedReply = true
+				a.runTokens++
 			}
 		}
-		return a.waitForAgentEvent()
+		wait := a.waitForAgentEvent()
+		if !a.streamTickPending {
+			a.streamTickPending = true
+			return tea.Batch(wait, scheduleStreamTick())
+		}
+		return wait
 	case agent.EventThought:
 		if thought, ok := ev.Payload.(string); ok {
 			a.conversation.AppendThought(thought)
@@ -956,9 +1056,35 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			} else {
 				a.statusBar.SetStatus(msg)
 			}
-			// Add to conversation for auditability
+			// Add to conversation for auditability; info lines log plainly,
+			// only warnings/errors keep a level tag.
 			if msg != "" {
-				a.conversation.AddMessage("system", fmt.Sprintf("[%s] %s", lvl, msg), false)
+				if lvl == "" || lvl == "info" {
+					a.conversation.AddMessage("system", msg, false)
+				} else {
+					a.conversation.AddMessage("system", fmt.Sprintf("[%s] %s", lvl, msg), false)
+				}
+			}
+		}
+		return a.waitForAgentEvent()
+	case agent.EventInitAction:
+		// Init-phase prep work renders exactly like model-driven tool calls —
+		// part of the log, not separate chatter.
+		if p, ok := ev.Payload.(shared.InitActionEvent); ok {
+			args := initActionArgs(p.RawTool, p.Target)
+			argText := ""
+			if b, err := json.Marshal(args); err == nil {
+				argText = string(b)
+			}
+			id := "init:" + p.RawTool + ":" + p.Target
+			if p.Running {
+				a.conversation.AddToolLifecycleStart(id, p.Tool, argText, p.Target)
+			} else {
+				result := tools.Result{Content: p.Summary, IsError: p.Failed}
+				if p.Failed {
+					result.Content = p.Err
+				}
+				a.conversation.AddToolLifecycleDone(id, p.Tool, p.Target, p.Summary, p.Duration, result, a.conversation.ReviewMode())
 			}
 		}
 		return a.waitForAgentEvent()
@@ -970,6 +1096,9 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventDone:
 		a.thinking = false
 		a.spin.Stop()
+		a.spin.SetLabel("thinking")
+		a.streamTickPending = false
+		a.conversation.RenderIfDirty()
 		text, _ := ev.Payload.(string)
 		if a.streamedReply {
 			a.conversation.FinalizeStreamingWithContent(text)
@@ -981,7 +1110,9 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
 		if tel := a.ag.Telemetry(); tel != nil {
-			a.stats.TotalCost = tel.GetCostSummary().TotalCostUSD
+			cost := tel.GetCostSummary().TotalCostUSD
+			a.stats.TotalCost = cost
+			a.header.SetCost(cost)
 		}
 		a.header.SetTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
 		if calc := a.ag.AdaptiveCalculator(); calc != nil {
@@ -1006,6 +1137,9 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventError:
 		a.thinking = false
 		a.spin.Stop()
+		a.spin.SetLabel("thinking")
+		a.streamTickPending = false
+		a.conversation.RenderIfDirty()
 		a.conversation.FinalizeStreaming() // Re-render with markdown
 		a.layout()                         // Reclaim space from spinner
 		if err, ok := ev.Payload.(error); ok {
@@ -1180,86 +1314,52 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 }
 
 func (a *App) handleSlashCommand(input string) tea.Cmd {
-	parts := strings.Fields(input)
-	if len(parts) == 0 {
+	name, args := commands.Parse(input)
+	if name == "" {
 		return nil
 	}
-	cmd := parts[0]
-	args := parts[1:]
-	if definition, ok := lookupSlashCommand(strings.TrimPrefix(cmd, "/")); ok {
-		cmd = "/" + definition.Name
-	}
-
-	// Session-owned commands handled inline (not in command package)
-	// These are: /new, /sessions, /session, /resume, /clear, /reset, /compact, /approvals
-	switch cmd {
-	case "/new":
-		if a.storage != nil && a.sess != nil && len(a.sess.Messages) > 0 {
-			_ = a.storage.Save(a.sess)
-		}
-		a.conversation.Clear()
-		a.sess = session.New()
-		a.sess.Provider, a.sess.Model = a.cfg.Provider, a.cfg.Model
-		a.sess.WorkDir = a.workDir
-		a.ag.SetSession(a.sess)
-		if a.persist != nil {
-			a.persist.SetSession(a.sess)
-		}
-		a.updateActiveTokens()
-		a.stats.TotalCost = 0
-		a.statusBar.SetStatus("New session started")
-		return nil
-
-	case "/sessions", "/session":
-		a.showSessions()
-		return nil
-
-	case "/resume":
-		if len(args) > 0 {
-			if err := a.resumeSession(args[0]); err != nil {
-				a.statusBar.SetStatus("Unable to resume session: " + err.Error())
-			}
-		} else {
-			a.showSessions()
-		}
-		return nil
-
-	case "/clear":
-		a.conversation.Clear()
-		a.statusBar.SetStatus("Conversation cleared")
-		return nil
-
-	case "/reset":
-		a.conversation.Clear()
-		a.sess.SetMessages(nil)
-		a.statusBar.SetStatus("History reset")
-		return nil
-
-	case "/compact":
-		a.statusBar.SetStatus("Compacting context...")
-		return a.compactContext()
-
-	case "/approvals":
-		a.handleApprovalsCommand(args)
-		return nil
-	}
-
-	// Delegate all other commands to the command package
-	host := &commandHost{app: a}
-	cmdName := strings.TrimPrefix(cmd, "/")
-	dispatched, err := command.Default().Dispatch(host, cmdName, args)
+	host := a
+	result, err := a.commands.Dispatch(host, name, args)
 	if err != nil {
-		switch err.(type) {
-		case command.ErrUnknownCommand:
-			a.conversation.AddMessage("assistant", fmt.Sprintf("Unknown command: %s", cmd), true)
-		case command.ErrSessionOwned:
-			// Should not happen - handled above
+		// A command unknown to the registry may have been added to disk after
+		// startup: reload custom commands once and retry before failing.
+		if _, unknown := err.(commands.ErrUnknownCommand); unknown {
+			if a.refreshCustomCommands() > 0 {
+				if result, err = a.commands.Dispatch(host, name, args); err == nil {
+					return a.deliverCommandResult(result)
+				}
+			}
+		}
+		switch e := err.(type) {
+		case commands.ErrUnknownCommand:
+			a.conversation.AddMessage("assistant", fmt.Sprintf("Unknown command: /%s", name), true)
+		case commands.ErrCommandDisabled:
+			a.statusBar.SetStatus(e.Reason)
 		default:
-			a.commandError(err.Error())
+			a.CommandError(err.Error())
 		}
 		return nil
 	}
-	return dispatched
+	return a.deliverCommandResult(result)
+}
+
+// deliverCommandResult relays a successful dispatch outcome to the UI.
+func (a *App) deliverCommandResult(result commands.Result) tea.Cmd {
+	if result.Text != "" {
+		a.conversation.AddMessage("system", result.Text, false)
+	}
+	return result.Cmd
+}
+
+// dispatchByName runs a registered command by canonical name so keyboard
+// shortcuts and slash commands share one code path. Failures are silent:
+// shortcuts only bind to commands that cannot fail dispatch.
+func (a *App) dispatchByName(name string) tea.Cmd {
+	result, err := a.commands.Dispatch(a, name, nil)
+	if err != nil {
+		return nil
+	}
+	return a.deliverCommandResult(result)
 }
 
 func (a *App) layout() {
@@ -1271,6 +1371,7 @@ func (a *App) layout() {
 	a.statusBar.SetWidth(a.width)
 	a.input.SetWidth(a.width)
 	a.palette.SetSize(a.width, a.height)
+	a.selector.SetSize(a.width, a.height)
 	a.confirm.SetSize(a.width, a.height)
 	a.coAuthorConfirm.SetSize(a.width, a.height)
 
@@ -1279,12 +1380,14 @@ func (a *App) layout() {
 	// visible) instead of the usual HUD bar.
 	logoH := 0
 	if a.showLogo() {
-		logoW := a.width - 6
-		if logoW > 100 {
-			logoW = 100
+		// 75% of the available width keeps the mark crisp without
+		// dominating the screen.
+		logoW := (a.width - 6) * 3 / 4
+		if logoW > 75 {
+			logoW = 75
 		}
-		if logoW < 20 {
-			logoW = 20
+		if logoW < 15 {
+			logoW = 15
 		}
 		a.logo.SetWidth(logoW)
 		logoH = lipgloss.Height(a.logoView())
@@ -1391,6 +1494,9 @@ func (a *App) View() tea.View {
 	}
 	if a.showHelp {
 		return makeView(a.helpOverlay.View())
+	}
+	if a.selector.Visible() {
+		return makeView(a.selector.View())
 	}
 
 	headerView := ""
@@ -1652,6 +1758,9 @@ func (a *App) cancelActiveRun(status string) {
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 	a.thinking = false
 	a.spin.Stop()
+	a.spin.SetLabel("thinking")
+	a.streamTickPending = false
+	a.conversation.RenderIfDirty()
 
 	// Clean up any pending ask_user channel to prevent agent deadlock
 	if a.askUserReplyCh != nil {
@@ -1679,6 +1788,31 @@ done:
 
 func (a *App) persistProjectConfig() error {
 	return a.cfg.SaveIfLoaded()
+}
+
+// handleBackgroundColor reacts to the terminal's reported background color:
+// with AUTOMERGENT_AUTO_THEME=1 the theme switches to a matching light/dark
+// variant; otherwise the user just gets a one-time hint.
+func (a *App) handleBackgroundColor(c color.Color) {
+	if c == nil || a.theme == nil || a.theme.Background == nil {
+		return
+	}
+	termDark := themes.IsDark(c)
+	themeDark := themes.IsDark(a.theme.Background)
+	if termDark == themeDark {
+		return
+	}
+	if os.Getenv("AUTOMERGENT_AUTO_THEME") != "1" {
+		return // respect the user's explicit choice; no nagging either
+	}
+	target := "solarized-light"
+	if termDark {
+		target = "catppuccin"
+	}
+	if err := a.SetTheme(target); err == nil {
+		a.conversation.Invalidate()
+		a.conversation.AddMessage("system", fmt.Sprintf("Auto-switched to %s theme to match your terminal", target), false)
+	}
 }
 
 func appendUniquePath(paths []string, path string) []string {
@@ -1732,6 +1866,22 @@ func permissionInfoForTool(tc ai.ToolCall, name string) components.PermissionInf
 		}
 	}
 	return info
+}
+
+// initActionArgs builds representative tool arguments for an init-phase event
+// so the rendered card shows the same Path/Pattern/Command fields a native
+// tool call would.
+func initActionArgs(rawTool, target string) map[string]any {
+	switch rawTool {
+	case "read":
+		return map[string]any{"path": target}
+	case "glob", "grep":
+		return map[string]any{"pattern": target}
+	case "bash":
+		return map[string]any{"command": target}
+	default:
+		return map[string]any{"target": target}
+	}
 }
 
 func extractToolContext(name string, args map[string]any) string {
@@ -1980,6 +2130,7 @@ func buildProviderFromConfig(cfg *config.Config) (ai.Provider, error) {
 		DefaultModel:       cfg.Model,
 		OrgID:              pc.OrgID,
 		Effort:             pc.Effort,
+		ThinkingLevel:      pc.ThinkingLevel,
 		PromptCacheEnabled: &enablePromptCache,
 	}
 

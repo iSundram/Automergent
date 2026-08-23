@@ -27,6 +27,7 @@ func RegisterTaskStateTools(reg *Registry, store taskstate.TaskStore) {
 	reg.Register(&contextGetIntentTool{store: store})
 	reg.Register(&contextGetInitTool{store: store})
 	reg.Register(&todoListTool{store: store})
+	reg.Register(&todoWriteTool{store: store})
 	reg.Register(&todoNextTool{store: store})
 }
 
@@ -430,4 +431,112 @@ func (t *todoNextTool) Execute(ctx context.Context, args map[string]any) (Result
 	}
 	data, _ := json.MarshalIndent(next, "", "  ")
 	return Result{Content: string(data)}, nil
+}
+
+// todoWriteTool lets the model maintain its own plan in-log (Cursor-style
+// TODO_WRITE): replace the whole list or update a single status.
+type todoWriteTool struct{ store taskstate.TaskStore }
+
+func (*todoWriteTool) Name() string { return "todo_write" }
+func (*todoWriteTool) Description() string {
+	return "Write or update your todo list. Call with action=replace to install the full list, or action=status to move one item."
+}
+func (*todoWriteTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"action":  map[string]any{"type": "string", "enum": []string{"replace", "status"}, "description": "replace = install full todo list; status = update one item"},
+			"todos": map[string]any{
+				"type": "array",
+				"description": "For action=replace. Items: {description, priority?, dependencies?, id?}",
+				"items": map[string]any{
+					"type":       "object",
+					"properties": map[string]any{"id": map[string]any{"type": "string"}, "description": map[string]any{"type": "string"}, "priority": map[string]any{"type": "integer"}, "dependencies": map[string]any{"type": "array", "items": map[string]any{"type": "string"}}},
+					"required":   []string{"description"},
+				},
+			},
+			"id":     map[string]any{"type": "string", "description": "For action=status: todo ID"},
+			"status": map[string]any{"type": "string", "enum": []string{"pending", "in_progress", "completed", "blocked"}},
+		},
+		"required": []string{"action"},
+	}
+}
+func (*todoWriteTool) RequiresConfirmation(string) bool    { return false }
+func (*todoWriteTool) IsConcurrencySafe(map[string]any) bool { return false }
+func (*todoWriteTool) EstimatedCost() ToolCost             { return ToolCost{TokensApprox: 50, LatencyMs: 20, RiskLevel: "low"} }
+func (*todoWriteTool) IsDestructive(map[string]any) bool   { return false }
+func (*todoWriteTool) IsReadOnly(map[string]any) bool      { return false }
+func (*todoWriteTool) Meta() *ToolMeta {
+	return &ToolMeta{
+		Category:    "memory",
+		DisplayName: "Update todos",
+		InjectOrder: 10,
+		WhenToUse:   "Right after planning (install the full list), and every time you start/finish an item — keep statuses truthful; the UI board renders this live.",
+		UsageByFamily: map[string]string{
+			"gemini3": "Gemini 3: send the whole todos array in one call when planning; avoid one-call-per-item writes.",
+		},
+	}
+}
+
+func (t *todoWriteTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
+	action, _ := args["action"].(string)
+	switch action {
+	case "replace":
+		raw, ok := args["todos"].([]any)
+		if !ok {
+			return Result{IsError: true, Content: "todo_write replace requires `todos` array"}, nil
+		}
+		var items []shared.TodoItem
+		for _, r := range raw {
+			m, ok := r.(map[string]any)
+			if !ok {
+				continue
+			}
+			id, _ := StringArg(m, "id")
+			desc, _ := StringArg(m, "description")
+			item := shared.TodoItem{
+				ID:          id,
+				Description: desc,
+				Status:      shared.TodoStatusPending,
+				ContextKeys: []string{},
+			}
+			if item.Description == "" {
+				continue
+			}
+			if p, ok := m["priority"].(float64); ok {
+				item.Priority = int(p)
+			}
+			if deps, ok := m["dependencies"].([]any); ok {
+				for _, d := range deps {
+					if ds, ok := d.(string); ok {
+						item.Dependencies = append(item.Dependencies, ds)
+					}
+				}
+			}
+			items = append(items, item)
+		}
+		if len(items) == 0 {
+			return Result{IsError: true, Content: "todo_write replace: no valid todos supplied"}, nil
+		}
+		t.store.ReplaceTodos(items)
+		return Result{Content: fmt.Sprintf("Installed %d todos", len(items)), Summary: fmt.Sprintf("%d todos", len(items))}, nil
+
+	case "status":
+		id, _ := args["id"].(string)
+		statusStr, _ := args["status"].(string)
+		status := shared.TodoStatus(statusStr)
+		switch status {
+		case shared.TodoStatusPending, shared.TodoStatusInProgress,
+			shared.TodoStatusCompleted, shared.TodoStatusBlocked:
+		default:
+			return Result{IsError: true, Content: "todo_write status: invalid `status`"}, nil
+		}
+		if !t.store.SetTodoStatus(id, status) {
+			return Result{IsError: true, Content: fmt.Sprintf("todo %q not found", id)}, nil
+		}
+		return Result{Content: fmt.Sprintf("Todo %s -> %s", id, status), Summary: fmt.Sprintf("%s → %s", id, status)}, nil
+
+	default:
+		return Result{IsError: true, Content: "todo_write: action must be `replace` or `status`"}, nil
+	}
 }

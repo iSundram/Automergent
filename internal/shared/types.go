@@ -33,7 +33,7 @@ const (
 	StrategyDirect          ExecutionStrategy = "direct"
 	StrategyParallel        ExecutionStrategy = "parallel"
 	StrategySequential      ExecutionStrategy = "sequential"
-	StrategyCoderAgent      ExecutionStrategy = "coder_agent"
+	StrategyDelegate        ExecutionStrategy = "delegate"
 	StrategyTodoWalkthrough ExecutionStrategy = "todo_walkthrough"
 )
 
@@ -67,7 +67,7 @@ const (
 	StageInitialThinking PromptStage = "initial_thinking"
 	StageCategorization  PromptStage = "categorization"
 	StageTaskDefinition  PromptStage = "task_definition"
-	StageCoderInit       PromptStage = "coder_init"
+	StageTaskInit        PromptStage = "task_init"
 	StageWorkflowPlan    PromptStage = "workflow_plan"
 	StageExecution       PromptStage = "execution"
 	StageContextManage   PromptStage = "context_manage"
@@ -203,6 +203,20 @@ const (
 	InitActionCompleted  InitActionStatus = "completed"
 	InitActionFailed     InitActionStatus = "failed"
 )
+
+// InitActionEvent surfaces one init-phase tool execution to the UI as a
+// first-class log entry. Emitted twice per action: Running=true on start,
+// Running=false on completion (with Summary/Duration/Failed populated).
+type InitActionEvent struct {
+	Tool     string // normalized native tool name: read_file|grep|glob|bash
+	RawTool  string // pipeline-side name: read|grep|glob|bash
+	Target   string
+	Running  bool
+	Failed   bool
+	Err      string
+	Summary  string
+	Duration time.Duration
+}
 
 // InitResults holds the results of the initialization phase.
 type InitResults struct {

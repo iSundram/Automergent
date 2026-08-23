@@ -21,6 +21,16 @@ const (
 	defaultModel   = "gemini-3.6-flash"
 )
 
+// isGemini25 returns true if the model is a Gemini 2.5 series model.
+func isGemini25(model string) bool {
+	return strings.HasPrefix(model, "gemini-2.5")
+}
+
+// isGemini3 returns true if the model is a Gemini 3.x series model.
+func isGemini3(model string) bool {
+	return strings.HasPrefix(model, "gemini-3")
+}
+
 // Client implements ai.Provider for Google Gemini, backed by the official
 // Google GenAI SDK (google.golang.org/genai).
 //
@@ -392,10 +402,10 @@ func buildGenerateContentConfig(c *Client, req ai.CompletionRequest) *genai.Gene
 	}
 	// Enable thinking mode if configured
 	if req.Thinking != nil && req.Thinking.Type == "enabled" {
-		tc := &genai.ThinkingConfig{IncludeThoughts: true}
+		tc := &genai.ThinkingConfig{IncludeThoughts: req.Thinking.IncludeThoughts}
 
 		// Gemini 2.5 uses thinkingBudget; Gemini 3 uses thinkingLevel.
-		if strings.HasPrefix(c.model, "gemini-2.5") {
+		if isGemini25(c.model) {
 			if req.Thinking.BudgetTokens != 0 {
 				budget := int32(req.Thinking.BudgetTokens)
 				tc.ThinkingBudget = &budget
@@ -403,7 +413,32 @@ func buildGenerateContentConfig(c *Client, req ai.CompletionRequest) *genai.Gene
 				budget := int32(-1) // Dynamic thinking budget.
 				tc.ThinkingBudget = &budget
 			}
+		} else if isGemini3(c.model) {
+			// Gemini 3.x uses thinking_level
+			level := req.Thinking.ThinkingLevel
+			if level == "" {
+				level = req.Thinking.Effort // fallback to legacy Effort field
+			}
+			if level == "" {
+				level = c.effort // fallback to client config
+			}
+			if level == "" {
+				level = "high" // Default for Gemini 3
+			}
+			switch strings.ToLower(level) {
+			case "minimal":
+				tc.ThinkingLevel = genai.ThinkingLevelMinimal
+			case "low":
+				tc.ThinkingLevel = genai.ThinkingLevelLow
+			case "medium":
+				tc.ThinkingLevel = genai.ThinkingLevelMedium
+			case "high":
+				tc.ThinkingLevel = genai.ThinkingLevelHigh
+			default:
+				tc.ThinkingLevel = genai.ThinkingLevelHigh
+			}
 		} else {
+			// Legacy: map Effort to thinkingLevel for older models
 			effort := req.Thinking.Effort
 			if effort == "" {
 				effort = c.effort

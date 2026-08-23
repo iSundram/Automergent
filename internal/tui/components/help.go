@@ -11,12 +11,18 @@ type HelpOverlay struct {
 	styles *themes.Styles
 	width  int
 	height int
+	// slashCommands is injected by the app layer (derived from the command
+	// registry) so this view never hardcodes a drifting copy of the list.
+	slashCommands [][2]string
 }
 
 // NewHelpOverlay creates a new HelpOverlay component.
 func NewHelpOverlay(styles *themes.Styles) HelpOverlay {
 	return HelpOverlay{styles: styles}
 }
+
+// SetSlashCommands supplies the slash-command rows rendered by View.
+func (h *HelpOverlay) SetSlashCommands(items [][2]string) { h.slashCommands = items }
 
 // SetSize updates dimensions.
 func (h *HelpOverlay) SetSize(w, v int) { h.width = w; h.height = v }
@@ -64,31 +70,7 @@ func (h HelpOverlay) View() string {
 		},
 		{
 			"Slash Commands",
-			[][2]string{
-				{"/help", "Show this help"},
-				{"/new", "Start a fresh session"},
-				{"/clear", "Clear conversation"},
-				{"/context", "Show model and token usage"},
-				{"/provider <name> [model]", "Switch provider and optional model"},
-				{"/model <name>", "Switch AI model"},
-				{"/mode <mode>", "Switch approval mode (edit/plan)"},
-				{"/api-key <value>", "Set API key for active provider"},
-				{"/base-url <url>", "Set base URL for active provider"},
-				{"/provider-api-key <provider> <value>", "Set API key for a specific provider"},
-				{"/provider-base-url <provider> <url>", "Set base URL for a specific provider"},
-				{"/sessions or /resume", "Open session browser"},
-				{"/export [path]", "Export conversation as Markdown"},
-				{"/diff or /changes", "Toggle diff pane"},
-				{"/tree or /files", "Toggle file tree"},
-				{"/lsp or /diagnostics", "Toggle LSP panel"},
-				{"/search <query>", "Search workspace content"},
-				{"/run <command>", "Run a project command"},
-				{"/test [target]", "Run project tests"},
-				{"/build [target]", "Build the project"},
-				{"/review", "Toggle detailed review mode"},
-				{"/cancel", "Cancel the active request"},
-				{"/stats", "Show session statistics"},
-			},
+			h.slashCommands,
 		},
 	}
 

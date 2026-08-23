@@ -145,8 +145,13 @@ func (w *WorkflowPrompts) BuildSynthesisPrompt(results []TodoResult, originalTas
 	var sb strings.Builder
 
 	sb.WriteString("SYNTHESIZE PARALLEL RESULTS\n\n")
-	sb.WriteString(fmt.Sprintf("Original Task: %s\n", originalTask.OriginalPrompt))
-	sb.WriteString(fmt.Sprintf("Category: %s\n", originalTask.Category))
+
+	if originalTask != nil {
+		sb.WriteString(fmt.Sprintf("Original Task: %s\n", originalTask.OriginalPrompt))
+		sb.WriteString(fmt.Sprintf("Category: %s\n", originalTask.Category))
+	} else {
+		sb.WriteString("Original Task: (intent-based system)\n")
+	}
 	sb.WriteString(fmt.Sprintf("Number of Results: %d\n\n", len(results)))
 
 	for i, result := range results {
@@ -197,23 +202,28 @@ type Artifact struct {
 }
 
 // BuildModerateDirectPrompt creates a prompt for direct moderate task execution.
-func (w *WorkflowPrompts) BuildModerateDirectPrompt(categorized *CategorizedRequest, coderContext *CoderContext) *PromptPart {
+func (w *WorkflowPrompts) BuildModerateDirectPrompt(categorized *CategorizedRequest, turnContext *TurnContext) *PromptPart {
 	var sb strings.Builder
 
 	sb.WriteString("DIRECT MODERATE TASK EXECUTION\n\n")
-	sb.WriteString("Task: ")
-	sb.WriteString(categorized.OriginalPrompt)
-	sb.WriteString("\n")
-	sb.WriteString("Complexity: ")
-	sb.WriteString(string(categorized.Complexity))
-	sb.WriteString("\n")
-	sb.WriteString("Strategy: Direct execution by coder\n\n")
+
+	if categorized != nil {
+		sb.WriteString("Task: ")
+		sb.WriteString(categorized.OriginalPrompt)
+		sb.WriteString("\n")
+		sb.WriteString("Complexity: ")
+		sb.WriteString(string(categorized.Complexity))
+		sb.WriteString("\n")
+		sb.WriteString("Strategy: Direct execution by coder\n\n")
+	} else {
+		sb.WriteString("Task: (intent-based system)\n\n")
+	}
 
 	sb.WriteString("Available Tools: edit, write, bash, sql, search, read_file, read_many_files, read_file_lines\n\n")
 
-	if len(coderContext.Files) > 0 {
+	if len(turnContext.Files) > 0 {
 		sb.WriteString("Relevant Files:\n")
-		for _, f := range coderContext.Files {
+		for _, f := range turnContext.Files {
 			sb.WriteString("  - ")
 			sb.WriteString(f)
 			sb.WriteString("\n")
@@ -221,17 +231,17 @@ func (w *WorkflowPrompts) BuildModerateDirectPrompt(categorized *CategorizedRequ
 		sb.WriteString("\n")
 	}
 
-	if len(coderContext.CodeSnippets) > 0 {
+	if len(turnContext.CodeSnippets) > 0 {
 		sb.WriteString("Code Context:\n")
-		for path, code := range coderContext.CodeSnippets {
+		for path, code := range turnContext.CodeSnippets {
 			sb.WriteString(fmt.Sprintf("\n--- %s ---\n%s\n", path, code))
 		}
 		sb.WriteString("\n")
 	}
 
-	if len(coderContext.TodoItems) > 0 {
+	if len(turnContext.TodoItems) > 0 {
 		sb.WriteString("Todo Items:\n")
-		for _, todo := range coderContext.TodoItems {
+		for _, todo := range turnContext.TodoItems {
 			sb.WriteString(fmt.Sprintf("  - [%s] %s\n", todo.Status, todo.Description))
 		}
 		sb.WriteString("\n")
@@ -250,7 +260,7 @@ func (w *WorkflowPrompts) BuildModerateDirectPrompt(categorized *CategorizedRequ
 		Stage:    StageExecution,
 		Content:  sb.String(),
 		Tools:    ToolSetModerate,
-		Metadata: map[string]any{"categorized": categorized, "coder_context": coderContext},
+		Metadata: map[string]any{"categorized": categorized, "turn_context": turnContext},
 	}
 }
 

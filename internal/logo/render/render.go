@@ -3,10 +3,11 @@
 //
 // Pipeline:
 //
-//	oksvg rasterize at high resolution  (alpha = exact glyph coverage)
-//	  -> crop to the ink bounding box   (drop the empty SVG canvas)
-//	  -> area-average downsample        (box filter over coverage)
-//	  -> profile-specific cell masks    (block glyphs, foreground only)
+//	oksvg rasterize once at high resolution (alpha = glyph coverage)
+//	  -> crop to the ink bounding box    (drop the empty SVG canvas)
+//	  -> cache the alpha plane           (one pass, reused forever)
+//	  -> area-average downsample         (box filter over coverage)
+//	  -> exact block-glyph lookup        (sextant/octant atlases)
 //
 // The wordmark is flat #333333, so only the alpha channel carries
 // information; RGB is discarded and the ink color is chosen by the
@@ -30,57 +31,68 @@ import (
 	"github.com/srwiley/rasterx"
 )
 
-// Aspect reports the wordmark's ink bounding box ratio (width /
-// height). It is measured from the embedded asset on first use rather
-// than hardcoded, so replacing the SVG automatically re-proportions
-// every render.
-func Aspect() float64 {
-	metricsOnce.Do(measureMetrics)
-	return metrics.aspect
+// canonicalCanvasW is the rasterization width used for the cached ink
+// plane. At the wordmark's ~75% ink fraction this yields roughly 1500
+// ink pixels across, an order of magnitude above any realistic output
+// width, so the box filter stays well fed at every terminal size.
+const canonicalCanvasW = 2048
+
+// inkPlane is the cropped alpha channel of the artwork, cached after
+// a single rasterization.
+type inkPlane struct {
+	w, h  int
+	alpha []uint8
 }
 
-// metrics caches properties measured from the embedded artwork.
 var (
-	metricsOnce sync.Once
-	metrics     struct {
-		aspect float64 // ink width / ink height
-		fracW  float64 // ink width as a fraction of the SVG canvas
-		err    error
-	}
+	inkOnce sync.Once
+	ink     inkPlane
+	inkErr  error
 )
 
-// probeSize is the canvas width used to measure the artwork. Large
-// enough that the ink bounding box is accurate to a fraction of a
-// percent, small enough to be instant.
-const probeSize = 1024
-
-// measureMetrics rasterizes the asset once to learn its ink extents.
-func measureMetrics() {
-	// Fall back to the artwork's nominal proportions if the probe
-	// fails, so a measurement problem degrades rather than panics.
-	metrics.aspect, metrics.fracW = 6.0, 0.75
-
-	img, canvasW, _, err := rasterize(probeSize)
-	if err != nil {
-		metrics.err = err
-		return
-	}
-	box, ok := alphaBounds(img)
-	if !ok {
-		metrics.err = fmt.Errorf("artwork contains no ink")
-		return
-	}
-	metrics.aspect = float64(box.Dx()) / float64(box.Dy())
-	metrics.fracW = float64(box.Dx()) / float64(canvasW)
+// loadInk rasterizes the embedded asset exactly once per process and
+// keeps its cropped alpha plane. Every render afterwards is a cheap
+// area-average plus table lookups, so window resizes never re-parse or
+// re-draw the SVG.
+func loadInk() (inkPlane, error) {
+	inkOnce.Do(func() {
+		// Fall back to the artwork's nominal aspect if the probe
+		// fails, so a measurement problem degrades rather than panics.
+		inkErr = fmt.Errorf("artwork unavailable")
+		img, _, _, err := rasterize(canonicalCanvasW)
+		if err != nil {
+			return
+		}
+		box, ok := alphaBounds(img)
+		if !ok {
+			inkErr = fmt.Errorf("artwork contains no ink")
+			return
+		}
+		w, h := box.Dx(), box.Dy()
+		alpha := make([]uint8, w*h)
+		for y := 0; y < h; y++ {
+			row := img.Pix[(box.Min.Y+y)*img.Stride+box.Min.X*4:]
+			for x := 0; x < w; x++ {
+				alpha[y*w+x] = row[x*4+3]
+			}
+		}
+		ink = inkPlane{w: w, h: h, alpha: alpha}
+		inkErr = nil
+	})
+	return ink, inkErr
 }
 
-// Compatibility aliases retained for tests and decoders.
-const (
-	glyphFull  = "█" // both samples inked
-	glyphUpper = "▀" // top sample only
-	glyphLower = "▄" // bottom sample only
-	glyphBlank = " " // neither
-)
+// Aspect reports the wordmark's ink bounding box ratio (width /
+// height). It is measured from the embedded asset rather than
+// hardcoded, so replacing the SVG automatically re-proportions every
+// render.
+func Aspect() float64 {
+	p, err := loadInk()
+	if err != nil || p.h == 0 {
+		return 6.0
+	}
+	return float64(p.w) / float64(p.h)
+}
 
 // covEpsilon is the coverage below which a sample counts as empty.
 //
@@ -226,8 +238,7 @@ func Render(opts Options) (*Grid, error) {
 				}
 			}
 
-			density := sum / float64(subW*subH)
-			cell := Cell{Glyph: opts.Glyphs.glyphFor(pattern, density)}
+			cell := Cell{Glyph: opts.Glyphs.glyphFor(pattern)}
 			if n > 0 {
 				cell.Cov = sum / float64(n)
 				cell.Ink = float64(n) / float64(subW*subH)
@@ -243,30 +254,14 @@ func Render(opts Options) (*Grid, error) {
 	return &Grid{Cells: cells, Cols: opts.Cols, Rows: rows}, nil
 }
 
-// coverage rasterizes the SVG and returns a sw x sh grid of ink
-// coverage in [0,1], cropped to the wordmark's ink bounding box.
+// coverage downsamples the cached ink plane to a sw x sh grid of ink
+// coverage in [0,1].
 func coverage(sw, sh int) ([]float64, error) {
-	metricsOnce.Do(measureMetrics)
-	if metrics.err != nil {
-		return nil, metrics.err
-	}
-
-	// Rasterize large enough that every output sample averages a
-	// healthy block of source pixels; 8x in each axis keeps the box
-	// filter well fed without a costly canvas. Dividing by the ink
-	// fraction scales the canvas so the ink itself hits that target.
-	const oversample = 8
-	canvasW := int(math.Ceil(float64(sw*oversample) / metrics.fracW))
-
-	rgba, _, _, err := rasterize(canvasW)
+	p, err := loadInk()
 	if err != nil {
 		return nil, err
 	}
-	box, ok := alphaBounds(rgba)
-	if !ok {
-		return nil, fmt.Errorf("rasterized logo is empty (no ink found)")
-	}
-	return boxDownsample(rgba, box, sw, sh), nil
+	return downsample(p, sw, sh), nil
 }
 
 // rasterize draws the embedded artwork onto a transparent canvas of
@@ -326,42 +321,42 @@ func alphaBounds(img *image.RGBA) (image.Rectangle, bool) {
 	return image.Rect(minX, minY, maxX+1, maxY+1), true
 }
 
-// boxDownsample area-averages the alpha channel of src within box
-// into a dw x dh coverage grid. Coverage is a linear quantity, so a
-// plain mean is the correct filter (no gamma conversion applies).
-func boxDownsample(src *image.RGBA, box image.Rectangle, dw, dh int) []float64 {
+// downsample area-averages the cached alpha plane into a dw x dh
+// coverage grid. Coverage is a linear quantity, so a plain mean is the
+// correct filter (no gamma conversion applies).
+func downsample(p inkPlane, dw, dh int) []float64 {
 	out := make([]float64, dw*dh)
-	bw, bh := float64(box.Dx()), float64(box.Dy())
+	bw, bh := float64(p.w), float64(p.h)
 	for y := 0; y < dh; y++ {
 		// Source row span for this output row.
-		y0 := box.Min.Y + int(math.Floor(float64(y)*bh/float64(dh)))
-		y1 := box.Min.Y + int(math.Ceil(float64(y+1)*bh/float64(dh)))
+		y0 := int(math.Floor(float64(y) * bh / float64(dh)))
+		y1 := int(math.Ceil(float64(y+1) * bh / float64(dh)))
 		if y1 <= y0 {
 			y1 = y0 + 1
 		}
-		if y1 > box.Max.Y {
-			y1 = box.Max.Y
+		if y1 > p.h {
+			y1 = p.h
 		}
 		for x := 0; x < dw; x++ {
-			x0 := box.Min.X + int(math.Floor(float64(x)*bw/float64(dw)))
-			x1 := box.Min.X + int(math.Ceil(float64(x+1)*bw/float64(dw)))
+			x0 := int(math.Floor(float64(x) * bw / float64(dw)))
+			x1 := int(math.Ceil(float64(x+1) * bw / float64(dw)))
 			if x1 <= x0 {
 				x1 = x0 + 1
 			}
-			if x1 > box.Max.X {
-				x1 = box.Max.X
+			if x1 > p.w {
+				x1 = p.w
 			}
-			var sum float64
+			var sum uint64
 			var n int
 			for yy := y0; yy < y1; yy++ {
-				base := yy * src.Stride
+				base := yy * p.w
 				for xx := x0; xx < x1; xx++ {
-					sum += float64(src.Pix[base+xx*4+3])
+					sum += uint64(p.alpha[base+xx])
 					n++
 				}
 			}
 			if n > 0 {
-				out[y*dw+x] = sum / float64(n) / 255.0
+				out[y*dw+x] = float64(sum) / float64(n) / 255.0
 			}
 		}
 	}

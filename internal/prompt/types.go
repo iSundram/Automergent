@@ -46,7 +46,7 @@ const (
 	StrategyDirect          = shared.StrategyDirect
 	StrategyParallel        = shared.StrategyParallel
 	StrategySequential      = shared.StrategySequential
-	StrategyCoderAgent      = shared.StrategyCoderAgent
+	StrategyDelegate        = shared.StrategyDelegate
 	StrategyTodoWalkthrough = shared.StrategyTodoWalkthrough
 
 	ContextActionStash    = shared.ContextActionStash
@@ -133,23 +133,21 @@ const (
 	ContextShareFull    ContextShareMode = "full"
 )
 
-// AssistantContext represents the assistant's context (for talking to user).
-type AssistantContext struct {
+// TurnContext is the single unified working context for the agent.
+// There is no assistant/coder split: one persona, one context, one loop.
+// It carries everything the current turn needs — conversation state,
+// discovered files/snippets, constraints, todos and shared scratch space.
+type TurnContext struct {
+	WorkingDir          string
+	Files               []string
+	CodeSnippets        map[string]string
+	Constraints         []string
+	TodoItems           []shared.TodoItem
+	SharedContext       map[string]string
 	ConversationHistory []shared.Message
 	UserPreferences     map[string]string
 	CurrentTask         *CategorizedRequest
 	StashedContexts     []ContextStash
-}
-
-// CoderContext represents the coder's context (for coding, separate from assistant).
-type CoderContext struct {
-	WorkingDir        string
-	Files             []string
-	CodeSnippets      map[string]string
-	Constraints       []string
-	TodoItems         []shared.TodoItem
-	SharedContext     map[string]string
-	ParentAssistantID string
 }
 
 // PromptPart represents a part of a prompt sent at a specific stage.
@@ -168,7 +166,7 @@ const (
 	StageInitialThinking PromptStage = "initial_thinking"
 	StageCategorization  PromptStage = "categorization"
 	StageTaskDefinition  PromptStage = "task_definition"
-	StageCoderInit       PromptStage = "coder_init"
+	StageTaskInit        PromptStage = "task_init"
 	StageWorkflowPlan    PromptStage = "workflow_plan"
 	StageExecution       PromptStage = "execution"
 	StageContextManage   PromptStage = "context_manage"
@@ -311,8 +309,7 @@ func GetContextProfile(category RequestCategory) ContextProfile {
 
 // PromptConfig holds configuration for prompt generation.
 type PromptConfig struct {
-	AssistantModel     string
-	CoderModel         string
+	PlanningModel      string
 	MaxContextSize     int
 	EnableStashing     bool
 	EnableSharing      bool
@@ -325,8 +322,7 @@ type PromptConfig struct {
 // DefaultPromptConfig returns default configuration.
 func DefaultPromptConfig() *PromptConfig {
 	return &PromptConfig{
-		AssistantModel:     "default",
-		CoderModel:         "default",
+		PlanningModel:      "default",
 		MaxContextSize:     100000,
 		EnableStashing:     true,
 		EnableSharing:      true,

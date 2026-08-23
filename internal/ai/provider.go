@@ -67,11 +67,17 @@ func (r CompletionRequest) Validate() error {
 type ThinkingConfig struct {
 	// Type should be "enabled" to activate extended thinking
 	Type string
-	// BudgetTokens is the maximum tokens allocated for thinking (default: 10000)
+	// BudgetTokens is the maximum tokens allocated for thinking (Gemini 2.5 only).
+	// Range: 0-32768 (2.5 Pro), 0-24576 (2.5 Flash). Use -1 for dynamic.
 	BudgetTokens int
+	// ThinkingLevel specifies the reasoning effort level for Gemini 3+ models.
+	// Valid values: "minimal", "low", "medium", "high".
+	ThinkingLevel string
 	// Stream enables streaming thought chunks when supported by the provider.
 	Stream bool
-	// Effort specifies the reasoning/thinking effort level (minimal, low, medium, high).
+	// IncludeThoughts includes thought summaries in the streaming response.
+	IncludeThoughts bool
+	// Effort specifies the reasoning/thinking effort level (legacy, maps to ThinkingLevel).
 	Effort string
 }
 
@@ -165,8 +171,9 @@ type ProviderConfig struct {
 	Project            string
 	Location           string
 	Effort             string
-	PromptCacheEnabled *bool
+	ThinkingLevel      string
 	HTTPClient         *http.Client
+	PromptCacheEnabled *bool
 }
 
 // Event is a generic event emitted during a completion.
