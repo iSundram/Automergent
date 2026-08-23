@@ -1,16 +1,15 @@
-package tui
+package app
 
 import (
+	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
+	"github.com/iSundram/Automergent/internal/ai"
+	"github.com/iSundram/Automergent/internal/session"
+	"github.com/iSundram/Automergent/internal/tui/components"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
-
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-	"github.com/iSundram/Automergent/internal/ai"
-	"github.com/iSundram/Automergent/internal/session"
-	"github.com/iSundram/Automergent/internal/tui/components"
 )
 
 var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)

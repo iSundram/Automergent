@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/iSundram/Automergent/internal/ai"
@@ -176,4 +177,28 @@ func stringUnquote(s string) (string, error) {
 		b.WriteByte(body[i])
 	}
 	return b.String(), nil
+}
+
+// ShellGrantPreview describes, in user-facing words, what pressing
+// "always allow" will grant for this call: a reusable command prefix or,
+// for dangerous shapes, only this exact command.
+func ShellGrantPreview(name string, args map[string]any) string {
+	cmd := shellCommandOf(name, args)
+	if cmd == "" {
+		return "this tool"
+	}
+	if isGeneralizable(cmd) {
+		return fmt.Sprintf("prefix %q", commandPrefix(cmd))
+	}
+	return "this exact command"
+}
+
+// CommandIsDangerous reports whether the call contains constructs that force
+// exact-match approval (used by the UI for warning tints).
+func CommandIsDangerous(name string, args map[string]any) bool {
+	cmd := shellCommandOf(name, args)
+	if cmd == "" {
+		return false
+	}
+	return !isGeneralizable(cmd)
 }

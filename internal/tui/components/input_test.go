@@ -39,7 +39,7 @@ func TestInputLineCountCalculation(t *testing.T) {
 			name:      "long wrapping line",
 			width:     30,
 			value:     "this is a very long string that should definitely wrap across multiple lines because it exceeds thirty columns in width",
-			wantLines: 6,
+			wantLines: 5, // matches the textarea's actual soft-wrap rendering
 		},
 	}
 

@@ -35,16 +35,16 @@ func FromReasoningPlan(ctx context.Context, rp *reasoning.ExecutionPlan) (*Execu
 		}
 
 		task := &Task{
-			ID:          rt.ID,
-			Prompt:      rt.Description,
-			Role:        role,
+			ID:           rt.ID,
+			Prompt:       rt.Description,
+			Role:         role,
 			Dependencies: rt.Dependencies,
-			Priority:    mapPriority(rt.Priority),
-			Context:     taskCtx,
-			Status:      TaskStatusPending,
-			CreatedAt:   rt.CreatedAt,
-			MaxRetries:  3,
-			Timeout:     rt.Estimated,
+			Priority:     mapPriority(rt.Priority),
+			Context:      taskCtx,
+			Status:       TaskStatusPending,
+			CreatedAt:    rt.CreatedAt,
+			MaxRetries:   3,
+			Timeout:      rt.Estimated,
 		}
 		tasks = append(tasks, task)
 		taskByID[rt.ID] = task
@@ -208,7 +208,7 @@ func buildDependencies(tasks []*Task) map[string][]string {
 
 // AgentExecutorAdapter adapts the coordinator's AgentExecutor to use the agent's execution.
 type AgentExecutorAdapter struct {
-	agent   interface {
+	agent interface {
 		Execute(ctx context.Context, agentType subagent.AgentType, prompt string, model string) (string, error)
 	}
 	model string

@@ -253,11 +253,11 @@ type ContextItem struct {
 	Staleness  string  `json:"staleness,omitempty"`
 
 	// Context state tracking
-	State        ContextState    `json:"state"`
-	Summary      string          `json:"summary,omitempty"`
-	IgnoredAt    *time.Time      `json:"ignored_at,omitempty"`
-	ResumedAt    *time.Time      `json:"resumed_at,omitempty"`
-	IgnoreReason string          `json:"ignore_reason,omitempty"`
+	State         ContextState    `json:"state"`
+	Summary       string          `json:"summary,omitempty"`
+	IgnoredAt     *time.Time      `json:"ignored_at,omitempty"`
+	ResumedAt     *time.Time      `json:"resumed_at,omitempty"`
+	IgnoreReason  string          `json:"ignore_reason,omitempty"`
 	PriorityLevel ContextPriority `json:"priority_level"`
 }
 
@@ -265,7 +265,7 @@ type ContextItem struct {
 type ContextState int
 
 const (
-	ContextActive   ContextState = iota
+	ContextActive ContextState = iota
 	ContextIgnored
 	ContextResumed
 )

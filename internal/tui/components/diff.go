@@ -10,7 +10,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/tui/render"
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
@@ -52,7 +51,7 @@ type Diff struct {
 
 	// Confirmation
 	mode        diffMode
-	replyCh     chan agent.ConfirmationResponse
+	replyCh     chan Confirmation
 	rejectInput textinput.Model
 }
 
@@ -136,7 +135,7 @@ func (d *Diff) SetContent(content string) {
 }
 
 // ShowWithConfirm shows diff and waits for user confirmation.
-func (d *Diff) ShowWithConfirm(replyCh chan agent.ConfirmationResponse) {
+func (d *Diff) ShowWithConfirm(replyCh chan Confirmation) {
 	d.visible = true
 	d.mode = diffModeConfirm
 	d.replyCh = replyCh
@@ -219,7 +218,7 @@ func (d Diff) Update(msg tea.Msg) (Diff, tea.Cmd) {
 				reason := strings.TrimSpace(d.rejectInput.Value())
 				if d.replyCh != nil {
 					select {
-					case d.replyCh <- agent.ConfirmationResponse{Allow: false, Feedback: reason}:
+					case d.replyCh <- Confirmation{Allow: false, Feedback: reason}:
 					default:
 					}
 				}
@@ -229,7 +228,7 @@ func (d Diff) Update(msg tea.Msg) (Diff, tea.Cmd) {
 				// Skip reason, just reject
 				if d.replyCh != nil {
 					select {
-					case d.replyCh <- agent.ConfirmationResponse{Allow: false}:
+					case d.replyCh <- Confirmation{Allow: false}:
 					default:
 					}
 				}
@@ -248,7 +247,7 @@ func (d Diff) Update(msg tea.Msg) (Diff, tea.Cmd) {
 		case "y", "Y", "enter":
 			if d.mode == diffModeConfirm && d.replyCh != nil {
 				select {
-				case d.replyCh <- agent.ConfirmationResponse{Allow: true}:
+				case d.replyCh <- Confirmation{Allow: true}:
 				default:
 				}
 				d.Hide()
@@ -257,7 +256,7 @@ func (d Diff) Update(msg tea.Msg) (Diff, tea.Cmd) {
 		case "a", "A":
 			if d.mode == diffModeConfirm && d.replyCh != nil {
 				select {
-				case d.replyCh <- agent.ConfirmationResponse{Allow: true, Always: true}:
+				case d.replyCh <- Confirmation{Allow: true, Always: true}:
 				default:
 				}
 				d.Hide()
@@ -276,7 +275,7 @@ func (d Diff) Update(msg tea.Msg) (Diff, tea.Cmd) {
 			if d.mode == diffModeConfirm && d.replyCh != nil {
 				// Quick reject without reason
 				select {
-				case d.replyCh <- agent.ConfirmationResponse{Allow: false}:
+				case d.replyCh <- Confirmation{Allow: false}:
 				default:
 				}
 				d.Hide()

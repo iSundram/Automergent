@@ -35,8 +35,8 @@ func globResult(t *testing.T, root, pattern string) string {
 	t.Helper()
 	tool := &GlobTool{}
 	res, err := tool.Execute(context.Background(), map[string]any{
-		"pattern":    pattern,
-		"path":       root,
+		"pattern":     pattern,
+		"path":        root,
 		"max_results": 100,
 	})
 	if err != nil {

@@ -10,16 +10,16 @@ import (
 
 // SessionDiagnostics summarizes health and metrics for a session storage directory.
 type SessionDiagnostics struct {
-	TotalSessions       int           `json:"total_sessions"`
-	CorruptSessions     []string      `json:"corrupt_sessions,omitempty"`
-	OrphanedCheckpoints []string      `json:"orphaned_checkpoints,omitempty"`
-	TotalInputTokens    int           `json:"total_input_tokens"`
-	TotalOutputTokens   int           `json:"total_output_tokens"`
-	EstimatedCostUSD    float64       `json:"estimated_cost_usd"`
-	OldestSession       time.Time     `json:"oldest_session,omitempty"`
-	NewestSession       time.Time     `json:"newest_session,omitempty"`
-	StoreSizeBytes      int64         `json:"store_size_bytes"`
-	ScannedAt           time.Time     `json:"scanned_at"`
+	TotalSessions       int       `json:"total_sessions"`
+	CorruptSessions     []string  `json:"corrupt_sessions,omitempty"`
+	OrphanedCheckpoints []string  `json:"orphaned_checkpoints,omitempty"`
+	TotalInputTokens    int       `json:"total_input_tokens"`
+	TotalOutputTokens   int       `json:"total_output_tokens"`
+	EstimatedCostUSD    float64   `json:"estimated_cost_usd"`
+	OldestSession       time.Time `json:"oldest_session,omitempty"`
+	NewestSession       time.Time `json:"newest_session,omitempty"`
+	StoreSizeBytes      int64     `json:"store_size_bytes"`
+	ScannedAt           time.Time `json:"scanned_at"`
 }
 
 // AuditStorage performs a comprehensive health and metrics audit of the session storage directory.

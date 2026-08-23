@@ -15,6 +15,7 @@ import (
 	"github.com/iSundram/Automergent/internal/config"
 	contextmgr "github.com/iSundram/Automergent/internal/context"
 	"github.com/iSundram/Automergent/internal/coordinator"
+	"github.com/iSundram/Automergent/internal/editreview"
 	"github.com/iSundram/Automergent/internal/errors"
 	promptpkg "github.com/iSundram/Automergent/internal/prompt"
 	"github.com/iSundram/Automergent/internal/reasoning"
@@ -46,6 +47,7 @@ type Agent struct {
 	decisionRecords     []ToolDecisionRecord
 	skills              []Skill
 	skillPaths          *skillTracker
+	editReview          *editreview.Store
 	reasoningPreAnalyze func(context.Context, string) (string, error)
 	currentComplexity   reasoning.Complexity
 	currentTaskType     reasoning.TaskType
@@ -190,22 +192,22 @@ type executedToolCall struct {
 }
 
 const (
-	EventToken     = "token"
-	EventThought   = "thought"
-	EventToolCall  = "tool_call"
-	EventToolStart = "tool_start"
-	EventToolDone  = "tool_done"
-	EventDone      = "done"
-	EventError     = "error"
-	EventConfirm   = "confirm"
-	EventAskUser   = "ask_user"
-	EventNotify    = "notify"
-	EventStatus    = "status"
-	EventThinking  = "thinking"
-	EventCompacted = "compacted"
+	EventToken        = "token"
+	EventThought      = "thought"
+	EventToolCall     = "tool_call"
+	EventToolStart    = "tool_start"
+	EventToolDone     = "tool_done"
+	EventDone         = "done"
+	EventError        = "error"
+	EventConfirm      = "confirm"
+	EventAskUser      = "ask_user"
+	EventNotify       = "notify"
+	EventStatus       = "status"
+	EventThinking     = "thinking"
+	EventCompacted    = "compacted"
 	EventTodoSnapshot = "todo_snapshot"
-	EventTodoUpdate = "todo_update"
-	EventInitAction = "init_action"
+	EventTodoUpdate   = "todo_update"
+	EventInitAction   = "init_action"
 )
 
 const (
@@ -226,6 +228,7 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 		sessionAllowedTools: make(map[string]bool),
 		approvalSource:      "tui",
 		skillPaths:          newSkillTracker(12),
+		editReview:          nil,
 	}
 
 	if cfg != nil && cfg.NoTUI {
@@ -407,6 +410,10 @@ func (a *Agent) Approvals() []session.ToolApproval {
 
 // RevokeApproval removes an always-allow approval from both the in-memory
 // cache and the persisted session. Returns true if the scope was present.
+// EditReviewStore returns the pending-edit proposal store (nil when the
+// edit-review mode is disabled).
+func (a *Agent) EditReviewStore() *editreview.Store { return a.editReview }
+
 func (a *Agent) RevokeApproval(scope string) bool {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -459,7 +466,6 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	// Apply triage wrapper for first message if using legacy mode
 	firstUserPrompt := originalUserPrompt
 
-
 	// Persist the user-authored message before any optional coordinator path
 	// can return. The triage wrapper exists only in the request copy below.
 	userMsg := ai.NewTextMessage(ai.RoleUser, firstUserPrompt)
@@ -479,20 +485,18 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			return nil
 		}
 		if err == errPromptSystemPrepared {
-a.Emit(EventStatus, "prompt and graph context prepared; starting tool-capable execution")
-	} else {
-		a.Emit(EventError, err)
-		return fmt.Errorf("agent: prepare prompt system: %w", err)
+			a.Emit(EventStatus, "prompt and graph context prepared; starting tool-capable execution")
+		} else {
+			a.Emit(EventError, err)
+			return fmt.Errorf("agent: prepare prompt system: %w", err)
+		}
 	}
-}
-// Determine tool profile from identified intents (new intent-based system)
-a.toolProfile = a.selectToolProfileFromIntents(ctx)
-defer func() { a.toolProfile = nil }()
-if a.toolProfile != nil {
-	a.Emit(EventStatus, fmt.Sprintf("native tool surface prepared: %d tools", len(a.toolProfile)))
-}
-
-
+	// Determine tool profile from identified intents (new intent-based system)
+	a.toolProfile = a.selectToolProfileFromIntents(ctx)
+	defer func() { a.toolProfile = nil }()
+	if a.toolProfile != nil {
+		a.Emit(EventStatus, fmt.Sprintf("native tool surface prepared: %d tools", len(a.toolProfile)))
+	}
 
 	// In edit mode, check that we are inside a git repository when required.
 	if a.cfg.Mode == "edit" && a.cfg.Security.RequireGitForAutoModes {
@@ -1436,6 +1440,10 @@ func (a *Agent) RegisterContextTools() ContextToolRegistration {
 
 	// Register the builtin expansion suite: git, wait, multi_edit, finish.
 	if a.tools != nil {
+		if a.cfg != nil && a.cfg.EditReview && a.editReview == nil {
+			a.editReview = editreview.NewStore()
+			editreview.WrapWriteTools(a.tools, a.editReview)
+		}
 		gitpkg.RegisterAll(a.tools)
 		a.tools.Register(toolsShell.NewWaitTool())
 		a.tools.Register(toolsFS.NewMultiEditTool(a.cfg))
@@ -1519,7 +1527,6 @@ func (a *Agent) getNextTodoPrompt() *promptpkg.PromptPart {
 	}
 	return nil
 }
-
 
 // ContextManager returns the persistent context manager, initializing it on first use.
 func (a *Agent) ContextManager() *contextmgr.Manager {

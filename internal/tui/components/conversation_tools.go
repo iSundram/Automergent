@@ -375,3 +375,71 @@ func truncateContent(s string, reviewMode bool) string {
 	runes := []rune(s)
 	return string(runes[:maxRunes]) + " … [truncated, press Ctrl+R for full review mode]"
 }
+
+func (c *Conversation) toolBranding(name string) (icon string, accent colorAlias, pretty string) {
+	icon = "󰆍"
+	accent = c.styles.T.Accent
+	pretty = name
+
+	switch name {
+	case "read_file", "view":
+		pretty, icon, accent = "Readfile", "󰈔", c.styles.T.Blue
+	case "write_file", "create_file":
+		pretty, icon, accent = "Write", "󱇧", c.styles.T.Green
+	case "edit_file":
+		pretty, icon, accent = "Edit", "󰛓", c.styles.T.Yellow
+	case "delete_file":
+		pretty, icon, accent = "Delete", "󰆴", c.styles.T.Red
+	case "move_file":
+		pretty, icon, accent = "Move", "󰪹", c.styles.T.Blue
+	case "copy_file":
+		pretty, icon, accent = "Copy", "󰪹", c.styles.T.Blue
+	case "list_directory":
+		pretty, icon, accent = "List directory", "󰉋", c.styles.T.Blue
+	case "search":
+		pretty, icon, accent = "Deep Search", "󰍉", c.styles.T.Magenta
+	case "glob":
+		pretty, icon, accent = "Glob", "󰈞", c.styles.T.Blue
+	case "grep", "grep_search":
+		pretty, icon, accent = "Search", "󰍉", c.styles.T.Magenta
+	case "run_shell_command", "run_command", "bash":
+		pretty, icon, accent = "Run", "󰆍", c.styles.T.Yellow
+	case "read_shell":
+		pretty, icon, accent = "Read shell", "󰇯", c.styles.T.Yellow
+	case "write_shell":
+		pretty, icon, accent = "Write shell", "󰇰", c.styles.T.Yellow
+	case "stop_shell":
+		pretty, icon, accent = "Stop shell", "󰅙", c.styles.T.Red
+	case "git_commit":
+		pretty, icon, accent = "Git commit", "󰊢", c.styles.T.Red
+	case "git_add":
+		pretty, icon, accent = "Git stage", "󰊢", c.styles.T.Green
+	case "git_checkout":
+		pretty, icon, accent = "Git checkout", "󰊢", c.styles.T.Blue
+	case "git_branch":
+		pretty, icon, accent = "Git branch", "󰊢", c.styles.T.Magenta
+	case "git_stash":
+		pretty, icon, accent = "Git stash", "󰊢", c.styles.T.Yellow
+	case "git_status":
+		pretty, icon, accent = "Git status", "󰊢", c.styles.T.Cyan
+	case "git_diff":
+		pretty, icon, accent = "Git diff", "󰊢", c.styles.T.Yellow
+	case "git_log":
+		pretty, icon, accent = "Git log", "󰊢", c.styles.T.Blue
+	case "lsp_diagnostics", "lsp_symbols":
+		pretty, icon, accent = "LSP", "󰘦", c.styles.T.Cyan
+	case "web_fetch", "web_search":
+		pretty, icon, accent = "Web", "󰖟", c.styles.T.Magenta
+	case "sql":
+		pretty, icon, accent = "SQL", "󰆼", c.styles.T.Blue
+	case "secrets_scan":
+		pretty, icon, accent = "Secrets scan", "󰦝", c.styles.T.Red
+	case "dependency_audit":
+		pretty, icon, accent = "Audit", "󰒺", c.styles.T.Yellow
+	case "task":
+		pretty, icon, accent = "Task", "󰒋", c.styles.T.Accent
+	case "read_agent":
+		pretty, icon, accent = "Read agent", "󰒋", c.styles.T.Accent
+	}
+	return
+}

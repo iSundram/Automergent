@@ -10,7 +10,6 @@ import (
 	"github.com/charmbracelet/x/ansi"
 	"image/color"
 
-	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
@@ -19,7 +18,7 @@ type Confirm struct {
 	styles     *themes.Styles
 	visible    bool
 	prompt     string
-	replyCh    chan agent.ConfirmationResponse
+	replyCh    chan Confirmation
 	feedback   textinput.Model
 	mode       confirmMode
 	width      int
@@ -37,11 +36,12 @@ type PermissionField struct {
 }
 
 type PermissionInfo struct {
-	Icon   string
-	Tool   string
-	Action string
-	Fields []PermissionField
-	Risk   string
+	Icon      string
+	Tool      string
+	Action    string
+	Fields    []PermissionField
+	Risk      string
+	Dangerous bool // warning tint on the risk line
 }
 
 type confirmMode int
@@ -102,7 +102,7 @@ func (c *Confirm) ShowWithDiff(prompt, _ string) {
 }
 
 // SetReply sets the channel to send the reply to.
-func (c *Confirm) SetReply(ch chan agent.ConfirmationResponse) {
+func (c *Confirm) SetReply(ch chan Confirmation) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.replyCh = ch
@@ -144,7 +144,7 @@ func (c Confirm) Update(msg tea.Msg) (Confirm, tea.Cmd) {
 			switch km.String() {
 			case "enter":
 				feedback := strings.TrimSpace(c.feedback.Value())
-				c.sendResponse(agent.ConfirmationResponse{Allow: false, Feedback: feedback})
+				c.sendResponse(Confirmation{Allow: false, Feedback: feedback})
 				return c, nil
 			case "esc":
 				c.mode = modeSelection
@@ -159,13 +159,13 @@ func (c Confirm) Update(msg tea.Msg) (Confirm, tea.Cmd) {
 	if km, ok := msg.(tea.KeyMsg); ok {
 		switch km.String() {
 		case "y", "Y", "enter":
-			c.sendResponse(agent.ConfirmationResponse{Allow: true})
+			c.sendResponse(Confirmation{Allow: true})
 		case "a", "A":
 			if !c.simple || c.trust {
-				c.sendResponse(agent.ConfirmationResponse{Allow: true, Always: true})
+				c.sendResponse(Confirmation{Allow: true, Always: true})
 			}
 		case "n", "N":
-			c.sendResponse(agent.ConfirmationResponse{Allow: false})
+			c.sendResponse(Confirmation{Allow: false})
 		case "f", "F":
 			if !c.simple {
 				c.mode = modeFeedback
@@ -173,13 +173,13 @@ func (c Confirm) Update(msg tea.Msg) (Confirm, tea.Cmd) {
 				return c, textinput.Blink
 			}
 		case "esc":
-			c.sendResponse(agent.ConfirmationResponse{Allow: false})
+			c.sendResponse(Confirmation{Allow: false})
 		}
 	}
 	return c, nil
 }
 
-func (c *Confirm) sendResponse(res agent.ConfirmationResponse) {
+func (c *Confirm) sendResponse(res Confirmation) {
 	c.visible = false
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -254,7 +254,11 @@ func (c Confirm) renderPermission() string {
 		lines = append(lines, label+value)
 	}
 	if p.Risk != "" {
-		lines = append(lines, lipgloss.NewStyle().Foreground(c.styles.T.Yellow).Render("Risk: "+p.Risk))
+		riskColor := c.styles.T.Yellow
+		if p.Dangerous {
+			riskColor = c.styles.T.Red
+		}
+		lines = append(lines, lipgloss.NewStyle().Foreground(riskColor).Bold(p.Dangerous).Render("Risk: "+p.Risk))
 	}
 	return strings.Join(lines, "\n")
 }

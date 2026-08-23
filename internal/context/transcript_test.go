@@ -27,7 +27,7 @@ func TestTranscriptAppendAndReconstruct(t *testing.T) {
 	toolRes := ai.Message{
 		Role: ai.RoleTool,
 		Content: []ai.ContentPart{{
-			Type: ai.ContentTypeToolResult,
+			Type:       ai.ContentTypeToolResult,
 			ToolResult: &ai.ToolResult{ToolCallID: "c1", Content: "found"},
 		}},
 	}
@@ -96,7 +96,7 @@ func TestNormalizeMessagesForAPI(t *testing.T) {
 		{
 			Role: ai.RoleTool,
 			Content: []ai.ContentPart{{
-				Type: ai.ContentTypeToolResult,
+				Type:       ai.ContentTypeToolResult,
 				ToolResult: &ai.ToolResult{ToolCallID: "c1", Content: "data"},
 			}},
 		},

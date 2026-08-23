@@ -83,7 +83,9 @@ func (*statusTool) RequiresConfirmation(string) bool      { return false }
 func (*statusTool) IsConcurrencySafe(map[string]any) bool { return true }
 func (*statusTool) IsReadOnly(map[string]any) bool        { return true }
 func (*statusTool) IsDestructive(map[string]any) bool     { return false }
-func (*statusTool) EstimatedCost() tools.ToolCost         { return tools.ToolCost{TokensApprox: 150, LatencyMs: 100, RiskLevel: "low"} }
+func (*statusTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 150, LatencyMs: 100, RiskLevel: "low"}
+}
 func (*statusTool) Meta() *tools.ToolMeta {
 	return meta("Git status", "Check what changed before staging or committing; also verifies you are inside a repository.", "")
 }
@@ -116,7 +118,9 @@ func (*diffTool) RequiresConfirmation(string) bool      { return false }
 func (*diffTool) IsConcurrencySafe(map[string]any) bool { return true }
 func (*diffTool) IsReadOnly(map[string]any) bool        { return true }
 func (*diffTool) IsDestructive(map[string]any) bool     { return false }
-func (*diffTool) EstimatedCost() tools.ToolCost         { return tools.ToolCost{TokensApprox: 300, LatencyMs: 100, RiskLevel: "low"} }
+func (*diffTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 300, LatencyMs: 100, RiskLevel: "low"}
+}
 func (*diffTool) Meta() *tools.ToolMeta {
 	return meta("Git diff", "Review your edits before committing — always diff before you commit.", "")
 }
@@ -156,7 +160,9 @@ func (*logTool) RequiresConfirmation(string) bool      { return false }
 func (*logTool) IsConcurrencySafe(map[string]any) bool { return true }
 func (*logTool) IsReadOnly(map[string]any) bool        { return true }
 func (*logTool) IsDestructive(map[string]any) bool     { return false }
-func (*logTool) EstimatedCost() tools.ToolCost         { return tools.ToolCost{TokensApprox: 250, LatencyMs: 100, RiskLevel: "low"} }
+func (*logTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 250, LatencyMs: 100, RiskLevel: "low"}
+}
 func (*logTool) Meta() *tools.ToolMeta {
 	return meta("Git log", "Inspect history for context: recent changes, blame-adjacent archaeology, release boundaries.", "")
 }
@@ -192,7 +198,9 @@ func (*addTool) Schema() map[string]any {
 func (*addTool) RequiresConfirmation(string) bool      { return false }
 func (*addTool) IsConcurrencySafe(map[string]any) bool { return false }
 func (*addTool) IsReadOnly(map[string]any) bool        { return false }
-func (*addTool) EstimatedCost() tools.ToolCost         { return tools.ToolCost{TokensApprox: 80, LatencyMs: 80, RiskLevel: "low"} }
+func (*addTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 80, LatencyMs: 80, RiskLevel: "low"}
+}
 
 func (t *addTool) IsDestructive(args map[string]any) bool {
 	return false // staging is reversible via git reset
@@ -236,11 +244,13 @@ func (*commitTool) Schema() map[string]any {
 		"required": []string{"message"},
 	}
 }
-func (*commitTool) RequiresConfirmation(string) bool    { return true }
+func (*commitTool) RequiresConfirmation(string) bool      { return true }
 func (*commitTool) IsConcurrencySafe(map[string]any) bool { return false }
-func (*commitTool) IsReadOnly(map[string]any) bool      { return false }
-func (*commitTool) IsDestructive(map[string]any) bool   { return false }
-func (*commitTool) EstimatedCost() tools.ToolCost       { return tools.ToolCost{TokensApprox: 100, LatencyMs: 150, RiskLevel: "medium"} }
+func (*commitTool) IsReadOnly(map[string]any) bool        { return false }
+func (*commitTool) IsDestructive(map[string]any) bool     { return false }
+func (*commitTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 100, LatencyMs: 150, RiskLevel: "medium"}
+}
 func (*commitTool) Meta() *tools.ToolMeta {
 	return meta("Git commit", "After staging and reviewing a diff. Write a concise message that matches the repository's existing style.",
 		"Do not bypass hooks or verification (no --no-verify); do not commit secrets.")
@@ -272,7 +282,9 @@ func (*branchTool) RequiresConfirmation(mode string) bool { return mode == "edit
 func (*branchTool) IsConcurrencySafe(map[string]any) bool { return false }
 func (*branchTool) IsReadOnly(map[string]any) bool        { return false }
 func (*branchTool) IsDestructive(map[string]any) bool     { return false }
-func (*branchTool) EstimatedCost() tools.ToolCost         { return tools.ToolCost{TokensApprox: 80, LatencyMs: 80, RiskLevel: "low"} }
+func (*branchTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 80, LatencyMs: 80, RiskLevel: "low"}
+}
 func (*branchTool) Meta() *tools.ToolMeta {
 	return meta("Git branch", "List branches for context, or create a working branch before starting a multi-file change.", "")
 }
@@ -289,8 +301,10 @@ func (t *branchTool) Execute(ctx context.Context, args map[string]any) (tools.Re
 
 type checkoutTool struct{ tools.BaseTool }
 
-func (*checkoutTool) Name() string        { return "git_checkout" }
-func (*checkoutTool) Description() string { return "Switch branches; optionally create the target first." }
+func (*checkoutTool) Name() string { return "git_checkout" }
+func (*checkoutTool) Description() string {
+	return "Switch branches; optionally create the target first."
+}
 func (*checkoutTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -301,11 +315,13 @@ func (*checkoutTool) Schema() map[string]any {
 		"required": []string{"target"},
 	}
 }
-func (*checkoutTool) RequiresConfirmation(string) bool    { return true }
+func (*checkoutTool) RequiresConfirmation(string) bool      { return true }
 func (*checkoutTool) IsConcurrencySafe(map[string]any) bool { return false }
-func (*checkoutTool) IsReadOnly(map[string]any) bool      { return false }
-func (*checkoutTool) IsDestructive(map[string]any) bool   { return false }
-func (*checkoutTool) EstimatedCost() tools.ToolCost       { return tools.ToolCost{TokensApprox: 100, LatencyMs: 120, RiskLevel: "medium"} }
+func (*checkoutTool) IsReadOnly(map[string]any) bool        { return false }
+func (*checkoutTool) IsDestructive(map[string]any) bool     { return false }
+func (*checkoutTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 100, LatencyMs: 120, RiskLevel: "medium"}
+}
 func (*checkoutTool) Meta() *tools.ToolMeta {
 	return meta("Git checkout", "Switch to an existing or new branch. Warn the user if uncommitted work might be disturbed.", "")
 }
@@ -328,8 +344,10 @@ func (t *checkoutTool) Execute(ctx context.Context, args map[string]any) (tools.
 
 type stashTool struct{ tools.BaseTool }
 
-func (*stashTool) Name() string        { return "git_stash" }
-func (*stashTool) Description() string { return "Stash changes (push), restore them (pop), or list stashes." }
+func (*stashTool) Name() string { return "git_stash" }
+func (*stashTool) Description() string {
+	return "Stash changes (push), restore them (pop), or list stashes."
+}
 func (*stashTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -344,7 +362,9 @@ func (*stashTool) RequiresConfirmation(mode string) bool { return mode == "edit"
 func (*stashTool) IsConcurrencySafe(map[string]any) bool { return false }
 func (*stashTool) IsReadOnly(map[string]any) bool        { return false }
 func (*stashTool) IsDestructive(map[string]any) bool     { return false }
-func (*stashTool) EstimatedCost() tools.ToolCost         { return tools.ToolCost{TokensApprox: 90, LatencyMs: 90, RiskLevel: "low"} }
+func (*stashTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 90, LatencyMs: 90, RiskLevel: "low"}
+}
 func (*stashTool) Meta() *tools.ToolMeta {
 	return meta("Git stash", "Shelve in-progress work when switching context mid-task; pop restores it.", "pop can conflict — read its output carefully.")
 }

@@ -46,9 +46,9 @@ func (m *mockExecutor) Execute(ctx context.Context, role AgentRole, prompt strin
 	}
 
 	return &TaskResult{
-		Success:  true,
-		Output:   fmt.Sprintf("result from %s", role),
-		Quality:  0.85,
+		Success:    true,
+		Output:     fmt.Sprintf("result from %s", role),
+		Quality:    0.85,
 		TokensUsed: 100,
 	}, nil
 }
@@ -66,7 +66,7 @@ func testConfig() *CoordinatorConfig {
 		DefaultTimeout: 5 * time.Second,
 		MaxRetries:     1,
 		ResourceLimits: ResourceLimits{
-			MaxTokensPerTask: 10000,
+			MaxTokensPerTask:   10000,
 			RateLimitPerMinute: 60,
 		},
 	}

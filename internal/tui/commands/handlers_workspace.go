@@ -11,17 +11,34 @@ import (
 
 func handleRewind(host Host, args []string) Result {
 	checkpoints := host.Checkpoints()
-	if len(checkpoints) == 0 {
-		host.AddSystemMessage("No checkpoints yet — they are captured automatically before each agent turn.")
+	if len(args) == 0 {
+		if len(checkpoints) == 0 {
+			host.AddSystemMessage("No checkpoints yet — they are captured automatically before each agent turn.")
+			return Done(nil)
+		}
+		host.OpenRewindPicker()
 		return Done(nil)
 	}
-	if len(args) == 0 {
-		host.OpenRewindPicker()
+	if args[0] == "list" {
+		for _, cp := range checkpoints {
+			host.AddSystemMessage(fmt.Sprintf("%d. %s", cp.Index, cp.Label))
+		}
 		return Done(nil)
 	}
 	n := 0
 	if _, err := fmt.Sscanf(args[0], "%d", &n); err != nil || n < 1 {
 		host.CommandUsage("/rewind <index>")
+		return Done(nil)
+	}
+	known := false
+	for _, cp := range checkpoints {
+		if cp.Index == n {
+			known = true
+			break
+		}
+	}
+	if !known {
+		host.CommandError(fmt.Sprintf("no checkpoint at index %d (see /rewind list)", n))
 		return Done(nil)
 	}
 	if err := host.RewindTo(n); err != nil {
@@ -124,6 +141,9 @@ func handleConfig(host Host, args []string) Result {
 
 func handlePermissions(host Host, args []string) Result {
 	if len(args) == 0 {
+		// Log the current grants so they are part of the transcript, then
+		// open the interactive picker on top.
+		host.HandleApprovalsCommand(nil)
 		host.OpenPermissionsPicker()
 		return Done(nil)
 	}

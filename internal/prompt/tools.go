@@ -148,10 +148,10 @@ func (t *ToolPrompts) BuildEditFilePrompt(path string, oldStr, newStr string) *P
 		Content: sb.String(),
 		Tools:   ToolSetBasic,
 		Metadata: map[string]any{
-			"tool":     "edit_file",
-			"path":     path,
-			"old_str":  oldStr,
-			"new_str":  newStr,
+			"tool":    "edit_file",
+			"path":    path,
+			"old_str": oldStr,
+			"new_str": newStr,
 		},
 	}
 }
@@ -286,14 +286,14 @@ type ToolOperation struct {
 func (t *ToolPrompts) determineToolSet(operations []ToolOperation) ToolSet {
 	maxLevel := ToolSetContextOnly
 	levels := map[string]ToolSet{
-		"read_file":         ToolSetReadOnly,
-		"read_many_files":   ToolSetReadOnly,
-		"read_file_lines":   ToolSetReadOnly,
-		"search":            ToolSetModerate,
-		"write_file":        ToolSetBasic,
-		"edit_file":         ToolSetBasic,
-		"bash":              ToolSetModerate,
-		"sql":               ToolSetModerate,
+		"read_file":       ToolSetReadOnly,
+		"read_many_files": ToolSetReadOnly,
+		"read_file_lines": ToolSetReadOnly,
+		"search":          ToolSetModerate,
+		"write_file":      ToolSetBasic,
+		"edit_file":       ToolSetBasic,
+		"bash":            ToolSetModerate,
+		"sql":             ToolSetModerate,
 	}
 
 	for _, op := range operations {
@@ -327,10 +327,10 @@ func (t *ToolPrompts) BuildFileOperationPrompt(operation, path, destination stri
 		Content: sb.String(),
 		Tools:   ToolSetBasic,
 		Metadata: map[string]any{
-			"tool":         "file_operation",
-			"operation":    operation,
-			"path":         path,
-			"destination":  destination,
+			"tool":        "file_operation",
+			"operation":   operation,
+			"path":        path,
+			"destination": destination,
 		},
 	}
 }

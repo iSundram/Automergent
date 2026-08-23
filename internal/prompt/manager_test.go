@@ -1,15 +1,15 @@
 package prompt
 
 import (
-	"strings"
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 )
 
 func TestPromptManager_NewPromptManager(t *testing.T) {
 	mockClient := &MockLLMClient{
-		Response: `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"add new API","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
+		Response:     `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"add new API","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
 		TaskResponse: `{"tasks":[{"id":"task-1","type":"implement","role":"coder","priority":1,"dependencies":[],"description":"Do the work","prompt":"Do the requested work"}]}`,
 	}
 	pm := NewPromptManager(nil, nil, "", mockClient, nil)
@@ -47,7 +47,7 @@ func TestPromptManager_NewPromptManager(t *testing.T) {
 
 func TestPromptManager_ProcessUserMessage_NewFeature(t *testing.T) {
 	mockClient := &MockLLMClient{
-		Response: `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add a new REST API endpoint","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
+		Response:     `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add a new REST API endpoint","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
 		TaskResponse: `{"tasks":[{"id":"task-1","type":"implement","role":"coder","priority":1,"dependencies":[],"description":"Do the work","prompt":"Do the requested work"}]}`,
 	}
 	pm := NewPromptManager(nil, nil, "", mockClient, nil)
@@ -114,7 +114,7 @@ func TestPromptManager_ProcessUserMessage_NewFeature(t *testing.T) {
 
 func TestPromptManager_ProcessUserMessage_Debug(t *testing.T) {
 	mockClient := &MockLLMClient{
-		Response: `{"intents":[{"type":"debug","priority":1,"confidence":0.9,"raw_text":"debug why JWT failing","parameters":{"error_type":"token"},"dependencies":[]}],"requires_init":true,"init_goal":"Understand the codebase to address: debug why JWT failing","init_actions":[{"tool":"grep","target":"error","reason":"Search for errors"}]}`,
+		Response:     `{"intents":[{"type":"debug","priority":1,"confidence":0.9,"raw_text":"debug why JWT failing","parameters":{"error_type":"token"},"dependencies":[]}],"requires_init":true,"init_goal":"Understand the codebase to address: debug why JWT failing","init_actions":[{"tool":"grep","target":"error","reason":"Search for errors"}]}`,
 		TaskResponse: `{"tasks":[{"id":"task-1","type":"implement","role":"coder","priority":1,"dependencies":[],"description":"Do the work","prompt":"Do the requested work"}]}`,
 	}
 	pm := NewPromptManager(nil, nil, "", mockClient, nil)
@@ -149,7 +149,7 @@ func TestPromptManager_ProcessUserMessage_Debug(t *testing.T) {
 
 func TestPromptManager_ProcessUserMessage_ExploreAndFix(t *testing.T) {
 	mockClient := &MockLLMClient{
-		Response: `{"intents":[{"type":"explore","priority":1,"confidence":0.9,"raw_text":"see files related to context","parameters":{"target":"context"},"dependencies":[]},{"type":"fix","priority":2,"confidence":0.85,"raw_text":"fix it","parameters":{"area":"context"},"dependencies":[]},{"type":"commit","priority":4,"confidence":0.95,"raw_text":"git commit","parameters":{"message":"fix context issue"},"dependencies":[]}],"requires_init":true,"init_goal":"Understand the codebase to address: see files related to context and there in building context there is issue, fix it and git commit","init_actions":[{"tool":"glob","target":"**/*context*","reason":"Find context-related files"}]}`,
+		Response:     `{"intents":[{"type":"explore","priority":1,"confidence":0.9,"raw_text":"see files related to context","parameters":{"target":"context"},"dependencies":[]},{"type":"fix","priority":2,"confidence":0.85,"raw_text":"fix it","parameters":{"area":"context"},"dependencies":[]},{"type":"commit","priority":4,"confidence":0.95,"raw_text":"git commit","parameters":{"message":"fix context issue"},"dependencies":[]}],"requires_init":true,"init_goal":"Understand the codebase to address: see files related to context and there in building context there is issue, fix it and git commit","init_actions":[{"tool":"glob","target":"**/*context*","reason":"Find context-related files"}]}`,
 		TaskResponse: `{"tasks":[{"id":"task-1","type":"implement","role":"coder","priority":1,"dependencies":[],"description":"Do the work","prompt":"Do the requested work"}]}`,
 	}
 	pm := NewPromptManager(nil, nil, "", mockClient, nil)
@@ -196,7 +196,7 @@ func TestPromptManager_ProcessUserMessage_ExploreAndFix(t *testing.T) {
 
 func TestPromptManager_ContinuationIsRecordedOnceAndSharesContext(t *testing.T) {
 	mockClient := &MockLLMClient{
-		Response: `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add thinking effort support","parameters":{},"dependencies":[]}],"requires_init":false}`,
+		Response:     `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add thinking effort support","parameters":{},"dependencies":[]}],"requires_init":false}`,
 		TaskResponse: `{"tasks":[{"id":"task-1","type":"implement","role":"coder","priority":1,"dependencies":[],"description":"Do the work","prompt":"Do the requested work"}]}`,
 	}
 	pm := NewPromptManager(nil, nil, "", mockClient, nil)
@@ -282,30 +282,30 @@ func TestLLMTaskPlanner_Error(t *testing.T) {
 
 func TestLLMIntentIdentifier_IdentifyIntents(t *testing.T) {
 	tests := []struct {
-		name           string
-		userMessage    string
-		mockResponse   string
-		expectedTypes  []IntentType
-		expectedInit   bool
+		name          string
+		userMessage   string
+		mockResponse  string
+		expectedTypes []IntentType
+		expectedInit  bool
 	}{
 		{
-			name:        "single implement intent",
-			userMessage: "Add a new REST API endpoint for user authentication",
-			mockResponse: `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add a new REST API endpoint","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
+			name:          "single implement intent",
+			userMessage:   "Add a new REST API endpoint for user authentication",
+			mockResponse:  `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add a new REST API endpoint","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
 			expectedTypes: []IntentType{IntentImplement},
 			expectedInit:  false,
 		},
 		{
-			name:        "explore and fix with init",
-			userMessage: "see files related to context and there in building context there is issue, fix it",
-			mockResponse: `{"intents":[{"type":"explore","priority":1,"confidence":0.9,"raw_text":"see files related to context","parameters":{"target":"context"},"dependencies":[]},{"type":"fix","priority":2,"confidence":0.85,"raw_text":"fix it","parameters":{"area":"context"},"dependencies":[]}],"requires_init":true,"init_goal":"Understand the codebase to address: see files related to context and there in building context there is issue, fix it","init_actions":[{"tool":"glob","target":"**/*context*","reason":"Find context-related files"}]}`,
+			name:          "explore and fix with init",
+			userMessage:   "see files related to context and there in building context there is issue, fix it",
+			mockResponse:  `{"intents":[{"type":"explore","priority":1,"confidence":0.9,"raw_text":"see files related to context","parameters":{"target":"context"},"dependencies":[]},{"type":"fix","priority":2,"confidence":0.85,"raw_text":"fix it","parameters":{"area":"context"},"dependencies":[]}],"requires_init":true,"init_goal":"Understand the codebase to address: see files related to context and there in building context there is issue, fix it","init_actions":[{"tool":"glob","target":"**/*context*","reason":"Find context-related files"}]}`,
 			expectedTypes: []IntentType{IntentExplore, IntentFix},
 			expectedInit:  true,
 		},
 		{
-			name:        "multi-intent: explore, implement, test, commit",
-			userMessage: "explore the codebase, implement a new feature, write tests, and commit",
-			mockResponse: `{"intents":[{"type":"explore","priority":1,"confidence":0.9,"raw_text":"explore the codebase","parameters":{},"dependencies":[]},{"type":"implement","priority":2,"confidence":0.85,"raw_text":"implement a new feature","parameters":{},"dependencies":[]},{"type":"test","priority":3,"confidence":0.8,"raw_text":"write tests","parameters":{},"dependencies":[]},{"type":"commit","priority":4,"confidence":0.95,"raw_text":"and commit","parameters":{},"dependencies":[]}],"requires_init":true,"init_goal":"Understand the codebase to address: explore the codebase, implement a new feature, write tests, and commit","init_actions":[{"tool":"glob","target":"**/*","reason":"Find relevant files"}]}`,
+			name:          "multi-intent: explore, implement, test, commit",
+			userMessage:   "explore the codebase, implement a new feature, write tests, and commit",
+			mockResponse:  `{"intents":[{"type":"explore","priority":1,"confidence":0.9,"raw_text":"explore the codebase","parameters":{},"dependencies":[]},{"type":"implement","priority":2,"confidence":0.85,"raw_text":"implement a new feature","parameters":{},"dependencies":[]},{"type":"test","priority":3,"confidence":0.8,"raw_text":"write tests","parameters":{},"dependencies":[]},{"type":"commit","priority":4,"confidence":0.95,"raw_text":"and commit","parameters":{},"dependencies":[]}],"requires_init":true,"init_goal":"Understand the codebase to address: explore the codebase, implement a new feature, write tests, and commit","init_actions":[{"tool":"glob","target":"**/*","reason":"Find relevant files"}]}`,
 			expectedTypes: []IntentType{IntentExplore, IntentImplement, IntentTest, IntentCommit},
 			expectedInit:  true,
 		},
@@ -364,7 +364,7 @@ func TestLLMIntentIdentifier_ErrorHandling(t *testing.T) {
 
 func TestPromptManager_WithLLMClient(t *testing.T) {
 	mockClient := &MockLLMClient{
-		Response: `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add a new REST API endpoint","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
+		Response:     `{"intents":[{"type":"implement","priority":2,"confidence":0.9,"raw_text":"Add a new REST API endpoint","parameters":{"type":"api"},"dependencies":[]}],"requires_init":false}`,
 		TaskResponse: `{"tasks":[{"id":"task-1","type":"implement","role":"coder","priority":1,"dependencies":[],"description":"Do the work","prompt":"Do the requested work"}]}`,
 	}
 	pm := NewPromptManager(nil, nil, "", mockClient, nil)

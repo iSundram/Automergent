@@ -16,9 +16,9 @@ import (
 type MemoryTier int
 
 const (
-	TierGlobal MemoryTier = iota // ~/.automergent/*.md
-	TierProject                  // AUTOMERGENT.md in project root
-	TierSubdir                   // .automergent.md in subdirectories (JIT)
+	TierGlobal  MemoryTier = iota // ~/.automergent/*.md
+	TierProject                   // AUTOMERGENT.md in project root
+	TierSubdir                    // .automergent.md in subdirectories (JIT)
 )
 
 // JITMemoryLoader handles tiered, just-in-time loading of memory files.
@@ -28,15 +28,15 @@ type JITMemoryLoader struct {
 	globalPaths  []string
 	projectPaths map[string][]string // projectDir -> paths
 	subdirCache  map[string]*SubdirMemory
-	loaded       map[string]bool     // path -> loaded
+	loaded       map[string]bool // path -> loaded
 	accessLog    []MemoryAccess
 }
 
 // SubdirMemory holds memory for a subdirectory.
 type SubdirMemory struct {
-	Path      string
-	Content   string
-	LoadedAt  time.Time
+	Path        string
+	Content     string
+	LoadedAt    time.Time
 	AccessCount int
 }
 
@@ -232,20 +232,20 @@ func (j *JITMemoryLoader) EvictOld() {
 
 // WorldState tracks project context state for diff-based rendering.
 type WorldState struct {
-	mu           sync.RWMutex
-	baseline     *WorldStateSnapshot // last emitted snapshot
-	current      *WorldStateSnapshot
-	sections     map[string]string   // section name -> content
-	projectDir   string
+	mu         sync.RWMutex
+	baseline   *WorldStateSnapshot // last emitted snapshot
+	current    *WorldStateSnapshot
+	sections   map[string]string // section name -> content
+	projectDir string
 }
 
 // WorldStateSnapshot is a point-in-time capture of world state.
 type WorldStateSnapshot struct {
-	Sections    map[string]string `json:"sections"`
-	ProjectDir  string            `json:"project_dir"`
-	GitCommit   string            `json:"git_commit,omitempty"`
-	Timestamp   time.Time         `json:"timestamp"`
-	TokenCount  int               `json:"token_count"`
+	Sections   map[string]string `json:"sections"`
+	ProjectDir string            `json:"project_dir"`
+	GitCommit  string            `json:"git_commit,omitempty"`
+	Timestamp  time.Time         `json:"timestamp"`
+	TokenCount int               `json:"token_count"`
 }
 
 // NewWorldState creates a world state tracker.

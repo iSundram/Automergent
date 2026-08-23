@@ -1,16 +1,9 @@
-package tui
+package app
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"context"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime/debug"
-	"sort"
-	"strings"
-
-	tea "charm.land/bubbletea/v2"
-
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/sandbox"
@@ -19,6 +12,11 @@ import (
 	"github.com/iSundram/Automergent/internal/tui/keys"
 	"github.com/iSundram/Automergent/internal/tui/render"
 	"github.com/iSundram/Automergent/internal/tui/themes"
+	"os"
+	"path/filepath"
+	"runtime/debug"
+	"sort"
+	"strings"
 )
 
 // Compile-time guarantee that App satisfies the command host contract.

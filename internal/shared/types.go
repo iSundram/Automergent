@@ -142,29 +142,29 @@ type ContextStash struct {
 type IntentType string
 
 const (
-	IntentExplore      IntentType = "explore"
-	IntentImplement    IntentType = "implement"
-	IntentFix          IntentType = "fix"
-	IntentTest         IntentType = "test"
-	IntentCommit       IntentType = "commit"
-	IntentReview       IntentType = "review"
-	IntentDocument     IntentType = "document"
-	IntentRefactor     IntentType = "refactor"
-	IntentDebug        IntentType = "debug"
-	IntentQuestion     IntentType = "question"
-	IntentPlan         IntentType = "plan"
-	IntentDirect       IntentType = "direct"
+	IntentExplore   IntentType = "explore"
+	IntentImplement IntentType = "implement"
+	IntentFix       IntentType = "fix"
+	IntentTest      IntentType = "test"
+	IntentCommit    IntentType = "commit"
+	IntentReview    IntentType = "review"
+	IntentDocument  IntentType = "document"
+	IntentRefactor  IntentType = "refactor"
+	IntentDebug     IntentType = "debug"
+	IntentQuestion  IntentType = "question"
+	IntentPlan      IntentType = "plan"
+	IntentDirect    IntentType = "direct"
 )
 
 // Intent represents a single identified intent from the user message.
 type Intent struct {
-	ID            string
-	Type          IntentType
-	Priority      int
-	Dependencies  []string
-	Parameters    map[string]any
-	RawText       string
-	Confidence    float64
+	ID           string
+	Type         IntentType
+	Priority     int
+	Dependencies []string
+	Parameters   map[string]any
+	RawText      string
+	Confidence   float64
 }
 
 // IntentSet represents a collection of intents identified from a message.
@@ -186,12 +186,12 @@ type InitPhase struct {
 
 // InitAction represents a single exploration action.
 type InitAction struct {
-	ID       string
-	Tool     string
-	Target   string
-	Reason   string
-	Status   InitActionStatus
-	Result   string
+	ID     string
+	Tool   string
+	Target string
+	Reason string
+	Status InitActionStatus
+	Result string
 }
 
 // InitActionStatus represents the status of an init action.
@@ -220,25 +220,25 @@ type InitActionEvent struct {
 
 // InitResults holds the results of the initialization phase.
 type InitResults struct {
-	FilesFound       []string
-	CodeSnippets     map[string]string
-	Errors           []string
-	Summary          string
-	CompletedAt      time.Time
+	FilesFound   []string
+	CodeSnippets map[string]string
+	Errors       []string
+	Summary      string
+	CompletedAt  time.Time
 }
 
 // TaskSpec represents a generated task specification.
 type TaskSpec struct {
-	ID            string
-	IntentID      string
-	Type          string
-	Role          string
-	Priority      int
-	Dependencies  []string
-	Prompt        string
-	Context       map[string]any
-	Tools         []string
-	Description   string
+	ID           string
+	IntentID     string
+	Type         string
+	Role         string
+	Priority     int
+	Dependencies []string
+	Prompt       string
+	Context      map[string]any
+	Tools        []string
+	Description  string
 }
 
 // PromptPart represents a part of a prompt sent at a specific stage.

@@ -34,8 +34,8 @@ type TranscriptItem struct {
 	Kind      TranscriptItemKind `json:"kind"`
 	Role      ai.Role            `json:"role"`
 	Parts     []PartRef          `json:"parts"`
-	ParentID  string             `json:"parent_id,omitempty"`  // replacesId
-	Abstracts []string           `json:"abstracts,omitempty"`  // abstractsIds
+	ParentID  string             `json:"parent_id,omitempty"` // replacesId
+	Abstracts []string           `json:"abstracts,omitempty"` // abstractsIds
 	TurnID    string             `json:"turn_id,omitempty"`
 	Seq       int64              `json:"seq"`
 	Compacted bool               `json:"compacted,omitempty"`

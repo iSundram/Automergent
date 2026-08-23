@@ -6,8 +6,8 @@ import (
 	"sync"
 
 	"charm.land/glamour/v2"
-	"charm.land/glamour/v2/styles"
 	"charm.land/glamour/v2/ansi"
+	"charm.land/glamour/v2/styles"
 )
 
 var (

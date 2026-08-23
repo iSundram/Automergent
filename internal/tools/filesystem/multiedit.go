@@ -21,15 +21,17 @@ func NewMultiEditTool(cfg *config.Config) *MultiEditTool {
 	return &MultiEditTool{cfg: cfg}
 }
 
-func (*MultiEditTool) Name() string        { return "multi_edit" }
-func (*MultiEditTool) Description() string { return "Apply multiple exact replacements to one file in a single call." }
+func (*MultiEditTool) Name() string { return "multi_edit" }
+func (*MultiEditTool) Description() string {
+	return "Apply multiple exact replacements to one file in a single call."
+}
 func (*MultiEditTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
 			"path": map[string]any{"type": "string", "description": "File to edit"},
 			"edits": map[string]any{
-				"type":  "array",
+				"type":        "array",
 				"description": "Applied in order; each old_str must match exactly and uniquely at apply time.",
 				"items": map[string]any{
 					"type": "object",
@@ -48,7 +50,9 @@ func (*MultiEditTool) Schema() map[string]any {
 func (*MultiEditTool) RequiresConfirmation(mode string) bool { return mode == "edit" || mode == "plan" }
 func (*MultiEditTool) IsConcurrencySafe(map[string]any) bool { return false }
 func (*MultiEditTool) IsReadOnly(map[string]any) bool        { return false }
-func (*MultiEditTool) EstimatedCost() tools.ToolCost         { return tools.ToolCost{TokensApprox: 150, LatencyMs: 60, RiskLevel: "medium"} }
+func (*MultiEditTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 150, LatencyMs: 60, RiskLevel: "medium"}
+}
 
 func (t *MultiEditTool) IsDestructive(args map[string]any) bool {
 	raw, ok := args["edits"].([]any)

@@ -10,9 +10,9 @@ import (
 // normalization/hardening for the model-facing sequence. It is the single
 // stateful owner of conversation history across turns.
 type TranscriptManager struct {
-	mu        sync.RWMutex
+	mu         sync.RWMutex
 	transcript *Transcript
-	turnID    string
+	turnID     string
 }
 
 // NewTranscriptManager creates a transcript manager.

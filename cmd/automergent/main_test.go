@@ -54,8 +54,6 @@ func TestRememberedProjectDoesNotRequireApproval(t *testing.T) {
 	}
 }
 
-
-
 func TestParseOutputFormat(t *testing.T) {
 	tests := []struct {
 		name     string

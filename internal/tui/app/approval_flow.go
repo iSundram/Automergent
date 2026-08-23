@@ -1,14 +1,12 @@
-package tui
+package app
 
 import (
+	tea "charm.land/bubbletea/v2"
+	lipgloss "charm.land/lipgloss/v2"
+	"github.com/iSundram/Automergent/internal/config"
 	"os"
 	"os/user"
 	"strings"
-
-	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
-
-	"github.com/iSundram/Automergent/internal/config"
 )
 
 // projectApprovalResult is the outcome of the pre-TUI project trust gate.

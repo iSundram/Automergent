@@ -1,17 +1,15 @@
-package tui
+package app
 
 import (
 	"fmt"
+	"github.com/iSundram/Automergent/internal/ai"
+	"github.com/iSundram/Automergent/internal/session"
+	"github.com/iSundram/Automergent/internal/tui/commands"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
-
-
-	"github.com/iSundram/Automergent/internal/ai"
-	"github.com/iSundram/Automergent/internal/session"
-	"github.com/iSundram/Automergent/internal/tui/commands"
 )
 
 // exportConversation writes a readable, deterministic Markdown transcript.

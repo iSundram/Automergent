@@ -135,9 +135,11 @@ type ControlTool struct {
 	tools.BaseTool
 }
 
-func (*ControlTool) Name() string        { return "agent_control" }
-func (*ControlTool) Description() string { return "Manage running/completed subagents: continue their thread, fork one, interrupt it, or list them." }
-func (*ControlTool) RequiresConfirmation(string) bool    { return false }
+func (*ControlTool) Name() string { return "agent_control" }
+func (*ControlTool) Description() string {
+	return "Manage running/completed subagents: continue their thread, fork one, interrupt it, or list them."
+}
+func (*ControlTool) RequiresConfirmation(string) bool      { return false }
 func (*ControlTool) IsConcurrencySafe(map[string]any) bool { return true }
 func (*ControlTool) IsReadOnly(args map[string]any) bool {
 	action, _ := tools.StringArg(args, "action")
@@ -393,6 +395,71 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// AgentSnapshot is a safe point-in-time view of an instance for UIs.
+type AgentSnapshot struct {
+	ID      string
+	Name    string
+	Type    string
+	Status  string
+	Turns   int
+	Elapsed string
+}
+
+// Snapshot returns a locked copy of the instance state.
+func (a *AgentInstance) Snapshot() AgentSnapshot {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := AgentSnapshot{
+		ID:     a.ID,
+		Name:   a.Name,
+		Type:   string(a.Type),
+		Status: string(a.Status),
+		Turns:  len(a.Turns),
+	}
+	if !a.StartedAt.IsZero() {
+		end := a.CompletedAt
+		if end.IsZero() {
+			end = time.Now()
+		}
+		out.Elapsed = end.Sub(a.StartedAt).Round(time.Second).String()
+	}
+	return out
+}
+
+// ControlAction runs one subagent operation programmatically (UI entry
+// point): action is list|continue|fork|interrupt.
+func ControlAction(action, agentID, prompt, mode string) string {
+	switch action {
+	case "interrupt":
+		if inst, ok := GetAgentManager().Get(agentID); ok {
+			inst.mu.Lock()
+			terminal := isTerminalAgentStatus(inst.Status)
+			inst.mu.Unlock()
+			if terminal {
+				return fmt.Sprintf("%s already %s", agentID, inst.Status)
+			}
+			if cAny, loaded := cancelRegistry.Load(agentID); loaded {
+				if cancel, ok := cAny.(context.CancelFunc); ok {
+					cancel()
+				}
+			}
+			_ = GetAgentManager().UpdateStatus(agentID, AgentStatusCancelled, "interrupted", nil)
+			inst.dismiss.Do(func() { close(inst.done) })
+			return fmt.Sprintf("interrupted %s", agentID)
+		}
+		return fmt.Sprintf("agent %q not found", agentID)
+	case "list":
+		var sb strings.Builder
+		for _, inst := range GetAgentManager().List(true) {
+			snap := inst.Snapshot()
+			fmt.Fprintf(&sb, "- %s [%s] %s\n", snap.ID, snap.Status, snap.Type)
+		}
+		return strings.TrimRight(sb.String(), "\n")
+	default:
+		return fmt.Sprintf("action %q requires the task tool path", action)
+	}
 }
 
 // RegisterControlTool wires the control tool into a registry.

@@ -525,11 +525,11 @@ func extractQuotedString(s string) string {
 
 // ContextSelector selects relevant context files.
 type ContextSelector struct {
-	graph          *DependencyGraph
-	ranker         *Ranker
-	budget         *TokenBudget
-	detector       *StalenessDetector
-	fileProvider   func(context.Context, string) (string, bool)
+	graph        *DependencyGraph
+	ranker       *Ranker
+	budget       *TokenBudget
+	detector     *StalenessDetector
+	fileProvider func(context.Context, string) (string, bool)
 }
 
 // ContextSignal captures the signals used to select and rank a file.

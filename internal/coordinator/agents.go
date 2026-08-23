@@ -11,41 +11,41 @@ import (
 
 // researcherAgent implements the Researcher agent type.
 type researcherAgent struct {
-	id           string
-	model        string
-	executor     AgentExecutor
+	id            string
+	model         string
+	executor      AgentExecutor
 	promptManager *prompt.PromptManager
 }
 
 // coderAgent implements the Coder agent type.
 type coderAgent struct {
-	id           string
-	model        string
-	executor     AgentExecutor
+	id            string
+	model         string
+	executor      AgentExecutor
 	promptManager *prompt.PromptManager
 }
 
 // reviewerAgent implements the Reviewer agent type.
 type reviewerAgent struct {
-	id           string
-	model        string
-	executor     AgentExecutor
+	id            string
+	model         string
+	executor      AgentExecutor
 	promptManager *prompt.PromptManager
 }
 
 // testerAgent implements the Tester agent type.
 type testerAgent struct {
-	id           string
-	model        string
-	executor     AgentExecutor
+	id            string
+	model         string
+	executor      AgentExecutor
 	promptManager *prompt.PromptManager
 }
 
 // documenterAgent implements the Documenter agent type.
 type documenterAgent struct {
-	id           string
-	model        string
-	executor     AgentExecutor
+	id            string
+	model         string
+	executor      AgentExecutor
 	promptManager *prompt.PromptManager
 }
 

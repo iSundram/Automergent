@@ -16,9 +16,9 @@ type Header struct {
 	model          string
 	provider       string
 	mode           string
-	phase          string  // "research", "plan", "execute"
-	activeTokens   int     // tokens in current prompt (active context)
-	totalTokens    int     // cumulative session tokens
+	phase          string // "research", "plan", "execute"
+	activeTokens   int    // tokens in current prompt (active context)
+	totalTokens    int    // cumulative session tokens
 	maxTokens      int
 	adaptiveWeight float64 // learned token estimation weight (1.0 = perfect)
 	cost           float64 // session cost in USD

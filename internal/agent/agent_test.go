@@ -22,8 +22,8 @@ func (m *mockLLMProvider) Complete(ctx context.Context, req ai.CompletionRequest
 	return ai.NewStaticResponse("ok", "", nil, ai.StopReasonEnd, ai.Usage{}), nil
 }
 func (m *mockLLMProvider) Models(ctx context.Context) ([]ai.Model, error) { return nil, nil }
-func (m *mockLLMProvider) TokenCount(messages []ai.Message) (int, error) { return 0, nil }
-func (m *mockLLMProvider) ContextLimit() int { return 128000 }
+func (m *mockLLMProvider) TokenCount(messages []ai.Message) (int, error)  { return 0, nil }
+func (m *mockLLMProvider) ContextLimit() int                              { return 128000 }
 
 type scopeTestTool struct {
 	readOnly    bool

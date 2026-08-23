@@ -21,7 +21,7 @@ func newTestSelector(items []SelectorItem) SelectorOverlay {
 func TestSelectorEnterEmitsSelection(t *testing.T) {
 	s := newTestSelector([]SelectorItem{{Label: "first"}, {Label: "second"}})
 	s2, cmd := s.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	if !s2.Visible() {
+	if s2.Visible() {
 		t.Fatal("overlay should hide after selection")
 	}
 	if cmd == nil {

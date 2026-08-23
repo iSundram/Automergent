@@ -1,13 +1,12 @@
-package tui
+package app
 
 import (
-	"os"
-	"strings"
-	"testing"
-
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/iSundram/Automergent/internal/config"
+	"os"
+	"strings"
+	"testing"
 )
 
 func testApprovalCfg() *config.Config {

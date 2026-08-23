@@ -28,17 +28,17 @@ type PromptManager struct {
 	toolExecutor     ToolExecutor
 
 	// State — one unified context (no assistant/coder split)
-	turnCtx           *TurnContext
-	currentIntentSet  *shared.IntentSet
-	currentInitPhase  *InitPhase
+	turnCtx            *TurnContext
+	currentIntentSet   *shared.IntentSet
+	currentInitPhase   *InitPhase
 	currentInitResults *shared.InitResults
-	currentTasks      []shared.TaskSpec
-	promptHistory     []PromptPart
-	stashedContexts   []ContextStash
-	workingDir        string
-	progress          func(stage, detail string)
-	actionObserver    func(shared.InitActionEvent)
-	mu                sync.RWMutex
+	currentTasks       []shared.TaskSpec
+	promptHistory      []PromptPart
+	stashedContexts    []ContextStash
+	workingDir         string
+	progress           func(stage, detail string)
+	actionObserver     func(shared.InitActionEvent)
+	mu                 sync.RWMutex
 
 	// Task state store for tools
 	taskState *taskstate.Store

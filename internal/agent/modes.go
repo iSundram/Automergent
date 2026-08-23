@@ -24,7 +24,7 @@ var readOnlyPlusFinish = func(extra ...string) map[string]bool {
 		"web_search": true, "web_fetch": true,
 		"git_status": true, "git_diff": true, "git_log": true,
 		"todo_list": true, "todo_next": true, "todo_write": true,
-		"finish":    true, "ask_user": true, "wait": true,
+		"finish": true, "ask_user": true, "wait": true,
 	}
 	for _, name := range extra {
 		m[name] = true

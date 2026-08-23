@@ -20,19 +20,19 @@ type StatusBar struct {
 	browsing       bool
 
 	// HUD segments (IDE chrome)
-	ctxPercent    float64 // context window usage, 0-100+
-	pendingEdits  int     // edits awaiting review
-	branch        string  // git branch (+ahead/behind suffix)
-	problems      int     // diagnostics introduced this session
-	showSegments  bool
+	ctxPercent   float64 // context window usage, 0-100+
+	pendingEdits int     // edits awaiting review
+	branch       string  // git branch (+ahead/behind suffix)
+	problems     int     // diagnostics introduced this session
+	showSegments bool
 }
 
 // NewStatusBar creates a new StatusBar.
 func NewStatusBar(styles *themes.Styles) StatusBar {
 	return StatusBar{
-		styles:      styles,
-		status:      "Ready",
-		startTime:   time.Now(),
+		styles:       styles,
+		status:       "Ready",
+		startTime:    time.Now(),
 		showSegments: true,
 	}
 }
@@ -188,4 +188,56 @@ func (s StatusBar) View() string {
 		Border(lipgloss.NormalBorder(), true, false, false, false). // Top border for footer
 		BorderForeground(s.styles.T.BorderNormal).
 		Render(content)
+}
+
+// hudSegments renders the IDE-chrome segments between the shortcuts and the
+// clock: context meter · pending-review · problems · git branch.
+func (s StatusBar) hudSegments() []string {
+	if !s.showSegments || s.width < 90 {
+		return nil
+	}
+	segStyle := lipgloss.NewStyle().Foreground(s.styles.T.Muted)
+	warnStyle := lipgloss.NewStyle().Foreground(s.styles.T.Yellow).Bold(true)
+	errStyle := lipgloss.NewStyle().Foreground(s.styles.T.Red).Bold(true)
+	accent := lipgloss.NewStyle().Foreground(s.styles.T.Accent)
+
+	var parts []string
+
+	// Context meter: "ctx 34% ###-----", warning tint past 80%.
+	if s.ctxPercent > 0 {
+		filled := int(s.ctxPercent / 10)
+		if filled > 10 {
+			filled = 10
+		}
+		meter := strings.Repeat("#", filled) + strings.Repeat("-", 10-filled)
+		style := segStyle
+		hint := ""
+		if s.ctxPercent >= 80 {
+			style = warnStyle
+			hint = "!"
+		}
+		parts = append(parts, style.Render(fmt.Sprintf("ctx %.0f%% %s%s", s.ctxPercent, meter, hint)))
+	}
+
+	// Pending review count — jumps to diff pane in app handling.
+	if s.pendingEdits > 0 {
+		parts = append(parts, warnStyle.Render(fmt.Sprintf("%d pending", s.pendingEdits)))
+	}
+
+	// Problems count from session-edited files.
+	if s.problems > 0 {
+		parts = append(parts, errStyle.Render(fmt.Sprintf("%X problems", s.problems)))
+	}
+
+	// Git branch.
+	if s.branch != "" {
+		parts = append(parts, accent.Render(" "+s.branch))
+	}
+
+	for i, p := range parts {
+		if i < len(parts)-1 {
+			parts[i] = p + segStyle.Render(" │ ")
+		}
+	}
+	return parts
 }

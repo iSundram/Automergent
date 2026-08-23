@@ -105,7 +105,6 @@ func TestGreetingDoesNotCallProviderOrExposeTools(t *testing.T) {
 	provider := &firstMessageRecordingProvider{}
 	ag := newFirstMessageTestAgent(provider)
 
-
 	if err := ag.Run(context.Background(), "hi"); err != nil {
 		t.Fatalf("run failed: %v", err)
 	}

@@ -28,8 +28,6 @@ func TestDefaultAndApplyFlags(t *testing.T) {
 	}
 }
 
-
-
 func TestSaveIfLoadedDoesNotCreateMissingConfig(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	cfg := Default()

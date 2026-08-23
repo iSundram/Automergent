@@ -11,12 +11,12 @@ import (
 
 // TaskRecord holds a task with its current status and metadata.
 type TaskRecord struct {
-	TaskSpec   shared.TaskSpec
-	Status     shared.TodoStatus
-	Assignee   string
-	Result     string
-	Error      string
-	StartedAt  time.Time
+	TaskSpec    shared.TaskSpec
+	Status      shared.TodoStatus
+	Assignee    string
+	Result      string
+	Error       string
+	StartedAt   time.Time
 	CompletedAt time.Time
 }
 
@@ -28,8 +28,8 @@ type Store struct {
 	mu sync.RWMutex
 
 	// Task plan (created by LLM task planner)
-	Plan     []shared.TaskSpec
-	Records  map[string]*TaskRecord // keyed by task ID
+	Plan    []shared.TaskSpec
+	Records map[string]*TaskRecord // keyed by task ID
 
 	// Context buckets: named stores for sharing context between agents/tasks
 	Buckets map[string]Bucket
@@ -48,12 +48,12 @@ type Store struct {
 // NewStore creates an empty store.
 func NewStore() *Store {
 	return &Store{
-		Plan:       nil,
-		Records:    make(map[string]*TaskRecord),
-		Buckets:    make(map[string]Bucket),
-		IntentSet:  nil,
+		Plan:        nil,
+		Records:     make(map[string]*TaskRecord),
+		Buckets:     make(map[string]Bucket),
+		IntentSet:   nil,
 		InitResults: nil,
-		todoItems:  nil,
+		todoItems:   nil,
 	}
 }
 

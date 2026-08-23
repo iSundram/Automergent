@@ -27,15 +27,15 @@ type ContextBreakdown struct {
 
 // CompactionEvent records a compaction action.
 type CompactionEvent struct {
-	Timestamp   time.Time        `json:"timestamp"`
-	Reason      CompactionReason `json:"reason"`
-	Phase       CompactionPhase  `json:"phase"`
-	Strategy    CompactionStrategy `json:"strategy"`
-	TokensBefore int            `json:"tokens_before"`
-	TokensAfter  int            `json:"tokens_after"`
-	DurationMs  int64           `json:"duration_ms"`
-	Success     bool            `json:"success"`
-	Error       string          `json:"error,omitempty"`
+	Timestamp    time.Time          `json:"timestamp"`
+	Reason       CompactionReason   `json:"reason"`
+	Phase        CompactionPhase    `json:"phase"`
+	Strategy     CompactionStrategy `json:"strategy"`
+	TokensBefore int                `json:"tokens_before"`
+	TokensAfter  int                `json:"tokens_after"`
+	DurationMs   int64              `json:"duration_ms"`
+	Success      bool               `json:"success"`
+	Error        string             `json:"error,omitempty"`
 }
 
 // UsageEvent tracks token usage and cost.
@@ -51,13 +51,13 @@ type UsageEvent struct {
 
 // TelemetryCollector aggregates context and usage telemetry.
 type TelemetryCollector struct {
-	mu              sync.RWMutex
-	breakdowns      []ContextBreakdown
+	mu               sync.RWMutex
+	breakdowns       []ContextBreakdown
 	compactionEvents []CompactionEvent
-	usageEvents     []UsageEvent
-	maxEvents       int
-	path            string
-	costTracker     *CostTracker
+	usageEvents      []UsageEvent
+	maxEvents        int
+	path             string
+	costTracker      *CostTracker
 }
 
 // NewTelemetryCollector creates a telemetry collector with persistence.
@@ -213,9 +213,9 @@ func (tc *TelemetryCollector) Load() error {
 
 // CostTracker maintains per-model cost accumulation.
 type CostTracker struct {
-	mu       sync.RWMutex
-	models   map[string]*ModelCost
-	pricing  map[string]ModelPricing
+	mu      sync.RWMutex
+	models  map[string]*ModelCost
+	pricing map[string]ModelPricing
 }
 
 // ModelPricing defines cost per 1K tokens.
@@ -234,23 +234,23 @@ type ModelCost struct {
 
 // CostSummary aggregates cost across models.
 type CostSummary struct {
-	TotalCostUSD     float64            `json:"total_cost_usd"`
-	TotalInputTokens int                `json:"total_input_tokens"`
-	TotalOutputTokens int               `json:"total_output_tokens"`
-	ByModel          map[string]ModelCost `json:"by_model"`
+	TotalCostUSD      float64              `json:"total_cost_usd"`
+	TotalInputTokens  int                  `json:"total_input_tokens"`
+	TotalOutputTokens int                  `json:"total_output_tokens"`
+	ByModel           map[string]ModelCost `json:"by_model"`
 }
 
 // DefaultPricing returns known model pricing (as of 2024).
 func DefaultPricing() map[string]ModelPricing {
 	return map[string]ModelPricing{
-		"gemini-3.6-flash":   {InputPer1K: 0.000075, OutputPer1K: 0.0003},
-		"gemini-3.6-pro":     {InputPer1K: 0.000125, OutputPer1K: 0.0005},
-		"gemini-2.5-pro":     {InputPer1K: 0.000125, OutputPer1K: 0.0005},
-		"gemini-2.5-flash":   {InputPer1K: 0.000075, OutputPer1K: 0.0003},
-		"gpt-4o":             {InputPer1K: 0.005, OutputPer1K: 0.015},
-		"gpt-4o-mini":        {InputPer1K: 0.00015, OutputPer1K: 0.0006},
-		"claude-3.5-sonnet":  {InputPer1K: 0.003, OutputPer1K: 0.015},
-		"claude-3.5-haiku":   {InputPer1K: 0.00025, OutputPer1K: 0.00125},
+		"gemini-3.6-flash":  {InputPer1K: 0.000075, OutputPer1K: 0.0003},
+		"gemini-3.6-pro":    {InputPer1K: 0.000125, OutputPer1K: 0.0005},
+		"gemini-2.5-pro":    {InputPer1K: 0.000125, OutputPer1K: 0.0005},
+		"gemini-2.5-flash":  {InputPer1K: 0.000075, OutputPer1K: 0.0003},
+		"gpt-4o":            {InputPer1K: 0.005, OutputPer1K: 0.015},
+		"gpt-4o-mini":       {InputPer1K: 0.00015, OutputPer1K: 0.0006},
+		"claude-3.5-sonnet": {InputPer1K: 0.003, OutputPer1K: 0.015},
+		"claude-3.5-haiku":  {InputPer1K: 0.00025, OutputPer1K: 0.00125},
 	}
 }
 

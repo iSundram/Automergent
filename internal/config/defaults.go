@@ -43,10 +43,10 @@ func Default() *Config {
 		NoTUI:                false,
 		Quiet:                false,
 		Verbose:              false,
-ReasoningPreAnalysis: false,
-	Debug:                DefaultDebugConfig(),
+		ReasoningPreAnalysis: false,
+		Debug:                DefaultDebugConfig(),
 
-	Security: SecurityConfig{
+		Security: SecurityConfig{
 			Sandbox:                "auto",
 			RequireGitForAutoModes: true,
 			BlockedWritePaths: []string{
@@ -119,11 +119,11 @@ ReasoningPreAnalysis: false,
 			ContextWarning: true,
 		},
 		Coordinator: CoordinatorConfig{
-			Enabled:          false, // Opt-in: set to true to enable multi-agent coordination
-			WorkersPerRole:   map[string]int{"researcher": 2, "coder": 2, "reviewer": 1, "tester": 1, "documenter": 1},
-			DefaultTimeout:   "5m",
-			MaxRetries:       3,
-			QualityThreshold: 0.7,
+			Enabled:            false, // Opt-in: set to true to enable multi-agent coordination
+			WorkersPerRole:     map[string]int{"researcher": 2, "coder": 2, "reviewer": 1, "tester": 1, "documenter": 1},
+			DefaultTimeout:     "5m",
+			MaxRetries:         3,
+			QualityThreshold:   0.7,
 			ConsensusThreshold: 2,
 			ResourceLimits: CoordinatorResourceLimits{
 				MaxTokensPerTask:   100000,

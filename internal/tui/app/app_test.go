@@ -1,12 +1,6 @@
-package tui
+package app
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
-	"testing"
-	"time"
-
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/iSundram/Automergent/internal/agent"
@@ -16,6 +10,11 @@ import (
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
 	"github.com/iSundram/Automergent/internal/tui/components"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
 )
 
 func newTestApp(t *testing.T) *App {

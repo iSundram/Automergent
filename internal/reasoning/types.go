@@ -248,11 +248,11 @@ type Fix struct {
 
 // FailureAnalysis represents comprehensive failure analysis results.
 type FailureAnalysis struct {
-	RootCause       string         `json:"root_cause"`
-	Confidence      float64        `json:"confidence"`
-	ErrorPatterns   []ErrorPattern `json:"error_patterns"`
-	FailedTasks     []FailedTask   `json:"failed_tasks"`
-	SuggestedFixes  []Fix          `json:"suggested_fixes"`
+	RootCause      string         `json:"root_cause"`
+	Confidence     float64        `json:"confidence"`
+	ErrorPatterns  []ErrorPattern `json:"error_patterns"`
+	FailedTasks    []FailedTask   `json:"failed_tasks"`
+	SuggestedFixes []Fix          `json:"suggested_fixes"`
 	Retryable      bool           `json:"retryable"`
 	RequiresManual bool           `json:"requires_manual"`
 	AnalyzedAt     time.Time      `json:"analyzed_at"`

@@ -125,7 +125,7 @@ func (i *LLMIntentIdentifier) parseResponse(response, originalPrompt string) (*I
 	}
 
 	var parsed struct {
-		Intents      []struct {
+		Intents []struct {
 			Type         string         `json:"type"`
 			Priority     int            `json:"priority"`
 			Confidence   float64        `json:"confidence"`
@@ -133,7 +133,7 @@ func (i *LLMIntentIdentifier) parseResponse(response, originalPrompt string) (*I
 			Parameters   map[string]any `json:"parameters"`
 			Dependencies []string       `json:"dependencies"`
 		} `json:"intents"`
-		RequiresInit bool `json:"requires_init"`
+		RequiresInit bool   `json:"requires_init"`
 		InitGoal     string `json:"init_goal"`
 		InitActions  []struct {
 			Tool   string `json:"tool"`
@@ -175,13 +175,13 @@ func (i *LLMIntentIdentifier) parseResponse(response, originalPrompt string) (*I
 		}
 
 		intentSet.Intents = append(intentSet.Intents, Intent{
-			ID:            id,
-			Type:          intentType,
-			Priority:      intent.Priority,
-			Dependencies:  dependencies,
-			Parameters:    intent.Parameters,
-			RawText:       intent.RawText,
-			Confidence:    intent.Confidence,
+			ID:           id,
+			Type:         intentType,
+			Priority:     intent.Priority,
+			Dependencies: dependencies,
+			Parameters:   intent.Parameters,
+			RawText:      intent.RawText,
+			Confidence:   intent.Confidence,
 		})
 	}
 

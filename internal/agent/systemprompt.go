@@ -140,4 +140,3 @@ func (a *Agent) buildUnifiedSystemPrompt(ctx context.Context, provider ai.Provid
 
 	return sb.String()
 }
-

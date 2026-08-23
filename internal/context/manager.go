@@ -836,11 +836,11 @@ func (m *Manager) ResumeContext(path string) *ContextItem {
 
 	now := time.Now()
 	return &ContextItem{
-		Path:       cached.path,
-		Content:    cached.content,
-		Tokens:     cached.tokens,
-		State:      ContextResumed,
-		ResumedAt:  &now,
+		Path:      cached.path,
+		Content:   cached.content,
+		Tokens:    cached.tokens,
+		State:     ContextResumed,
+		ResumedAt: &now,
 	}
 }
 
@@ -852,11 +852,11 @@ func (m *Manager) GetIgnoredSummaries() []ContextItem {
 	var result []ContextItem
 	for _, cached := range m.fileCache {
 		item := ContextItem{
-			Path:         cached.path,
-			Content:      cached.content,
-			Tokens:       cached.tokens,
-			State:        ContextIgnored,
-			Summary:      m.summarizer.SummarizeIgnored(ContextItem{Content: cached.content}),
+			Path:          cached.path,
+			Content:       cached.content,
+			Tokens:        cached.tokens,
+			State:         ContextIgnored,
+			Summary:       m.summarizer.SummarizeIgnored(ContextItem{Content: cached.content}),
 			PriorityLevel: PriorityLow,
 		}
 		result = append(result, item)
@@ -890,11 +890,11 @@ func (m *Manager) GetContextWithMemory(ctx context.Context, req ContextRequest, 
 	for _, entry := range entries {
 		tokens := EstimateTokens(entry.Value)
 		memItems = append(memItems, ContextItem{
-			Path:         "memory:" + entry.Key,
-			Content:      entry.Value,
-			Tokens:       tokens,
-			Priority:     1.0,
-			Required:     true,
+			Path:          "memory:" + entry.Key,
+			Content:       entry.Value,
+			Tokens:        tokens,
+			Priority:      1.0,
+			Required:      true,
 			PriorityLevel: PriorityCritical,
 		})
 	}

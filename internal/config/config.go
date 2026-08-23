@@ -45,6 +45,10 @@ type Config struct {
 
 	ReasoningPreAnalysis bool `mapstructure:"reasoningPreAnalysis" yaml:"reasoningPreAnalysis"`
 
+	// EditReview routes file mutations through the pending-review flow:
+	// proposals render in the diff pane and touch disk only on accept.
+	EditReview bool `mapstructure:"editReview" yaml:"editReview"`
+
 	Security  SecurityConfig            `mapstructure:"security" yaml:"security"`
 	Tools     map[string]ToolConfig     `mapstructure:"tools" yaml:"tools"`
 	LSP       LSPConfig                 `mapstructure:"lsp" yaml:"lsp"`
@@ -272,15 +276,15 @@ type LogConfig struct {
 
 // ProviderConfig holds per-provider settings.
 type ProviderConfig struct {
-	APIKey       string                 `mapstructure:"apiKey" yaml:"apiKey,omitempty"`
-	BaseURL      string                 `mapstructure:"baseUrl" yaml:"baseUrl,omitempty"`
-	DefaultModel string                 `mapstructure:"defaultModel" yaml:"defaultModel,omitempty"`
-	OrgID        string                 `mapstructure:"orgId" yaml:"orgId,omitempty"`
-	Project      string                 `mapstructure:"project" yaml:"project,omitempty"`
-	Location     string                 `mapstructure:"location" yaml:"location,omitempty"`
-	Effort       string                 `mapstructure:"effort" yaml:"effort,omitempty"`
-	ThinkingLevel string                `mapstructure:"thinkingLevel" yaml:"thinkingLevel,omitempty"`
-	Models       map[string]ModelConfig `mapstructure:"models" yaml:"models,omitempty"`
+	APIKey        string                 `mapstructure:"apiKey" yaml:"apiKey,omitempty"`
+	BaseURL       string                 `mapstructure:"baseUrl" yaml:"baseUrl,omitempty"`
+	DefaultModel  string                 `mapstructure:"defaultModel" yaml:"defaultModel,omitempty"`
+	OrgID         string                 `mapstructure:"orgId" yaml:"orgId,omitempty"`
+	Project       string                 `mapstructure:"project" yaml:"project,omitempty"`
+	Location      string                 `mapstructure:"location" yaml:"location,omitempty"`
+	Effort        string                 `mapstructure:"effort" yaml:"effort,omitempty"`
+	ThinkingLevel string                 `mapstructure:"thinkingLevel" yaml:"thinkingLevel,omitempty"`
+	Models        map[string]ModelConfig `mapstructure:"models" yaml:"models,omitempty"`
 }
 
 // ModelConfig holds model-scoped provider settings.

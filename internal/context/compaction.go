@@ -15,9 +15,9 @@ import (
 type CompactionReason string
 
 const (
-	ReasonUserRequested CompactionReason = "user_requested"
-	ReasonContextLimit  CompactionReason = "context_limit"
-	ReasonModelDownshift CompactionReason = "model_downshift"
+	ReasonUserRequested   CompactionReason = "user_requested"
+	ReasonContextLimit    CompactionReason = "context_limit"
+	ReasonModelDownshift  CompactionReason = "model_downshift"
 	ReasonCompHashChanged CompactionReason = "comp_hash_changed"
 )
 
@@ -34,12 +34,12 @@ const (
 type CompactionStrategy string
 
 const (
-	StrategyGhost          CompactionStrategy = "ghost"          // persist-then-preview
+	StrategyGhost          CompactionStrategy = "ghost"           // persist-then-preview
 	StrategyTruncateMiddle CompactionStrategy = "truncate_middle" // keep head+tail with marker
-	StrategyDistill        CompactionStrategy = "distill"        // LLM summarization
-	StrategySnapshot       CompactionStrategy = "snapshot"       // Master State JSON
-	StrategyMicrocompact   CompactionStrategy = "microcompact"   // compact tool results only
-	StrategyFullCompact    CompactionStrategy = "full_compact"   // full summary + probe verify
+	StrategyDistill        CompactionStrategy = "distill"         // LLM summarization
+	StrategySnapshot       CompactionStrategy = "snapshot"        // Master State JSON
+	StrategyMicrocompact   CompactionStrategy = "microcompact"    // compact tool results only
+	StrategyFullCompact    CompactionStrategy = "full_compact"    // full summary + probe verify
 )
 
 // CompactionTier defines a tier in the progressive degradation ladder.
@@ -337,11 +337,11 @@ Keep under 500 words. Focus on: key findings, code snippets, errors, file struct
 // Tier 4: Snapshot - emit Master State JSON.
 func (cp *CompactionPipeline) emitSnapshot(ctx context.Context, messages []ai.Message, windowSize int) ([]ai.Message, error) {
 	snap := &MasterSnapshot{
-		ActiveTasks:          cp.extractActiveTasks(messages),
-		DiscoveredFacts:      cp.extractFacts(messages),
-		ConstraintsAndPrefs:  cp.extractConstraints(messages),
-		RecentArc:            cp.extractRecentArc(messages),
-		CreatedAt:            time.Now(),
+		ActiveTasks:         cp.extractActiveTasks(messages),
+		DiscoveredFacts:     cp.extractFacts(messages),
+		ConstraintsAndPrefs: cp.extractConstraints(messages),
+		RecentArc:           cp.extractRecentArc(messages),
+		CreatedAt:           time.Now(),
 	}
 
 	// Persist snapshot

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -104,36 +105,162 @@ func NewAskUserTool(responder func(string) (string, error)) *AskUserTool {
 	return &AskUserTool{responder: responder}
 }
 
-func (t *AskUserTool) Name() string                          { return "ask_user" }
-func (t *AskUserTool) Description() string                   { return "Ask the user a question and get their response." }
+func (t *AskUserTool) Name() string { return "ask_user" }
+func (t *AskUserTool) Description() string {
+	return "Ask the user one or more questions (with optional multiple-choice options) and get their answers."
+}
 func (t *AskUserTool) RequiresConfirmation(mode string) bool { return false }
 
 func (t *AskUserTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"question":     map[string]any{"type": "string", "description": "Question to ask the user."},
+			"question": map[string]any{"type": "string", "description": "Single free-text question. Use `questions` instead when options or multiple questions help."},
+			"questions": map[string]any{
+				"type":        "array",
+				"description": "Structured questionnaire: one entry per question, each with optional multiple-choice options.",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"question":     map[string]any{"type": "string", "description": "The question text."},
+						"options":      map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": "Multiple-choice options; the user may also type a custom answer."},
+						"allow_custom": map[string]any{"type": "boolean", "description": "Whether a custom free-text answer is offered (default true)."},
+					},
+					"required": []string{"question"},
+				},
+			},
 			"timeout_secs": map[string]any{"type": "integer", "description": "Timeout in seconds to wait for user response (optional)."},
 			"allow_empty":  map[string]any{"type": "boolean", "description": "Allow empty responses (default false)."},
 			"max_attempts": map[string]any{"type": "integer", "description": "How many times to prompt user for non-empty response (default 3)."},
 		},
-		"required": []string{"question"},
 	}
 }
 
-func (t *AskUserTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
-	question, ok := tools.StringArg(args, "question")
-	if !ok || question == "" {
-		return tools.Result{IsError: true, Content: "question is required"}, nil
+// AskQuestion is one structured question with optional choices.
+type AskQuestion struct {
+	Text        string
+	Options     []string
+	AllowCustom bool
+}
+
+// QuestionnaireRequest is the structured payload handed to the UI hook.
+type QuestionnaireRequest struct {
+	Questions []AskQuestion
+	Fallback  string // plain question text for legacy single-question asks
+}
+
+var (
+	questionnaireMu   sync.RWMutex
+	questionnaireHook func(QuestionnaireRequest) (string, error)
+)
+
+// SetQuestionnaire installs the UI handler that renders the interactive
+// questionnaire and returns the user's formatted answer. Mirrors SetNotifier.
+func SetQuestionnaire(fn func(QuestionnaireRequest) (string, error)) {
+	questionnaireMu.Lock()
+	defer questionnaireMu.Unlock()
+	questionnaireHook = fn
+}
+
+// parseQuestions extracts the structured questions array from tool args.
+func parseQuestions(args map[string]any) []AskQuestion {
+	raw, ok := args["questions"].([]any)
+	if !ok || len(raw) == 0 {
+		return nil
 	}
-	if t.responder == nil {
-		return tools.Result{IsError: true, Content: "no responder configured"}, nil
+	var out []AskQuestion
+	for _, r := range raw {
+		m, ok := r.(map[string]any)
+		if !ok {
+			continue
+		}
+		text, _ := m["question"].(string)
+		if strings.TrimSpace(text) == "" {
+			continue
+		}
+		q := AskQuestion{Text: text, AllowCustom: true}
+		if ac, ok := m["allow_custom"].(bool); ok {
+			q.AllowCustom = ac
+		}
+		if opts, ok := m["options"].([]any); ok {
+			for _, o := range opts {
+				if s, ok := o.(string); ok && s != "" {
+					q.Options = append(q.Options, s)
+				}
+			}
+		}
+		out = append(out, q)
+	}
+	return out
+}
+
+func (t *AskUserTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
+	fallback, _ := tools.StringArg(args, "question")
+	questions := parseQuestions(args)
+	if fallback == "" && len(questions) == 0 {
+		return tools.Result{IsError: true, Content: "question or questions is required"}, nil
+	}
+	if len(questions) == 0 {
+		questions = []AskQuestion{{Text: fallback, AllowCustom: true}}
+	}
+
+	// Structured UI path: the TUI questionnaire renders every question with
+	// its options and returns a formatted Q/A transcript.
+	questionnaireMu.RLock()
+	hook := questionnaireHook
+	questionnaireMu.RUnlock()
+	if hook != nil {
+		timeoutSecs, _ := tools.ArgInt(args, "timeout_secs")
+		if timeoutSecs <= 0 {
+			timeoutSecs = 3600
+		}
+		childCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSecs)*time.Second)
+		defer cancel()
+
+		type askResult struct {
+			answer string
+			err    error
+		}
+		done := make(chan askResult, 1)
+		go func() {
+			answer, err := hook(QuestionnaireRequest{Questions: questions, Fallback: fallback})
+			done <- askResult{answer, err}
+		}()
+		select {
+		case res := <-done:
+			LogInteraction(InteractionRecord{Time: time.Now(), Type: "ask", Question: questionsText(questions), Answer: res.answer})
+			if res.err != nil {
+				return tools.Result{IsError: true, Content: res.err.Error()}, nil
+			}
+			if strings.TrimSpace(res.answer) == "" {
+				return tools.Result{IsError: true, Content: "user dismissed the question"}, nil
+			}
+			return tools.Result{Content: res.answer}, nil
+		case <-childCtx.Done():
+			LogInteraction(InteractionRecord{Time: time.Now(), Type: "ask", Question: questionsText(questions), Message: "user response timeout"})
+			return tools.Result{IsError: true, Content: "user response timeout"}, nil
+		}
+	}
+
+	// Legacy single-question path (headless / stdin responders).
+	legacyQuestion := fallback
+	if legacyQuestion == "" {
+		legacyQuestion = questionsText(questions)
 	}
 
 	// Read optional args
 	timeoutSecs, _ := tools.ArgInt(args, "timeout_secs")
 	if timeoutSecs <= 0 {
 		// inherit context deadline if present, otherwise default to 3600s
+		timeoutSecs = 3600
+	}
+	if t.responder == nil {
+		return tools.Result{IsError: true, Content: "no responder configured"}, nil
+	}
+	question := legacyQuestion
+
+	// Optional args (timeout already resolved for the structured path)
+	if timeoutSecs <= 0 {
 		timeoutSecs = 3600
 	}
 	allowEmpty, okb := tools.ArgBool(args, "allow_empty")
@@ -219,6 +346,15 @@ func (t *AskUserTool) Execute(ctx context.Context, args map[string]any) (tools.R
 		lastErr = errors.New("no response")
 	}
 	return tools.Result{IsError: true, Content: lastErr.Error()}, nil
+}
+
+// questionsText renders the question set for logging/legacy paths.
+func questionsText(qs []AskQuestion) string {
+	parts := make([]string, 0, len(qs))
+	for _, q := range qs {
+		parts = append(parts, q.Text)
+	}
+	return strings.Join(parts, " | ")
 }
 
 // NotifyTool sends a notification to the user.

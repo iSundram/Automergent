@@ -1,12 +1,11 @@
-package tui
+package app
 
 import (
+	"github.com/iSundram/Automergent/internal/tui/render"
+	"github.com/iSundram/Automergent/internal/tui/themes"
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/iSundram/Automergent/internal/tui/render"
-	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
 func TestSmokeThemedDiff(t *testing.T) {

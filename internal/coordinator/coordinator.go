@@ -71,14 +71,14 @@ func (rl *rateLimiter) stop_() {
 
 // Engine is the main coordinator implementation.
 type Engine struct {
-	config       *CoordinatorConfig
-	executor     AgentExecutor
-	workers      map[string]*Worker
-	tasks        map[string]*Task
-	queues       *roleQueues
-	events       chan CoordinatorEvent
-	metrics      *CoordinatorMetrics
-	rateLimit    *rateLimiter
+	config        *CoordinatorConfig
+	executor      AgentExecutor
+	workers       map[string]*Worker
+	tasks         map[string]*Task
+	queues        *roleQueues
+	events        chan CoordinatorEvent
+	metrics       *CoordinatorMetrics
+	rateLimit     *rateLimiter
 	promptManager *prompt.PromptManager
 
 	workerWG sync.WaitGroup
@@ -962,7 +962,7 @@ func (e *Engine) dispatchLoop() {
 						task.mu.Lock()
 						task.Status = TaskStatusQueued
 						task.mu.Unlock()
-					e.queues.Push(task)
+						e.queues.Push(task)
 					}
 				} else {
 					task.mu.RUnlock()

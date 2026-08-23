@@ -16,8 +16,10 @@ type FinishTool struct {
 	tools.BaseTool
 }
 
-func (*FinishTool) Name() string        { return "finish" }
-func (*FinishTool) Description() string { return "End your turn: report completion (or the blocker) and stop calling tools." }
+func (*FinishTool) Name() string { return "finish" }
+func (*FinishTool) Description() string {
+	return "End your turn: report completion (or the blocker) and stop calling tools."
+}
 func (*FinishTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
@@ -33,7 +35,9 @@ func (*FinishTool) RequiresConfirmation(string) bool      { return false }
 func (*FinishTool) IsConcurrencySafe(map[string]any) bool { return true }
 func (*FinishTool) IsReadOnly(map[string]any) bool        { return true }
 func (*FinishTool) IsDestructive(map[string]any) bool     { return false }
-func (*FinishTool) EstimatedCost() tools.ToolCost         { return tools.ToolCost{TokensApprox: 20, LatencyMs: 10, RiskLevel: "low"} }
+func (*FinishTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 20, LatencyMs: 10, RiskLevel: "low"}
+}
 func (*FinishTool) Meta() *tools.ToolMeta {
 	return &tools.ToolMeta{
 		Category:    "interaction",

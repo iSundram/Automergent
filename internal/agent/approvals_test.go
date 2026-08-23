@@ -21,10 +21,10 @@ func (s *stubShellTool) Schema() map[string]any {
 func (s *stubShellTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
 	return tools.Result{}, nil
 }
-func (s *stubShellTool) RequiresConfirmation(string) bool { return true }
-func (s *stubShellTool) IsReadOnly(map[string]any) bool   { return false }
+func (s *stubShellTool) RequiresConfirmation(string) bool  { return true }
+func (s *stubShellTool) IsReadOnly(map[string]any) bool    { return false }
 func (s *stubShellTool) IsDestructive(map[string]any) bool { return false }
-func (s *stubShellTool) EstimatedCost() tools.ToolCost    { return tools.ToolCost{RiskLevel: "low"} }
+func (s *stubShellTool) EstimatedCost() tools.ToolCost     { return tools.ToolCost{RiskLevel: "low"} }
 
 func newScopeTestAgent() *Agent { return &Agent{} }
 
@@ -80,7 +80,7 @@ func TestShellGrantMatchesPrefix(t *testing.T) {
 		t.Error("exact prefix grant must match itself")
 	}
 	// A longer command sharing the granted prefix matches too.
-	if !a.shellGrantMatches(req+"-more") { // not realistic shape but tokens still prefix
+	if !a.shellGrantMatches(req + "-more") { // not realistic shape but tokens still prefix
 		t.Log("tokenized path checked separately below")
 	}
 	reqLong := "name=\"bash\";action=write;risk=low;cmd=\"go test -run TestX ./...\";generalizable=prefix"

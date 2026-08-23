@@ -71,8 +71,8 @@ func (t *ReadFileTool) Meta() *tools.ToolMeta {
 		UsageByFamily: map[string]string{
 			"gemini3": "Gemini 3 batches parallel calls well: issue several independent read_file calls in one turn instead of sequencing them.",
 		},
-		WhenToUse:    "Any time you need file contents: before editing, to trace symbols across files, or to verify an edit landed. Batch multiple independent reads in one turn.",
-		WhenNotTo:    "Do not use shell `cat`/`head`/`tail` for this. For binary files use `view`. Do not re-read a file listed under 'Contents already loaded'.",
+		WhenToUse: "Any time you need file contents: before editing, to trace symbols across files, or to verify an edit landed. Batch multiple independent reads in one turn.",
+		WhenNotTo: "Do not use shell `cat`/`head`/`tail` for this. For binary files use `view`. Do not re-read a file listed under 'Contents already loaded'.",
 		Usage: "Returns numbered lines from `path`, optionally bounded by `start_line`/`end_line`.\n" +
 			"Prefer narrow ranges on huge files; results are ghosted when enormous.\n" +
 			"If the file exists but is empty you will receive 'File is empty'.",

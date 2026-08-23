@@ -1,13 +1,12 @@
-package tui
+package app
 
 import (
+	"github.com/iSundram/Automergent/internal/ai"
+	"github.com/iSundram/Automergent/internal/session"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/iSundram/Automergent/internal/ai"
-	"github.com/iSundram/Automergent/internal/session"
 )
 
 func TestExportConversationMarkdownAndRejectsAbsolutePath(t *testing.T) {

@@ -46,11 +46,13 @@ func (*taskListTool) Schema() map[string]any {
 		},
 	}
 }
-func (*taskListTool) RequiresConfirmation(string) bool { return false }
+func (*taskListTool) RequiresConfirmation(string) bool      { return false }
 func (*taskListTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*taskListTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*taskListTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*taskListTool) IsDestructive(map[string]any) bool { return false }
-func (*taskListTool) IsReadOnly(map[string]any) bool { return true }
+func (*taskListTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *taskListTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	includeCompleted, _ := args["include_completed"].(bool)
@@ -75,7 +77,7 @@ func (t *taskListTool) Execute(ctx context.Context, args map[string]any) (Result
 
 type taskGetTool struct{ store taskstate.TaskStore }
 
-func (*taskGetTool) Name() string { return "task_get" }
+func (*taskGetTool) Name() string        { return "task_get" }
 func (*taskGetTool) Description() string { return "Get detailed info about a specific task by ID." }
 func (*taskGetTool) Schema() map[string]any {
 	return map[string]any{
@@ -84,11 +86,13 @@ func (*taskGetTool) Schema() map[string]any {
 		}, "required": []string{"task_id"},
 	}
 }
-func (*taskGetTool) RequiresConfirmation(string) bool { return false }
+func (*taskGetTool) RequiresConfirmation(string) bool      { return false }
 func (*taskGetTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*taskGetTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*taskGetTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*taskGetTool) IsDestructive(map[string]any) bool { return false }
-func (*taskGetTool) IsReadOnly(map[string]any) bool { return true }
+func (*taskGetTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *taskGetTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	taskID, _ := args["task_id"].(string)
@@ -109,7 +113,7 @@ func (t *taskGetTool) Execute(ctx context.Context, args map[string]any) (Result,
 
 type taskUpdateTool struct{ store taskstate.TaskStore }
 
-func (*taskUpdateTool) Name() string { return "task_update" }
+func (*taskUpdateTool) Name() string        { return "task_update" }
 func (*taskUpdateTool) Description() string { return "Update a task's status, result, or error." }
 func (*taskUpdateTool) Schema() map[string]any {
 	return map[string]any{
@@ -121,11 +125,13 @@ func (*taskUpdateTool) Schema() map[string]any {
 		}, "required": []string{"task_id", "status"},
 	}
 }
-func (*taskUpdateTool) RequiresConfirmation(string) bool { return false }
+func (*taskUpdateTool) RequiresConfirmation(string) bool      { return false }
 func (*taskUpdateTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*taskUpdateTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*taskUpdateTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*taskUpdateTool) IsDestructive(map[string]any) bool { return false }
-func (*taskUpdateTool) IsReadOnly(map[string]any) bool { return true }
+func (*taskUpdateTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *taskUpdateTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	taskID, _ := args["task_id"].(string)
@@ -155,7 +161,9 @@ func (t *taskUpdateTool) Execute(ctx context.Context, args map[string]any) (Resu
 type contextBucketCreateTool struct{ store taskstate.TaskStore }
 
 func (*contextBucketCreateTool) Name() string { return "context_bucket_create" }
-func (*contextBucketCreateTool) Description() string { return "Create a new context bucket for sharing data between tasks." }
+func (*contextBucketCreateTool) Description() string {
+	return "Create a new context bucket for sharing data between tasks."
+}
 func (*contextBucketCreateTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object", "properties": map[string]any{
@@ -163,11 +171,13 @@ func (*contextBucketCreateTool) Schema() map[string]any {
 		}, "required": []string{"name"},
 	}
 }
-func (*contextBucketCreateTool) RequiresConfirmation(string) bool { return false }
+func (*contextBucketCreateTool) RequiresConfirmation(string) bool      { return false }
 func (*contextBucketCreateTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*contextBucketCreateTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*contextBucketCreateTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*contextBucketCreateTool) IsDestructive(map[string]any) bool { return false }
-func (*contextBucketCreateTool) IsReadOnly(map[string]any) bool { return true }
+func (*contextBucketCreateTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *contextBucketCreateTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	name, _ := args["name"].(string)
@@ -182,7 +192,7 @@ func (t *contextBucketCreateTool) Execute(ctx context.Context, args map[string]a
 
 type contextBucketListTool struct{ store taskstate.TaskStore }
 
-func (*contextBucketListTool) Name() string { return "context_bucket_list" }
+func (*contextBucketListTool) Name() string        { return "context_bucket_list" }
 func (*contextBucketListTool) Description() string { return "List all keys in a context bucket." }
 func (*contextBucketListTool) Schema() map[string]any {
 	return map[string]any{
@@ -191,11 +201,13 @@ func (*contextBucketListTool) Schema() map[string]any {
 		}, "required": []string{"bucket"},
 	}
 }
-func (*contextBucketListTool) RequiresConfirmation(string) bool { return false }
+func (*contextBucketListTool) RequiresConfirmation(string) bool      { return false }
 func (*contextBucketListTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*contextBucketListTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*contextBucketListTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*contextBucketListTool) IsDestructive(map[string]any) bool { return false }
-func (*contextBucketListTool) IsReadOnly(map[string]any) bool { return true }
+func (*contextBucketListTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *contextBucketListTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	bucket, _ := args["bucket"].(string)
@@ -211,7 +223,7 @@ func (t *contextBucketListTool) Execute(ctx context.Context, args map[string]any
 
 type contextBucketGetTool struct{ store taskstate.TaskStore }
 
-func (*contextBucketGetTool) Name() string { return "context_bucket_get" }
+func (*contextBucketGetTool) Name() string        { return "context_bucket_get" }
 func (*contextBucketGetTool) Description() string { return "Get a value from a context bucket." }
 func (*contextBucketGetTool) Schema() map[string]any {
 	return map[string]any{
@@ -221,11 +233,13 @@ func (*contextBucketGetTool) Schema() map[string]any {
 		}, "required": []string{"bucket", "key"},
 	}
 }
-func (*contextBucketGetTool) RequiresConfirmation(string) bool { return false }
+func (*contextBucketGetTool) RequiresConfirmation(string) bool      { return false }
 func (*contextBucketGetTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*contextBucketGetTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*contextBucketGetTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*contextBucketGetTool) IsDestructive(map[string]any) bool { return false }
-func (*contextBucketGetTool) IsReadOnly(map[string]any) bool { return true }
+func (*contextBucketGetTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *contextBucketGetTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	bucket, _ := args["bucket"].(string)
@@ -242,7 +256,7 @@ func (t *contextBucketGetTool) Execute(ctx context.Context, args map[string]any)
 
 type contextBucketSetTool struct{ store taskstate.TaskStore }
 
-func (*contextBucketSetTool) Name() string { return "context_bucket_set" }
+func (*contextBucketSetTool) Name() string        { return "context_bucket_set" }
 func (*contextBucketSetTool) Description() string { return "Set a key-value pair in a context bucket." }
 func (*contextBucketSetTool) Schema() map[string]any {
 	return map[string]any{
@@ -253,11 +267,13 @@ func (*contextBucketSetTool) Schema() map[string]any {
 		}, "required": []string{"bucket", "key", "value"},
 	}
 }
-func (*contextBucketSetTool) RequiresConfirmation(string) bool { return false }
+func (*contextBucketSetTool) RequiresConfirmation(string) bool      { return false }
 func (*contextBucketSetTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*contextBucketSetTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*contextBucketSetTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*contextBucketSetTool) IsDestructive(map[string]any) bool { return false }
-func (*contextBucketSetTool) IsReadOnly(map[string]any) bool { return true }
+func (*contextBucketSetTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *contextBucketSetTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	bucket, _ := args["bucket"].(string)
@@ -272,7 +288,7 @@ func (t *contextBucketSetTool) Execute(ctx context.Context, args map[string]any)
 
 type contextBucketDeleteTool struct{ store taskstate.TaskStore }
 
-func (*contextBucketDeleteTool) Name() string { return "context_bucket_delete" }
+func (*contextBucketDeleteTool) Name() string        { return "context_bucket_delete" }
 func (*contextBucketDeleteTool) Description() string { return "Delete a key from a context bucket." }
 func (*contextBucketDeleteTool) Schema() map[string]any {
 	return map[string]any{
@@ -282,11 +298,13 @@ func (*contextBucketDeleteTool) Schema() map[string]any {
 		}, "required": []string{"bucket", "key"},
 	}
 }
-func (*contextBucketDeleteTool) RequiresConfirmation(string) bool { return false }
+func (*contextBucketDeleteTool) RequiresConfirmation(string) bool      { return false }
 func (*contextBucketDeleteTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*contextBucketDeleteTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*contextBucketDeleteTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*contextBucketDeleteTool) IsDestructive(map[string]any) bool { return false }
-func (*contextBucketDeleteTool) IsReadOnly(map[string]any) bool { return true }
+func (*contextBucketDeleteTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *contextBucketDeleteTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	bucket, _ := args["bucket"].(string)
@@ -301,17 +319,21 @@ func (t *contextBucketDeleteTool) Execute(ctx context.Context, args map[string]a
 type contextListBucketsTool struct{ store taskstate.TaskStore }
 
 func (*contextListBucketsTool) Name() string { return "context_list_buckets" }
-func (*contextListBucketsTool) Description() string { return "List all context buckets and their keys." }
+func (*contextListBucketsTool) Description() string {
+	return "List all context buckets and their keys."
+}
 func (*contextListBucketsTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object", "properties": map[string]any{},
 	}
 }
-func (*contextListBucketsTool) RequiresConfirmation(string) bool { return false }
+func (*contextListBucketsTool) RequiresConfirmation(string) bool      { return false }
 func (*contextListBucketsTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*contextListBucketsTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*contextListBucketsTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*contextListBucketsTool) IsDestructive(map[string]any) bool { return false }
-func (*contextListBucketsTool) IsReadOnly(map[string]any) bool { return true }
+func (*contextListBucketsTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *contextListBucketsTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	buckets := t.store.GetBuckets()
@@ -331,15 +353,19 @@ func (t *contextListBucketsTool) Execute(ctx context.Context, args map[string]an
 type contextGetIntentTool struct{ store taskstate.TaskStore }
 
 func (*contextGetIntentTool) Name() string { return "context_get_intent" }
-func (*contextGetIntentTool) Description() string { return "Get the intent set identified from the user's original message." }
+func (*contextGetIntentTool) Description() string {
+	return "Get the intent set identified from the user's original message."
+}
 func (*contextGetIntentTool) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}}
 }
-func (*contextGetIntentTool) RequiresConfirmation(string) bool { return false }
+func (*contextGetIntentTool) RequiresConfirmation(string) bool      { return false }
 func (*contextGetIntentTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*contextGetIntentTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*contextGetIntentTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*contextGetIntentTool) IsDestructive(map[string]any) bool { return false }
-func (*contextGetIntentTool) IsReadOnly(map[string]any) bool { return true }
+func (*contextGetIntentTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *contextGetIntentTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	intent := t.store.GetIntentSet()
@@ -353,15 +379,19 @@ func (t *contextGetIntentTool) Execute(ctx context.Context, args map[string]any)
 type contextGetInitTool struct{ store taskstate.TaskStore }
 
 func (*contextGetInitTool) Name() string { return "context_get_init" }
-func (*contextGetInitTool) Description() string { return "Get the initialization phase results (exploration findings)." }
+func (*contextGetInitTool) Description() string {
+	return "Get the initialization phase results (exploration findings)."
+}
 func (*contextGetInitTool) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}}
 }
-func (*contextGetInitTool) RequiresConfirmation(string) bool { return false }
+func (*contextGetInitTool) RequiresConfirmation(string) bool      { return false }
 func (*contextGetInitTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*contextGetInitTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*contextGetInitTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*contextGetInitTool) IsDestructive(map[string]any) bool { return false }
-func (*contextGetInitTool) IsReadOnly(map[string]any) bool { return true }
+func (*contextGetInitTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *contextGetInitTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	init := t.store.GetInitResults()
@@ -376,7 +406,7 @@ func (t *contextGetInitTool) Execute(ctx context.Context, args map[string]any) (
 
 type todoListTool struct{ store taskstate.TaskStore }
 
-func (*todoListTool) Name() string { return "todo_list" }
+func (*todoListTool) Name() string        { return "todo_list" }
 func (*todoListTool) Description() string { return "List all todo items from the current plan." }
 func (*todoListTool) Schema() map[string]any {
 	return map[string]any{
@@ -385,11 +415,13 @@ func (*todoListTool) Schema() map[string]any {
 		},
 	}
 }
-func (*todoListTool) RequiresConfirmation(string) bool { return false }
+func (*todoListTool) RequiresConfirmation(string) bool      { return false }
 func (*todoListTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*todoListTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*todoListTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*todoListTool) IsDestructive(map[string]any) bool { return false }
-func (*todoListTool) IsReadOnly(map[string]any) bool { return true }
+func (*todoListTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *todoListTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	filter, _ := args["status_filter"].(string)
@@ -413,16 +445,18 @@ func (t *todoListTool) Execute(ctx context.Context, args map[string]any) (Result
 
 type todoNextTool struct{ store taskstate.TaskStore }
 
-func (*todoNextTool) Name() string { return "todo_next" }
+func (*todoNextTool) Name() string        { return "todo_next" }
 func (*todoNextTool) Description() string { return "Get the next pending todo item ready to execute." }
 func (*todoNextTool) Schema() map[string]any {
 	return map[string]any{"type": "object", "properties": map[string]any{}}
 }
-func (*todoNextTool) RequiresConfirmation(string) bool { return false }
+func (*todoNextTool) RequiresConfirmation(string) bool      { return false }
 func (*todoNextTool) IsConcurrencySafe(map[string]any) bool { return true }
-func (*todoNextTool) EstimatedCost() ToolCost { return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"} }
+func (*todoNextTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 50, RiskLevel: "low"}
+}
 func (*todoNextTool) IsDestructive(map[string]any) bool { return false }
-func (*todoNextTool) IsReadOnly(map[string]any) bool { return true }
+func (*todoNextTool) IsReadOnly(map[string]any) bool    { return true }
 
 func (t *todoNextTool) Execute(ctx context.Context, args map[string]any) (Result, error) {
 	next := t.store.GetNextPendingTask()
@@ -445,9 +479,9 @@ func (*todoWriteTool) Schema() map[string]any {
 	return map[string]any{
 		"type": "object",
 		"properties": map[string]any{
-			"action":  map[string]any{"type": "string", "enum": []string{"replace", "status"}, "description": "replace = install full todo list; status = update one item"},
+			"action": map[string]any{"type": "string", "enum": []string{"replace", "status"}, "description": "replace = install full todo list; status = update one item"},
 			"todos": map[string]any{
-				"type": "array",
+				"type":        "array",
 				"description": "For action=replace. Items: {description, priority?, dependencies?, id?}",
 				"items": map[string]any{
 					"type":       "object",
@@ -461,11 +495,13 @@ func (*todoWriteTool) Schema() map[string]any {
 		"required": []string{"action"},
 	}
 }
-func (*todoWriteTool) RequiresConfirmation(string) bool    { return false }
+func (*todoWriteTool) RequiresConfirmation(string) bool      { return false }
 func (*todoWriteTool) IsConcurrencySafe(map[string]any) bool { return false }
-func (*todoWriteTool) EstimatedCost() ToolCost             { return ToolCost{TokensApprox: 50, LatencyMs: 20, RiskLevel: "low"} }
-func (*todoWriteTool) IsDestructive(map[string]any) bool   { return false }
-func (*todoWriteTool) IsReadOnly(map[string]any) bool      { return false }
+func (*todoWriteTool) EstimatedCost() ToolCost {
+	return ToolCost{TokensApprox: 50, LatencyMs: 20, RiskLevel: "low"}
+}
+func (*todoWriteTool) IsDestructive(map[string]any) bool { return false }
+func (*todoWriteTool) IsReadOnly(map[string]any) bool    { return false }
 func (*todoWriteTool) Meta() *ToolMeta {
 	return &ToolMeta{
 		Category:    "memory",

@@ -27,7 +27,6 @@ type CoderPrompts = TaskPrompts
 func (c *TaskPrompts) BuildTaskInitPrompt(ctx *TurnContext, categorized *CategorizedRequest) *PromptPart {
 	var sb strings.Builder
 
-
 	if categorized != nil {
 		sb.WriteString("Task: ")
 		sb.WriteString(categorized.OriginalPrompt)

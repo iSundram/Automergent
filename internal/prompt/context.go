@@ -129,7 +129,7 @@ func (c *ContextPrompts) BuildDeleteContextPrompt(context *TurnContext, target s
 	sb.WriteString("Confirm deletion. Specify exactly what to delete:")
 	sb.WriteString("\n- Specific messages? (range or criteria)")
 	sb.WriteString("\n- Current task?")
-sb.WriteString("\n- Specific stashed contexts? (by index or tag)")
+	sb.WriteString("\n- Specific stashed contexts? (by index or tag)")
 	sb.WriteString("\n- All context?")
 	sb.WriteString("\n\nProvide deletion specification.")
 
@@ -253,7 +253,7 @@ func (c *ContextPrompts) BuildShareContextPrompt(ctx *TurnContext, shareSpec str
 	sb.WriteString("Determine what to share:\n")
 	sb.WriteString("- Task definition and requirements\n")
 	sb.WriteString("- Working areas and files\n")
-sb.WriteString("- Code snippets and patterns\n")
+	sb.WriteString("- Code snippets and patterns\n")
 	sb.WriteString("- Constraints and requirements\n")
 	sb.WriteString("- Todo items and priorities\n")
 	sb.WriteString("- Deferred context injection specs\n\n")

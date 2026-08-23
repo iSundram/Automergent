@@ -31,7 +31,9 @@ func (*WaitTool) RequiresConfirmation(string) bool      { return false }
 func (*WaitTool) IsConcurrencySafe(map[string]any) bool { return false }
 func (*WaitTool) IsReadOnly(map[string]any) bool        { return true }
 func (*WaitTool) IsDestructive(map[string]any) bool     { return false }
-func (*WaitTool) EstimatedCost() tools.ToolCost         { return tools.ToolCost{TokensApprox: 10, LatencyMs: 5000, RiskLevel: "low"} }
+func (*WaitTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 10, LatencyMs: 5000, RiskLevel: "low"}
+}
 func (*WaitTool) Meta() *tools.ToolMeta {
 	return &tools.ToolMeta{
 		Category:    "shell",

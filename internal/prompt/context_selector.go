@@ -212,7 +212,8 @@ func (cs *ContextSelector) readFileWithBudget(path string, maxTokens int) (strin
 		content = content[:maxChars] + "\n... [truncated]"
 	}
 
-	return content, nil}
+	return content, nil
+}
 
 // estimateTokens roughly estimates token count from text.
 func estimateTokens(text string) int {

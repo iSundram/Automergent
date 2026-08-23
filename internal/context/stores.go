@@ -79,12 +79,12 @@ func (trs *ToolResultStore) Load(hash string) (string, error) {
 
 // MasterSnapshot is the structured state snapshot (gemini-style).
 type MasterSnapshot struct {
-	ActiveTasks          []string `json:"active_tasks"`
-	DiscoveredFacts      []string `json:"discovered_facts"`
-	ConstraintsAndPrefs  []string `json:"constraints_and_preferences"`
-	RecentArc            []string `json:"recent_arc"`
-	CreatedAt            time.Time `json:"created_at"`
-	TokenCount           int       `json:"token_count,omitempty"`
+	ActiveTasks         []string  `json:"active_tasks"`
+	DiscoveredFacts     []string  `json:"discovered_facts"`
+	ConstraintsAndPrefs []string  `json:"constraints_and_preferences"`
+	RecentArc           []string  `json:"recent_arc"`
+	CreatedAt           time.Time `json:"created_at"`
+	TokenCount          int       `json:"token_count,omitempty"`
 }
 
 // Summarize produces a human-readable summary of the snapshot.

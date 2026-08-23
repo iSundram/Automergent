@@ -95,12 +95,12 @@ func (l *Logger) writeEntry(ctx context.Context, entryType, provider string, dat
 	}
 
 	entry := DebugEntry{
-		Timestamp:   time.Now().Format(time.RFC3339Nano),
-		SessionID:   l.sessionID,
-		Type:        entryType,
-		Provider:    provider,
-		Data:        data,
-		Context:     extractContext(ctx),
+		Timestamp: time.Now().Format(time.RFC3339Nano),
+		SessionID: l.sessionID,
+		Type:      entryType,
+		Provider:  provider,
+		Data:      data,
+		Context:   extractContext(ctx),
 	}
 
 	jsonData, err := json.Marshal(entry)
@@ -155,12 +155,12 @@ func (l *Logger) Close() error {
 
 // DebugEntry represents a single debug log entry
 type DebugEntry struct {
-	Timestamp   string          `json:"timestamp"`
-	SessionID   string          `json:"session_id"`
-	Type        string          `json:"type"` // request, response, error
-	Provider    string          `json:"provider"`
-	Data        any             `json:"data"`
-	Context     map[string]any  `json:"context,omitempty"`
+	Timestamp string         `json:"timestamp"`
+	SessionID string         `json:"session_id"`
+	Type      string         `json:"type"` // request, response, error
+	Provider  string         `json:"provider"`
+	Data      any            `json:"data"`
+	Context   map[string]any `json:"context,omitempty"`
 }
 
 func extractContext(ctx context.Context) map[string]any {

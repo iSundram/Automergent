@@ -28,9 +28,9 @@ type AdaptiveTokenCalculator struct {
 	maxWeight    float64
 
 	// State
-	samples     int
-	lastGround  float64
-	path        string // optional persistence path
+	samples    int
+	lastGround float64
+	path       string // optional persistence path
 }
 
 // NewAdaptiveTokenCalculator creates a calculator with EMA learning.
