@@ -196,5 +196,3 @@ func (c *Conversation) renderThoughtBox(thought string, width int) string {
 	// Return header above box (matching Automergent label pattern)
 	return header + "\n" + box
 }
-
-// toolBranding returns the icon, accent color and display name for a tool.

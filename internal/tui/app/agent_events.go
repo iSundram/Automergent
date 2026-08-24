@@ -11,6 +11,7 @@ import (
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/shared"
 	"github.com/iSundram/Automergent/internal/tools"
+	"github.com/iSundram/Automergent/internal/tui/components"
 	"os"
 	"strings"
 )
@@ -255,28 +256,10 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		if payload, ok := ev.Payload.(map[string]any); ok {
 			if tc, ok := payload["tool_call"].(ai.ToolCall); ok {
 
-				// Use pretty name if possible
-				name := tc.Name
-				switch tc.Name {
-				case "read_file", "view":
-					name = "Readfile"
-				case "write_file", "create_file":
-					name = "Write"
-				case "edit_file":
-					name = "Edit"
-				case "delete_file":
-					name = "Delete"
-				case "move_file":
-					name = "Move"
-				case "copy_file":
-					name = "Copy"
-				case "list_directory":
-					name = "List directory"
-				case "run_shell_command", "run_command", "bash":
-					name = "Run"
-				case "git_commit":
-					name = "Git commit"
-				}
+				// Name the tool exactly as its conversation card does, from the
+				// single spec table in components — not a second lookup table
+				// that can drift out of sync with it.
+				name := components.ToolDisplayName(tc.Name)
 
 				// Special handling for file edits: show diff
 				// Special handling for file edits: show diff with inline confirmation
