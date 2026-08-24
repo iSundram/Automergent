@@ -22,7 +22,6 @@ var readOnlyPlusFinish = func(extra ...string) map[string]bool {
 		"grep": true, "glob": true, "search": true,
 		"lsp_diagnostics": true, "list_shells": true, "read_shell": true,
 		"web_search": true, "web_fetch": true,
-		"git_status": true, "git_diff": true, "git_log": true,
 		"todo_list": true, "todo_next": true, "todo_write": true,
 		"finish": true, "ask_user": true, "wait": true,
 	}

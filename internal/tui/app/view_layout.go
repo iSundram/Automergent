@@ -19,7 +19,6 @@ func (a *App) layout() {
 	a.palette.SetSize(a.width, a.height)
 	a.selector.SetSize(a.width, a.height)
 	a.confirm.SetSize(a.width, a.height)
-	a.coAuthorConfirm.SetSize(a.width, a.height)
 
 	// Logo mode replaces the header: the wordmark is shown left-aligned
 	// on a fresh conversation (or while a project trust warning is
@@ -61,9 +60,6 @@ func (a *App) layout() {
 	// Session browser also renders inline below the input.
 	if a.sessionBrowser.Visible() && !a.confirm.Visible() && !a.browsing {
 		footerH += a.sessionBrowser.Height()
-	}
-	if a.coAuthorConfirm.Visible() {
-		footerH += lipgloss.Height(a.coAuthorConfirm.View())
 	}
 	// Bottom dock (background shells/agents) renders under the input.
 	dockH := 0
@@ -211,9 +207,6 @@ func (a *App) View() tea.View {
 	// large empty area where the conversation used to be.
 	if a.sessionBrowser.Visible() && !a.confirm.Visible() && !a.browsing {
 		footer = append(footer, a.sessionBrowser.View())
-	}
-	if a.coAuthorConfirm.Visible() {
-		footer = append(footer, a.coAuthorConfirm.View())
 	}
 	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, footer...))
 

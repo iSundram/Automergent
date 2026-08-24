@@ -63,7 +63,6 @@ type App struct {
 	statusBar         components.StatusBar
 	spin              components.Spinner
 	confirm           components.Confirm
-	coAuthorConfirm   components.CoAuthorConfirm
 	sessionBrowser    components.SessionBrowser
 	selector          components.SelectorOverlay
 	selectorAction    func(index int)
@@ -115,11 +114,8 @@ type App struct {
 	// pendingDiffHide is set when confirmation completes and diff should be hidden
 	pendingDiffHide bool
 
-	// pendingCommitToolCall stores the tool call when waiting for co-author confirmation
-	pendingCommitToolCall *ai.ToolCall
-	pendingCommitReplyCh  chan agent.ConfirmationResponse
-	pendingProjectPath    string
-	projectApprovalCh     chan agent.ConfirmationResponse
+	pendingProjectPath string
+	projectApprovalCh  chan agent.ConfirmationResponse
 
 	// Streaming render coalescing + live telemetry.
 	streamTickPending bool
@@ -156,7 +152,6 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		taskBoard:          components.NewTaskBoard(styles),
 		spin:               components.NewSpinner(styles),
 		confirm:            components.NewConfirm(styles),
-		coAuthorConfirm:    components.NewCoAuthorConfirm(styles, cfg),
 		sessionBrowser:     components.NewSessionBrowser(styles),
 		selector:           components.NewSelectorOverlay(styles),
 		lspPanel:           components.NewLSPPanel(styles),
@@ -331,7 +326,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		// When diff is visible (fullscreen), route events to diff first
-		if a.diffPane.Visible() && !a.confirm.Visible() && !a.coAuthorConfirm.Visible() {
+		if a.diffPane.Visible() && !a.confirm.Visible() && !a.questionnaire.Visible() {
 			// Edit-review grammar takes priority while a proposal is shown.
 			if a.reviewingProposal != "" && a.handleEditReviewKeys(m) {
 				return a, tea.Batch(cmds...)
@@ -349,7 +344,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(cmds...)
 		}
 		// When confirmation modal is visible, route key events only to the modal.
-		if !a.confirm.Visible() && !a.coAuthorConfirm.Visible() {
+		if !a.confirm.Visible() && !a.questionnaire.Visible() {
 			cmd = a.handleKey(m)
 			if cmd != nil {
 				cmds = append(cmds, cmd)
@@ -495,14 +490,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.diffPane.Toggle()
 				a.pendingDiffHide = false
 			}
-			a.layout()
-		}
-	}
-	if a.coAuthorConfirm.Visible() {
-		c, cmd := a.coAuthorConfirm.Update(msg)
-		a.coAuthorConfirm = c
-		cmds = append(cmds, cmd)
-		if !a.coAuthorConfirm.Visible() {
 			a.layout()
 		}
 	}

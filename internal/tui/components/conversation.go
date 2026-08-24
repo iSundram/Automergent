@@ -530,12 +530,12 @@ func (c *Conversation) refresh() {
 			j := i + 1
 			for j < len(c.messages) &&
 				c.messages[j].Role == "tool_call" &&
-				c.messages[j].ToolName == m.ToolName &&
-				c.messages[j].Status == m.Status {
+				readFamily(c.messages[j].ToolName) == readFamily(m.ToolName) &&
+				m.Status == "done" {
 				j++
 			}
 			span := j - i
-			if span > 1 {
+			if span > 1 && readFamily(m.ToolName) {
 				group := c.messages[i:j]
 				var spanKey strings.Builder
 				for _, g := range group {
@@ -543,7 +543,7 @@ func (c *Conversation) refresh() {
 				}
 				key := hashMessage(c.styleEpoch, c.expandMode, c.reviewMode, m, spanKey.String())
 				writeCached(key, func() string {
-					return c.renderGroupedToolCalls(group, msgW)
+					return c.renderReadGroup(group, msgW)
 				})
 				i = j
 				continue

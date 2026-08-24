@@ -11,7 +11,6 @@ import (
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/shared"
 	"github.com/iSundram/Automergent/internal/tools"
-	"github.com/iSundram/Automergent/internal/tui/components"
 	"os"
 	"strings"
 )
@@ -255,63 +254,6 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventConfirm:
 		if payload, ok := ev.Payload.(map[string]any); ok {
 			if tc, ok := payload["tool_call"].(ai.ToolCall); ok {
-				// Special handling for git_commit with "ask" co-author mode
-				if tc.Name == "git_commit" && a.cfg.Git.CoAuthorMode() == "ask" {
-					// Check if co_author is not already explicitly set
-					if _, hasCoAuthor := tc.Args["co_author"]; !hasCoAuthor {
-						// Store the pending commit and show co-author dialog
-						tcCopy := tc
-						a.pendingCommitToolCall = &tcCopy
-						if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
-							a.pendingCommitReplyCh = replyCh
-						}
-						coAuthorReplyCh := make(chan components.CoAuthorResponse, 1)
-						a.coAuthorConfirm.SetReply(coAuthorReplyCh)
-						a.coAuthorConfirm.Show()
-						a.layout()
-
-						// Handle the co-author response in a goroutine
-						// Handle the co-author response in a goroutine
-						go func() {
-							select {
-							case res, ok := <-coAuthorReplyCh:
-								if !ok {
-									if a.pendingCommitReplyCh != nil {
-										select {
-										case a.pendingCommitReplyCh <- agent.ConfirmationResponse{Allow: false}:
-										default:
-										}
-									}
-									a.pendingCommitToolCall = nil
-									a.pendingCommitReplyCh = nil
-									return
-								}
-								if res.Save != "" {
-									a.cfg.Git.CoAuthor = res.Save
-									_ = a.cfg.SaveIfLoaded()
-								}
-								if a.pendingCommitToolCall != nil {
-									a.pendingCommitToolCall.Args["co_author"] = res.Include
-								}
-								if a.pendingCommitReplyCh != nil {
-									a.pendingCommitReplyCh <- agent.ConfirmationResponse{Allow: true}
-								}
-								a.pendingCommitToolCall = nil
-								a.pendingCommitReplyCh = nil
-							case <-a.ctx.Done():
-								if a.pendingCommitReplyCh != nil {
-									select {
-									case a.pendingCommitReplyCh <- agent.ConfirmationResponse{Allow: false}:
-									default:
-									}
-								}
-								a.pendingCommitToolCall = nil
-								a.pendingCommitReplyCh = nil
-							}
-						}()
-						return a.waitForAgentEvent()
-					}
-				}
 
 				// Use pretty name if possible
 				name := tc.Name

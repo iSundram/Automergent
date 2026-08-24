@@ -38,12 +38,12 @@ func Default() *Config {
 			"*.pyc", "*.o", "*.a", "vendor",
 		},
 
-		NoAnimation:          false,
-		NoColor:              false,
-		NoTUI:                false,
-		Quiet:                false,
-		Verbose:              false,
-		Debug:                DefaultDebugConfig(),
+		NoAnimation: false,
+		NoColor:     false,
+		NoTUI:       false,
+		Quiet:       false,
+		Verbose:     false,
+		Debug:       DefaultDebugConfig(),
 
 		Security: SecurityConfig{
 			Sandbox:                "auto",

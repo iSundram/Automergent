@@ -23,7 +23,6 @@ import (
 	"github.com/iSundram/Automergent/internal/tools"
 	subagent "github.com/iSundram/Automergent/internal/tools/agent"
 	toolsFS "github.com/iSundram/Automergent/internal/tools/filesystem"
-	gitpkg "github.com/iSundram/Automergent/internal/tools/git"
 	toolsInteraction "github.com/iSundram/Automergent/internal/tools/interaction"
 	toolsShell "github.com/iSundram/Automergent/internal/tools/shell"
 )
@@ -1182,7 +1181,6 @@ func readOnlyToolNames() map[string]bool {
 		"lsp_diagnostics": true, "list_shells": true, "read_shell": true,
 		"list_agents": true, "read_agent": true,
 		"web_search": true, "web_fetch": true,
-		"git_status": true, "git_diff": true, "git_log": true,
 	}
 	for name := range contextToolNames() {
 		names[name] = true
@@ -1385,7 +1383,6 @@ func (a *Agent) RegisterContextTools() ContextToolRegistration {
 			a.editReview = editreview.NewStore()
 			editreview.WrapWriteTools(a.tools, a.editReview)
 		}
-		gitpkg.RegisterAll(a.tools)
 		a.tools.Register(toolsShell.NewWaitTool())
 		a.tools.Register(toolsFS.NewMultiEditTool(a.cfg))
 		a.tools.Register(toolsInteraction.NewFinishTool())

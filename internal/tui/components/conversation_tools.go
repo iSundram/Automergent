@@ -118,8 +118,18 @@ func (c *Conversation) truncateLines(text string, n int) string {
 	return head + "\n  " + c.styles.Dim.Render(fmt.Sprintf("… (%d more lines — ctrl+e expands, ctrl+r for review mode)", len(lines)-n))
 }
 
-// renderToolCall renders a single tool card honoring the expand mode.
+// renderToolCall routes to the per-family renderer. Each tool family owns
+// a file: tool_read.go, tool_edit.go, tool_terminal.go — this fallback is
+// the generic param/result card for everything else.
 func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
+	switch {
+	case readFamily(m.ToolName):
+		return c.renderReadGroup([]ConversationMsg{m}, width)
+	case isFileEditTool(m.ToolName):
+		return c.renderEditCard(m, width)
+	case terminalFamily(m.ToolName):
+		return c.renderTerminalCard(m, width)
+	}
 	header := c.toolHeader(m, width, 1)
 
 	details := c.expandMode == ExpandFull || c.reviewMode
@@ -205,10 +215,6 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 
 	_, accent, _ := c.toolBranding(m.ToolName)
 	return wrapCard(accent, width, header+body.String())
-}
-
-func isFileEditTool(name string) bool {
-	return name == "write_file" || name == "edit_file" || name == "create_file"
 }
 
 func hasSummary(m ConversationMsg) bool { return strings.TrimSpace(m.ToolSummary) != "" }
@@ -410,22 +416,6 @@ func (c *Conversation) toolBranding(name string) (icon string, accent colorAlias
 		pretty, icon, accent = "Write shell", "󰇰", c.styles.T.Yellow
 	case "stop_shell":
 		pretty, icon, accent = "Stop shell", "󰅙", c.styles.T.Red
-	case "git_commit":
-		pretty, icon, accent = "Git commit", "󰊢", c.styles.T.Red
-	case "git_add":
-		pretty, icon, accent = "Git stage", "󰊢", c.styles.T.Green
-	case "git_checkout":
-		pretty, icon, accent = "Git checkout", "󰊢", c.styles.T.Blue
-	case "git_branch":
-		pretty, icon, accent = "Git branch", "󰊢", c.styles.T.Magenta
-	case "git_stash":
-		pretty, icon, accent = "Git stash", "󰊢", c.styles.T.Yellow
-	case "git_status":
-		pretty, icon, accent = "Git status", "󰊢", c.styles.T.Cyan
-	case "git_diff":
-		pretty, icon, accent = "Git diff", "󰊢", c.styles.T.Yellow
-	case "git_log":
-		pretty, icon, accent = "Git log", "󰊢", c.styles.T.Blue
 	case "lsp_diagnostics", "lsp_symbols":
 		pretty, icon, accent = "LSP", "󰘦", c.styles.T.Cyan
 	case "web_fetch", "web_search":
