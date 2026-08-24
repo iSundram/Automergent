@@ -1,109 +1,165 @@
 package components
 
-// File-change tool cards: edit_file, write_file, create_file, multi_edit.
-// Previews render through the shared diff box (tail + "+a −r" stats).
+// Mutation families: edit (write_file, create_file, edit_file, multi_edit) and
+// fileop (delete_file, move_file, copy_file).
+//
+// Edits are the one place where vertical space is always worth spending: the
+// diff is the whole point of the log entry. Everything else about an edit —
+// which file, how many occurrences, replace-all or not — compresses into the
+// call line's chips.
 
 import (
-	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
-// isFileEditTool reports file-mutation tools (multi_edit included).
-func isFileEditTool(name string) bool {
-	return name == "write_file" || name == "edit_file" ||
-		name == "create_file" || name == "multi_edit"
+// renderEditCard renders one file-mutation call.
+//
+//	● Edit  tool_box.go  ·  1 line replaced                              8ms
+//	  ╭──────────────────────────────────╮
+//	  │ - limit := c.tailLimit()         │
+//	  │ + limit := c.tailLimit() + 2     │
+//	  ╰──────────────────────────────────╯
+//	  +1 −1
+func (c *Conversation) renderEditCard(m ConversationMsg, width int) string {
+	head := c.callLine(m, width, subjectFor(m), c.editChips(m), durationChip(m.Duration))
+
+	if m.IsError {
+		return join(head, c.resultRow(c.severityMark("error"), oneLine(m.Content), width))
+	}
+	if !c.showDetail() {
+		return head
+	}
+	if diff := editDiffText(m); diff != "" {
+		return join(head, c.diffBox(diff, width))
+	}
+	// No diff to show (a fresh write, or a summary-only result): fall back to a
+	// single result row so the card still says what happened.
+	if s := oneLine(m.ToolSummary); s != "" {
+		return join(head, c.resultRow("", s, width))
+	}
+	return head
 }
 
-// editDiffText extracts diff-ish preview text from a message.
-// - running proposals: Content already carries the proposed diff
-// - done write/create: Content is the applied-diff summary
+// editChips describes the shape of the change from the arguments: how many
+// edits in a multi_edit, how many lines a replacement spans, and whether it
+// applied to every occurrence.
+func (c *Conversation) editChips(m ConversationMsg) []string {
+	args := argsOf(m)
+	var chips []string
+
+	if edits, ok := args["edits"].([]any); ok && len(edits) > 0 {
+		chips = append(chips, plural(len(edits), "edit"))
+	} else if old, ok := args["old_str"].(string); ok && old != "" {
+		chips = append(chips, plural(strings.Count(old, "\n")+1, "line replaced"))
+		if all, _ := args["replace_all"].(bool); all {
+			chips = append(chips, "all occurrences")
+		}
+	} else if content, ok := args["content"].(string); ok && content != "" {
+		chips = append(chips, plural(strings.Count(strings.TrimRight(content, "\n"), "\n")+1, "line"))
+	}
+
+	if m.Status == "running" {
+		chips = append(chips, "pending review")
+	}
+	return chips
+}
+
+// editDiffText extracts diff-ish preview text from a message. Running
+// proposals carry the proposed diff in Content; finished writes carry an
+// applied-diff summary. Plain prose summaries are rejected so they don't get
+// rendered as a diff with no +/- lines.
 func editDiffText(m ConversationMsg) string {
 	if strings.TrimSpace(m.Content) == "" {
 		return ""
 	}
-	// Heuristic: real diffs contain +/- lines; plain summaries don't.
-	hasDiffLines := false
 	for _, l := range strings.Split(m.Content, "\n") {
 		t := strings.TrimLeft(l, " ")
 		if strings.HasPrefix(t, "+") || strings.HasPrefix(t, "-") {
-			hasDiffLines = true
+			return m.Content
+		}
+	}
+	return ""
+}
+
+// renderFileOpCard renders delete_file / move_file / copy_file — pure path
+// bookkeeping, so one line each with no body.
+//
+//	● Move  internal/old.go → internal/new.go                            4ms
+//	● Delete  internal/tools/interaction/finish.go                        2ms
+func (c *Conversation) renderFileOpCard(m ConversationMsg, width int) string {
+	args := argsOf(m)
+	subject := subjectFor(m)
+	if dst, ok := args["destination"].(string); ok && dst != "" {
+		src, _ := args["source"].(string)
+		subject = fmt.Sprintf("%s %s %s", src, glyphTo, dst)
+	}
+
+	var chips []string
+	if rec, _ := args["recursive"].(bool); rec {
+		chips = append(chips, "recursive")
+	}
+	if ow, _ := args["overwrite"].(bool); ow {
+		chips = append(chips, "overwrite")
+	}
+
+	head := c.callLine(m, width, subject, chips, durationChip(m.Duration))
+	if m.IsError {
+		return join(head, c.resultRow(c.severityMark("error"), oneLine(m.Content), width))
+	}
+	return head
+}
+
+// renderFileOpGroup collapses a run of file operations into one card.
+func (c *Conversation) renderFileOpGroup(group []ConversationMsg, width int) string {
+	rollup := group[0]
+	rollup.Duration = 0
+	for _, g := range group {
+		rollup.Duration += g.Duration
+		if g.IsError {
+			rollup.IsError = true
+			rollup.Status = "error"
+		}
+	}
+
+	head := c.callLine(rollup, width, "", []string{plural(len(group), "file")}, durationChip(rollup.Duration))
+	if c.compactOnly() {
+		return head
+	}
+
+	limit := c.bodyLimit(len(group))
+	rows := make([]string, 0, limit+1)
+	for i, g := range group {
+		if i >= limit {
 			break
 		}
+		mark := ""
+		if g.IsError {
+			mark = c.severityMark("error")
+		}
+		rows = append(rows, c.resultRow(mark,
+			specFor(g.ToolName).Display+" "+filepath.Base(subjectFor(g)), width))
 	}
-	if !hasDiffLines {
-		return ""
+	if more := len(group) - limit; more > 0 {
+		rows = append(rows, c.moreRow(more, "file"))
 	}
-	return m.Content
+	return join(head, strings.Join(rows, "\n"))
 }
-
-// renderEditCard renders one file-change tool call.
-func (c *Conversation) renderEditCard(m ConversationMsg, width int) string {
-	header := c.toolHeader(m, width, 1)
-	collapse := c.expandMode == ExpandCompact && !c.reviewMode
-	details := c.expandMode == ExpandFull || c.reviewMode
-
-	var body strings.Builder
-
-	switch {
-	case m.Status == "running" && editDiffText(m) != "":
-		body.WriteString("\n\n")
-		body.WriteString(indentBlock(c.diffBox(editDiffText(m), width)))
-
-	case collapse:
-		if hasSummary(m) {
-			body.WriteString("\n\n  " + c.styles.Dim.Copy().Italic(true).Render(oneLine(m.ToolSummary)))
-		}
-		return c.wrapEdit(width, m, header+body.String())
-
-	default:
-		// Key params row for edits: show old→new sizes when available.
-		var args struct {
-			OldStr     string `json:"old_str"`
-			NewStr     string `json:"new_str"`
-			Edits      []any  `json:"edits"`
-			ReplaceAll bool   `json:"replace_all"`
-		}
-		if json.Unmarshal([]byte(m.ToolArgs), &args) == nil {
-			var param string
-			switch {
-			case len(args.Edits) > 0:
-				param = plural(len(args.Edits), "edit")
-			case args.OldStr != "":
-				param = plural(strings.Count(args.OldStr, "\n")+1, "line replaced")
-				if args.ReplaceAll {
-					param += ", all occurrences"
-				}
-			}
-			if param != "" {
-				body.WriteString("\n\n  " + c.styles.Dim.Render(param))
-			}
-		}
-		if hasSummary(m) {
-			body.WriteString("\n  " + c.styles.Dim.Copy().Italic(true).Render(oneLine(m.ToolSummary)))
-		}
-		if d := editDiffText(m); d != "" && details {
-			body.WriteString("\n\n" + indentBlock(c.diffBox(d, width)))
-		}
-	}
-
-	return c.wrapEdit(width, m, header+body.String())
-}
-
-// wrapEdit frames an edit card with the green accent border.
-func (c *Conversation) wrapEdit(width int, m ConversationMsg, content string) string {
-	_, accent, _ := c.toolBranding("write_file")
-	if m.IsError || m.Status == "error" {
-		_, accent, _ = c.toolBranding("delete_file")
-	}
-	return wrapCard(accent, width, content)
-}
-
-func indentBlock(s string) string { return "  " + s }
 
 func plural(n int, singular string) string {
 	if n == 1 {
 		return fmt.Sprintf("%d %s", n, singular)
+	}
+	// Pluralize the head noun so "1 line replaced" becomes "3 lines replaced".
+	if i := strings.IndexByte(singular, ' '); i > 0 {
+		return fmt.Sprintf("%d %ss%s", n, singular[:i], singular[i:])
+	}
+	if strings.HasSuffix(singular, "s") || strings.HasSuffix(singular, "h") {
+		return fmt.Sprintf("%d %ses", n, singular)
+	}
+	if strings.HasSuffix(singular, "y") {
+		return fmt.Sprintf("%d %sies", n, singular[:len(singular)-1])
 	}
 	return fmt.Sprintf("%d %ss", n, singular)
 }

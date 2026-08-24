@@ -26,6 +26,10 @@ type ConversationMsg struct {
 	ToolSummary string
 	Duration    time.Duration
 	Status      string // "running", "done", "error"
+	// Metadata carries tools.Result.Metadata verbatim: match counts, file
+	// counts, shell ids, exit codes, agent ids. Family renderers read it
+	// instead of re-parsing Content.
+	Metadata map[string]any
 }
 
 // msgRender caches the rendered output of one conversation row so unchanged
@@ -260,6 +264,7 @@ func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, d
 		}
 		c.messages[i].Duration = duration
 		c.messages[i].Content = result.Content
+		c.messages[i].Metadata = result.Metadata
 		if context != "" {
 			c.messages[i].ToolContext = context
 		}
@@ -296,6 +301,7 @@ func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, d
 		ToolContext: context,
 		ToolSummary: summary,
 		Content:     result.Content,
+		Metadata:    result.Metadata,
 		Status:      status,
 		IsError:     result.IsError,
 		Duration:    duration,
@@ -441,6 +447,11 @@ func hashMessage(epoch uint64, expand ExpandMode, review bool, m ConversationMsg
 		m.Role, m.Content, m.Thought, m.ToolName, m.ToolArgs,
 		m.ToolContext, m.ToolSummary, m.IsError, m.Status,
 		m.Duration.Nanoseconds(), m.Timestamp.UnixNano())
+	// Metadata drives family renderers, so it must participate — over sorted
+	// keys, since map iteration order would otherwise churn the cache.
+	for _, k := range metaKeys(m.Metadata) {
+		fmt.Fprintf(h, "\x02%s\x00%v", k, m.Metadata[k])
+	}
 	if spanExtra != "" {
 		h.Write([]byte(spanExtra))
 	}
@@ -525,26 +536,32 @@ func (c *Conversation) refresh() {
 			}
 		}
 
-		// Group consecutive finished calls of the same tool into one card.
-		if m.Role == "tool_call" && m.Status != "running" {
+		// Collapse a run of consecutive finished calls that share a grouping
+		// family (read_file + view merge; an edit between them breaks the run).
+		if m.Role == "tool_call" && m.Status == "done" && groupsFor(m.ToolName) {
+			key := groupKeyFor(m.ToolName)
 			j := i + 1
 			for j < len(c.messages) &&
 				c.messages[j].Role == "tool_call" &&
-				readFamily(c.messages[j].ToolName) == readFamily(m.ToolName) &&
-				m.Status == "done" {
+				c.messages[j].Status == "done" &&
+				groupKeyFor(c.messages[j].ToolName) == key {
 				j++
 			}
-			span := j - i
-			if span > 1 && readFamily(m.ToolName) {
+			if span := j - i; span > 1 {
 				group := c.messages[i:j]
 				var spanKey strings.Builder
 				for _, g := range group {
-					spanKey.WriteString(fmt.Sprintf("\x01%s\x00%s\x00%s\x00%d", g.ToolContext, g.ToolSummary, g.Status, g.Duration.Nanoseconds()))
+					spanKey.WriteString(fmt.Sprintf("\x01%s\x00%s\x00%s\x00%s\x00%d",
+						g.ToolName, g.ToolContext, g.ToolSummary, g.Status, g.Duration.Nanoseconds()))
+					for _, k := range metaKeys(g.Metadata) {
+						spanKey.WriteString(fmt.Sprintf("\x03%s\x00%v", k, g.Metadata[k]))
+					}
 				}
-				key := hashMessage(c.styleEpoch, c.expandMode, c.reviewMode, m, spanKey.String())
-				writeCached(key, func() string {
-					return c.renderReadGroup(group, msgW)
+				hkey := hashMessage(c.styleEpoch, c.expandMode, c.reviewMode, m, spanKey.String())
+				writeCached(hkey, func() string {
+					return c.renderToolGroup(group, msgW) + "\n\n"
 				})
+				prevRole = "tool_call"
 				i = j
 				continue
 			}

@@ -1,150 +1,224 @@
 package components
 
-// Terminal tool cards: bash, run_command, and the shell family.
-// Design: one terminal slab — true-black background, "$ command" first,
-// raw output beneath, scroll hint below the slab. The command is shown
-// exactly once (never echoed in both header and body).
+// Execution families: terminal (bash, run_command), shellsession (read_shell,
+// write_shell, stop_shell, wait) and shelllist (list_shells).
+//
+// The slab is the signature block here: a dark full-bleed surface carrying
+// "$ command" then the raw output tail, so a shell transcript reads like a
+// terminal instead of like prose. The command appears exactly once — on the
+// slab's first row, never echoed in both the call line and the body.
 
 import (
-	"encoding/json"
 	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 )
 
-// terminalFamily reports shell-execution tools sharing the slab design.
-func terminalFamily(name string) bool {
-	switch name {
-	case "bash", "run_command", "read_shell", "write_shell", "stop_shell", "wait":
-		return true
-	}
-	return false
-}
-
-// terminalCommand extracts the executed command from args, falling back to
-// the card context (stripped of any "exec: " decoration).
-func terminalCommand(m ConversationMsg) string {
-	var args struct {
-		Command string `json:"command"`
-	}
-	if json.Unmarshal([]byte(m.ToolArgs), &args) == nil && strings.TrimSpace(args.Command) != "" {
-		return strings.TrimSpace(args.Command)
-	}
-	ctx := strings.TrimSpace(m.ToolContext)
-	ctx = strings.TrimPrefix(ctx, "exec: ")
-	return strings.TrimSpace(ctx)
-}
-
-// renderTerminalCard renders ONLY the black slab — no card chrome, no
-// header, no left border. The slab carries command, output and status;
-// a scroll hint sits under it.
+// renderTerminalCard renders bash / run_command: a call line, then the slab.
+//
+//	● Bash  go test ./...                                               4.2s
+//	  ▓ $ go test ./...                                    ▓
+//	  ▓ ok  internal/tui/components   0.412s                ▓
+//	  ↑ 12 more lines — ctrl+e expands
 func (c *Conversation) renderTerminalCard(m ConversationMsg, width int) string {
-	collapse := c.expandMode == ExpandCompact && !c.reviewMode
+	cmd := terminalCommand(m)
+	head := c.callLine(m, width, cmd, c.terminalChips(m), durationChip(m.Duration))
 
-	if collapse && m.Status != "running" {
-		if hasSummary(m) {
-			return c.styles.Dim.Copy().Italic(true).Render(oneLine(m.ToolSummary))
-		}
-		if cmd := terminalCommand(m); cmd != "" {
-			return c.styles.Dim.Render(ansiSafeTruncate("$ "+cmd, width-8))
-		}
-		return ""
+	if !c.showDetail() {
+		return head
 	}
-	return "\n" + indentBlock(c.terminalSlab(m, width))
+	if strings.TrimSpace(m.Content) == "" && m.Status != "running" {
+		return head
+	}
+	return join(head, c.terminalSlab(m, width))
 }
 
-// terminalSlab renders the black terminal block: "$ command" then the
-// output tail (last N lines), plus a scroll hint under the slab.
-func (c *Conversation) terminalSlab(m ConversationMsg, width int) string {
-	// Manual slab construction: lipgloss Width+Padding double-wraps long
-	// output lines, so we truncate plainly and pad each row to an exact
-	// visual width, painting the black background per full row.
-	inner := width - 12
-	if inner < 14 {
-		inner = 14
-	}
-
-	bg := lipgloss.NewStyle().Background(lipgloss.Color("#000000"))
-	textFg := lipgloss.NewStyle().Foreground(c.styles.T.Text)
-	green := lipgloss.NewStyle().Foreground(c.styles.T.Green).Bold(true)
-	yellow := lipgloss.NewStyle().Foreground(c.styles.T.Yellow) // running chip
-	red := lipgloss.NewStyle().Foreground(c.styles.T.Red).Bold(true)
-
-	// row paints one plain-text line as a full-width black row.
-	row := func(s string) string {
-		s = strings.TrimRight(s, " \t")
-		s = ansiSafeTruncate(s, inner)
-		pad := inner - lipgloss.Width(s)
-		if pad < 0 {
-			pad = 0
+// terminalChips reports the async-vs-sync shape and outcome of a command.
+func (c *Conversation) terminalChips(m ConversationMsg) []string {
+	var chips []string
+	if id := metaString(m, "shell_id"); id != "" {
+		chips = append(chips, id)
+		if metaBool(m, "detached") {
+			chips = append(chips, "detached")
+		} else {
+			chips = append(chips, "async")
 		}
-		return bg.Render(" " + s + strings.Repeat(" ", pad) + " ")
 	}
+	if m.IsError {
+		chips = append(chips, "failed")
+	}
+	return chips
+}
 
-	plainCmd := "$ " + ansiSafeTruncate(strings.ReplaceAll(terminalCommand(m), "\n", " ⏎ "), inner-4)
+// terminalCommand extracts the executed command, falling back to the event
+// context stripped of its "exec: " decoration.
+func terminalCommand(m ConversationMsg) string {
+	if args := argsOf(m); args != nil {
+		if cmd, ok := args["command"].(string); ok && strings.TrimSpace(cmd) != "" {
+			return strings.TrimSpace(cmd)
+		}
+	}
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(m.ToolContext), "exec: "))
+}
+
+// terminalSlab paints the dark command block: "$ command" first, then the last
+// N lines of output, with a scroll hint below the slab when lines were hidden.
+func (c *Conversation) terminalSlab(m ConversationMsg, width int) string {
+	inner := slabInner(width)
+
+	textFg := lipgloss.NewStyle().Foreground(c.styles.T.Text)
+	prompt := lipgloss.NewStyle().Foreground(c.styles.T.Green).Bold(true)
+	bg := lipgloss.NewStyle().Background(c.slabBackground())
+
+	// Multi-line commands collapse onto one row with a visible ⏎ so the slab
+	// keeps a stable height regardless of how the model formatted the command.
+	cmdVis := strings.ReplaceAll(terminalCommand(m), "\n", " "+glyphReturn+" ")
 
 	var rows []string
-
 	if m.Status == "running" {
-		chip := "running…"
-		cmdVis := strings.ReplaceAll(terminalCommand(m), "\n", " ⏎ ")
-		left := green.Render("$") + " " + textFg.Render(ansiSafeTruncate(cmdVis, inner-6))
-		right := yellow.Render(chip)
-		pad := inner - 2 - lipgloss.Width(left) - lipgloss.Width(right)
+		// The running chip is right-aligned on the command row itself, so an
+		// in-flight command needs no extra line.
+		chip := lipgloss.NewStyle().Foreground(c.styles.T.Yellow).Render("running…")
+		left := prompt.Render("$") + " " + textFg.Render(ansiSafeTruncate(cmdVis, inner-12))
+		pad := inner - lipgloss.Width(left) - lipgloss.Width(chip)
 		if pad < 1 {
 			pad = 1
 		}
-		rows = append(rows, bg.Render(" "+left+strings.Repeat(" ", pad)+right+" "))
+		rows = append(rows, bg.Render(" "+left+strings.Repeat(" ", pad)+chip+" "))
 	} else {
-		rows = append(rows, row(plainCmd))
+		rows = append(rows, c.slabRow("$ "+cmdVis, inner))
 	}
 
+	hidden := 0
 	if strings.TrimSpace(m.Content) != "" {
-		limit := c.tailLimit()
-		shown, hidden := tailLines(m.Content, limit)
+		var shown []string
+		shown, hidden = tailLines(m.Content, c.tailLimit())
 		for _, l := range shown {
-			rows = append(rows, row(l))
-		}
-		if m.IsError {
-			msg := "✗ failed"
-			if strings.TrimSpace(m.ToolSummary) != "" {
-				msg += " — " + oneLine(m.ToolSummary)
-			}
-			rows = append(rows, row(msg))
-			_ = red
-		}
-		if hidden > 0 {
-			rows = append(rows, "")
+			rows = append(rows, c.slabRow(l, inner))
 		}
 	}
 
-	body := bg.Render("")
-	painted := make([]string, 0, len(rows))
-	for _, r := range rows {
-		if r == "" {
-			painted = append(painted, bg.Render(strings.Repeat(" ", inner+2)))
-			continue
-		}
-		painted = append(painted, r)
-	}
-	body = strings.Join(painted, "\n")
-
-	out := "\n" + indentBlock(body)
-
-	if m.Status != "running" && strings.TrimSpace(m.Content) != "" {
-		_, hidden := tailLines(m.Content, c.tailLimit())
-		if hidden > 0 {
-			out += "\n" + indentBlock(c.styles.Dim.Render(
-				fmt.Sprintf("↑ %d more lines — ctrl+e expands", hidden)))
+	out := c.slab(rows, width)
+	if m.Status != "running" {
+		if hint := c.hintRow(hidden, "lines"); hint != "" {
+			out += "\n" + hint
 		}
 	}
 	return out
 }
 
-func max0(v int) int {
-	if v < 0 {
-		return 0
+// renderShellSessionCard renders read_shell / write_shell / stop_shell / wait —
+// operations against an already-running shell, keyed by shell id.
+//
+//	● Read shell  sh_3  ·  48 lines                                      6ms
+//	  ▓ …output tail… ▓
+//	● Write shell  sh_3  →  "y"                                          1ms
+func (c *Conversation) renderShellSessionCard(m ConversationMsg, width int) string {
+	args := argsOf(m)
+	subject := subjectFor(m)
+	var chips []string
+
+	switch m.ToolName {
+	case "write_shell":
+		if in, ok := args["input"].(string); ok && in != "" {
+			subject += "  " + glyphTo + `  "` + oneLine(strings.TrimRight(in, "\n")) + `"`
+		}
+	case "wait":
+		if s := scalarString(args["seconds"]); s != "" {
+			subject = s + "s"
+		}
 	}
-	return v
+	if status := metaString(m, "status"); status != "" {
+		chips = append(chips, status)
+	}
+	if code := metaString(m, "exit_code"); code != "" {
+		chips = append(chips, "exit "+code)
+	}
+	if m.ToolName == "read_shell" && strings.TrimSpace(m.Content) != "" {
+		_, total := firstLines(m.Content, 0)
+		chips = append(chips, plural(total, "line"))
+	}
+
+	head := c.callLine(m, width, subject, chips, durationChip(m.Duration))
+	if m.IsError {
+		return join(head, c.resultRow(c.severityMark("error"), oneLine(m.Content), width))
+	}
+	// Only read_shell has output worth slabbing; the rest are control calls.
+	if m.ToolName != "read_shell" || !c.showDetail() || strings.TrimSpace(m.Content) == "" {
+		return head
+	}
+
+	inner := slabInner(width)
+	shown, hidden := tailLines(m.Content, c.tailLimit())
+	rows := make([]string, 0, len(shown))
+	for _, l := range shown {
+		rows = append(rows, c.slabRow(l, inner))
+	}
+	out := join(head, c.slab(rows, width))
+	if hint := c.hintRow(hidden, "lines"); hint != "" {
+		out += "\n" + hint
+	}
+	return out
+}
+
+// renderShellListCard renders list_shells as a table of live sessions.
+//
+//	● Shells  2 active
+//	  ID    STATUS   PID     COMMAND
+//	  sh_3  running  48213   npm run dev
+func (c *Conversation) renderShellListCard(m ConversationMsg, width int) string {
+	sessions := parseShellRows(m.Content)
+	chips := []string{}
+	if len(sessions) > 0 {
+		chips = append(chips, plural(len(sessions), "session"))
+	}
+	head := c.callLine(m, width, "", chips, durationChip(m.Duration))
+
+	if m.IsError {
+		return join(head, c.resultRow(c.severityMark("error"), oneLine(m.Content), width))
+	}
+	if !c.showDetail() || len(sessions) == 0 {
+		if len(sessions) == 0 && strings.TrimSpace(m.Content) != "" && c.showDetail() {
+			return join(head, c.resultRow("", oneLine(m.Content), width))
+		}
+		return head
+	}
+	return join(head, c.table([]string{"id", "status", "command"}, sessions, width))
+}
+
+// parseShellRows pulls id/status/command triples out of list_shells output.
+// The tool formats one session per line; anything unparseable is skipped so a
+// format change degrades to an empty table rather than a garbled one.
+func parseShellRows(content string) [][]string {
+	lines, _ := firstLines(content, 64)
+	var rows [][]string
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "sh_") && !strings.Contains(line, "shell_id") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) < 2 {
+			continue
+		}
+		id, status := fields[0], fields[1]
+		cmd := ""
+		if len(fields) > 2 {
+			cmd = strings.Join(fields[2:], " ")
+		}
+		rows = append(rows, []string{
+			strings.Trim(id, ":"),
+			strings.Trim(status, "[](),"),
+			cmd,
+		})
+	}
+	return rows
+}
+
+// exitChip renders a command's exit status as a colored chip.
+func (c *Conversation) exitChip(code int) string {
+	if code == 0 {
+		return lipgloss.NewStyle().Foreground(c.styles.T.Green).Render(glyphOK + " exit 0")
+	}
+	return lipgloss.NewStyle().Foreground(c.styles.T.Red).Render(fmt.Sprintf("%s exit %d", glyphFail, code))
 }
