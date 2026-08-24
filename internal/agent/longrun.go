@@ -87,28 +87,6 @@ func (a *Agent) stallNudgeBlock(stallCount int) string {
 	return "\n[System note] You did not call any tools this turn, but work remains. Continue calling tools until the task is complete; call `finish` only once you have verification evidence.\n"
 }
 
-// finishGate evaluates whether a finish call may pass. Unevidenced finishes
-// are denied while a goal is active or todos remain open — the model receives
-// the denial as an error result and must keep working (or argue its case).
-func (a *Agent) finishGate(summary, evidence string) (allowed bool, reason string) {
-	if evidence != "" {
-		return true, ""
-	}
-	if a.Goal() != "" {
-		return false, "finish gate: a /goal is active and no `evidence` was provided. Include concrete verification output (test/build logs, files changed), or explain precisely what remains."
-	}
-	if a.promptSystem != nil {
-		if turnCtx := a.promptSystem.GetTurnContext(); turnCtx != nil {
-			for _, todo := range turnCtx.TodoItems {
-				if todo.Status == "in_progress" || todo.Status == "pending" {
-					return false, "finish gate: todos are still open and no `evidence` was provided. Complete them or include verification evidence with your finish call."
-				}
-			}
-		}
-	}
-	return true, ""
-}
-
 // runMetadata carries per-Run counters (continuation index, stall count).
 type runMetadata struct {
 	turn          int

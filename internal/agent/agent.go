@@ -23,7 +23,6 @@ import (
 	"github.com/iSundram/Automergent/internal/tools"
 	subagent "github.com/iSundram/Automergent/internal/tools/agent"
 	toolsFS "github.com/iSundram/Automergent/internal/tools/filesystem"
-	toolsInteraction "github.com/iSundram/Automergent/internal/tools/interaction"
 	toolsShell "github.com/iSundram/Automergent/internal/tools/shell"
 )
 
@@ -602,20 +601,6 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		a.recordToTranscript(resultMsg)
 		a.injectLongRunContext(runMeta, true)
 
-		// The finish tool is the structured completion signal: end the turn
-		// chain with its summary instead of looping back to the provider.
-		for _, executed := range executedCalls {
-			if executed.call.Name != "finish" {
-				continue
-			}
-			finalText := executed.result.Summary
-			if finalText == "" || finalText == "completed" || finalText == "blocked" {
-				finalText = executed.result.Content
-			}
-			a.Emit(EventDone, finalText)
-			a.tryPersist()
-			return nil
-		}
 	}
 }
 
@@ -814,15 +799,6 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 	// Pre-tool hooks may veto before any approval or execution work happens.
 	if blocked, reason := a.runPreToolHooks(ctx, tc); blocked {
 		return tools.Result{IsError: true, Content: reason}, nil
-	}
-
-	// Finish gate: unevidenced completion is denied while work remains.
-	if tc.Name == "finish" && a.promptSystem != nil {
-		summary, _ := tools.StringArg(tc.Args, "summary")
-		evidence, _ := tools.StringArg(tc.Args, "evidence")
-		if allowed, reason := a.finishGate(summary, evidence); !allowed {
-			return tools.Result{IsError: true, Content: reason}, nil
-		}
 	}
 
 	approvalScope := a.scopedToolApprovalKey(tc, t)
@@ -1215,7 +1191,6 @@ func verificationToolNames() map[string]bool {
 	names["bash"] = true
 	names["write_shell"] = true
 	names["stop_shell"] = true
-	names["finish"] = true
 	names["todo_write"] = true
 	names["wait"] = true
 	return names
@@ -1407,12 +1382,11 @@ func (a *Agent) RegisterContextTools() ContextToolRegistration {
 		}
 		a.tools.Register(toolsShell.NewWaitTool())
 		a.tools.Register(toolsFS.NewMultiEditTool(a.cfg))
-		a.tools.Register(toolsInteraction.NewFinishTool())
-		subagent.RegisterControlTool(a.tools)
+			subagent.RegisterControlTool(a.tools)
 		names = append(names,
 			"git_status", "git_diff", "git_log", "git_add", "git_commit",
 			"git_branch", "git_checkout", "git_stash",
-			"wait", "multi_edit", "finish", "agent_control",
+			"wait", "multi_edit", "agent_control",
 		)
 
 		// Load user-defined agents from .agents/*.md in the workspace.

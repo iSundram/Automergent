@@ -23,7 +23,7 @@ var readOnlyPlusFinish = func(extra ...string) map[string]bool {
 		"lsp_diagnostics": true, "list_shells": true, "read_shell": true,
 		"web_search": true, "web_fetch": true,
 		"todo_list": true, "todo_next": true, "todo_write": true,
-		"finish": true, "ask_user": true, "wait": true,
+		"ask_user": true, "wait": true,
 	}
 	for _, name := range extra {
 		m[name] = true
@@ -67,7 +67,7 @@ var knownModes = map[string]*ModeSpec{
 		AllowedTools: map[string]bool{
 			"task": true, "read_agent": true, "list_agents": true,
 			"todo_write": true, "todo_list": true, "todo_next": true,
-			"finish": true, "ask_user": true,
+			"ask_user": true,
 		},
 		PromptBlock: "# Mode: Triage (orchestrator)\n" +
 			"You coordinate; subagents execute. Your ONLY tools spawn and track subagents — you cannot touch files directly.\n" +

@@ -57,73 +57,94 @@ func (c *Conversation) renderTerminalCard(m ConversationMsg, width int) string {
 // terminalSlab renders the black terminal block: "$ command" then the
 // output tail (last N lines), plus a scroll hint under the slab.
 func (c *Conversation) terminalSlab(m ConversationMsg, width int) string {
-	inner := width - 10
-	if inner < 12 {
-		inner = 12
+	// Manual slab construction: lipgloss Width+Padding double-wraps long
+	// output lines, so we truncate plainly and pad each row to an exact
+	// visual width, painting the black background per full row.
+	inner := width - 12
+	if inner < 14 {
+		inner = 14
 	}
 
-	promptStyle := lipgloss.NewStyle().Foreground(c.styles.T.Green).Bold(true)
-	cmdText := ansiSafeTruncate(strings.ReplaceAll(terminalCommand(m), "\n", " ⏎ "), inner-2)
-	promptLine := promptStyle.Render("$") + " " +
-		lipgloss.NewStyle().Foreground(c.styles.T.Text).Render(cmdText)
+	bg := lipgloss.NewStyle().Background(lipgloss.Color("#000000"))
+	textFg := lipgloss.NewStyle().Foreground(c.styles.T.Text)
+	green := lipgloss.NewStyle().Foreground(c.styles.T.Green).Bold(true)
+	yellow := lipgloss.NewStyle().Foreground(c.styles.T.Yellow) // running chip
+	red := lipgloss.NewStyle().Foreground(c.styles.T.Red).Bold(true)
 
-	// While running, the ▙ chip rides on the SAME line as the command,
-	// pushed to the right edge of the slab.
-	if m.Status == "running" {
-		chip := lipgloss.NewStyle().Foreground(c.styles.T.Yellow).Render("running…")
-		pad := inner - lipgloss.Width(promptLine) - lipgloss.Width(chip)
-		if pad >= 2 {
-			promptLine += strings.Repeat(" ", pad) + chip
-		} else {
-			promptLine += "  " + chip
+	// row paints one plain-text line as a full-width black row.
+	row := func(s string) string {
+		s = strings.TrimRight(s, " \t")
+		s = ansiSafeTruncate(s, inner)
+		pad := inner - lipgloss.Width(s)
+		if pad < 0 {
+			pad = 0
 		}
+		return bg.Render(" " + s + strings.Repeat(" ", pad) + " ")
 	}
 
-	content := []string{promptLine}
+	plainCmd := "$ " + ansiSafeTruncate(strings.ReplaceAll(terminalCommand(m), "\n", " ⏎ "), inner-4)
 
-	switch {
-	case strings.TrimSpace(m.Content) != "":
+	var rows []string
+
+	if m.Status == "running" {
+		chip := "running…"
+		cmdVis := strings.ReplaceAll(terminalCommand(m), "\n", " ⏎ ")
+		left := green.Render("$") + " " + textFg.Render(ansiSafeTruncate(cmdVis, inner-6))
+		right := yellow.Render(chip)
+		pad := inner - 2 - lipgloss.Width(left) - lipgloss.Width(right)
+		if pad < 1 {
+			pad = 1
+		}
+		rows = append(rows, bg.Render(" "+left+strings.Repeat(" ", pad)+right+" "))
+	} else {
+		rows = append(rows, row(plainCmd))
+	}
+
+	if strings.TrimSpace(m.Content) != "" {
 		limit := c.tailLimit()
 		shown, hidden := tailLines(m.Content, limit)
 		for _, l := range shown {
-			l = strings.TrimRight(l, " \t")
-			if t := strings.TrimSpace(l); t == "" {
-				content = append(content, "")
-				continue
-			}
-			content = append(content,
-				lipgloss.NewStyle().Foreground(c.styles.T.Text).Render(ansiSafeTruncate(l, inner)))
+			rows = append(rows, row(l))
 		}
 		if m.IsError {
 			msg := "✗ failed"
 			if strings.TrimSpace(m.ToolSummary) != "" {
 				msg += " — " + oneLine(m.ToolSummary)
 			}
-			content = append(content,
-				lipgloss.NewStyle().Foreground(c.styles.T.Red).Bold(true).Render(msg))
+			rows = append(rows, row(msg))
+			_ = red
 		}
 		if hidden > 0 {
-			content = append(content, "") // spacer before the outside hint
-			defer func() {}()             // keep structure explicit
+			rows = append(rows, "")
 		}
 	}
 
-	slab := lipgloss.NewStyle().
-		Background(lipgloss.Color("#000000")).
-		Foreground(c.styles.T.Text).
-		Padding(0, 1).
-		Width(inner)
+	body := bg.Render("")
+	painted := make([]string, 0, len(rows))
+	for _, r := range rows {
+		if r == "" {
+			painted = append(painted, bg.Render(strings.Repeat(" ", inner+2)))
+			continue
+		}
+		painted = append(painted, r)
+	}
+	body = strings.Join(painted, "\n")
 
-	var b strings.Builder
-	b.WriteString(slab.Render(strings.Join(content, "\n")))
+	out := "\n" + indentBlock(body)
 
-	// Scroll hint OUTSIDE the slab so it never looks like output.
 	if m.Status != "running" && strings.TrimSpace(m.Content) != "" {
 		_, hidden := tailLines(m.Content, c.tailLimit())
 		if hidden > 0 {
-			b.WriteString("\n  " + c.styles.Dim.Render(
+			out += "\n" + indentBlock(c.styles.Dim.Render(
 				fmt.Sprintf("↑ %d more lines — ctrl+e expands", hidden)))
 		}
 	}
-	return b.String()
+	return out
+}
+
+func max0(v int) int {
+	if v < 0 {
+		return 0
+	}
+	return v
 }

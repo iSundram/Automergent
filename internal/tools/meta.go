@@ -199,7 +199,7 @@ func InferCategory(name string) string {
 		return "memory"
 	case strings.HasPrefix(n, "plan"), n == "replan":
 		return "planning"
-	case n == "ask_user" || n == "notify" || n == "finish":
+	case n == "ask_user" || n == "notify":
 		return "interaction"
 	default:
 		return "general"

@@ -55,26 +55,6 @@ func TestStallNudgeRequiresPendingWork(t *testing.T) {
 	}
 }
 
-func TestFinishGate(t *testing.T) {
-	a := &Agent{sess: newTestSession()}
-
-	// No goal, no todos -> plain finish passes.
-	if ok, _ := a.finishGate("done", ""); !ok {
-		t.Error("plain finish should pass without goal/todos")
-	}
-
-	// Goal active without evidence -> denied.
-	a.SetGoal("overnight")
-	if ok, reason := a.finishGate("done", ""); ok || !strings.Contains(reason, "/goal") {
-		t.Errorf("goal without evidence must deny, ok=%v reason=%q", ok, reason)
-	}
-
-	// With evidence -> allowed.
-	if ok, _ := a.finishGate("done", "go test ./... green"); !ok {
-		t.Error("evidenced finish should pass")
-	}
-}
-
 func TestInjectLongRunContextStallContinues(t *testing.T) {
 	a := &Agent{sess: newTestSession()}
 	a.promptSystem = nil

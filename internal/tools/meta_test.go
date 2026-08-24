@@ -78,7 +78,6 @@ func TestInferCategory(t *testing.T) {
 		"secrets_scan":    "security",
 		"task":            "agents",
 		"todo_write":      "memory",
-		"finish":          "interaction",
 		"mystery_tool":    "general",
 	}
 	for name, want := range cases {
