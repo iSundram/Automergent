@@ -36,35 +36,22 @@ func terminalCommand(m ConversationMsg) string {
 	return strings.TrimSpace(ctx)
 }
 
-// renderTerminalCard renders one terminal call as a terminal slab.
+// renderTerminalCard renders ONLY the black slab — no card chrome, no
+// header, no left border. The slab carries command, output and status;
+// a scroll hint sits under it.
 func (c *Conversation) renderTerminalCard(m ConversationMsg, width int) string {
 	collapse := c.expandMode == ExpandCompact && !c.reviewMode
 
-	// The slab carries the command, so the header must not repeat it.
-	hdr := m
-	hdr.ToolContext = ""
-	header := c.toolHeader(hdr, width, 1)
-
-	var body strings.Builder
-
-	switch {
-	case collapse && m.Status != "running":
+	if collapse && m.Status != "running" {
 		if hasSummary(m) {
-			body.WriteString("\n\n  " + c.styles.Dim.Copy().Italic(true).Render(oneLine(m.ToolSummary)))
-		} else if cmd := terminalCommand(m); cmd != "" {
-			body.WriteString("\n\n  " + c.styles.Dim.Render(ansiSafeTruncate("$ "+cmd, width-8)))
+			return c.styles.Dim.Copy().Italic(true).Render(oneLine(m.ToolSummary))
 		}
-
-	default:
-		body.WriteString("\n\n")
-		body.WriteString(indentBlock(c.terminalSlab(m, width)))
-		if m.Status != "running" && hasSummary(m) && c.expandMode == ExpandFull {
-			body.WriteString("\n  " + c.styles.Dim.Copy().Italic(true).Render(oneLine(m.ToolSummary)))
+		if cmd := terminalCommand(m); cmd != "" {
+			return c.styles.Dim.Render(ansiSafeTruncate("$ "+cmd, width-8))
 		}
+		return ""
 	}
-
-	_, accent, _ := c.toolBranding("bash")
-	return wrapCard(accent, width, header+body.String())
+	return c.terminalSlab(m, width)
 }
 
 // terminalSlab renders the black terminal block: "$ command" then the
@@ -99,8 +86,12 @@ func (c *Conversation) terminalSlab(m ConversationMsg, width int) string {
 				lipgloss.NewStyle().Foreground(c.styles.T.Text).Render(ansiSafeTruncate(l, inner)))
 		}
 		if m.IsError {
+			msg := "✗ failed"
+			if strings.TrimSpace(m.ToolSummary) != "" {
+				msg += " — " + oneLine(m.ToolSummary)
+			}
 			content = append(content,
-				lipgloss.NewStyle().Foreground(c.styles.T.Red).Render(fmt.Sprintf("exit status: see above")))
+				lipgloss.NewStyle().Foreground(c.styles.T.Red).Bold(true).Render(msg))
 		}
 		if hidden > 0 {
 			content = append(content, "") // spacer before the outside hint
