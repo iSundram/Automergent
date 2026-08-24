@@ -51,7 +51,7 @@ func (c *Conversation) renderTerminalCard(m ConversationMsg, width int) string {
 		}
 		return ""
 	}
-	return c.terminalSlab(m, width)
+	return "\n" + indentBlock(c.terminalSlab(m, width))
 }
 
 // terminalSlab renders the black terminal block: "$ command" then the
@@ -67,12 +67,21 @@ func (c *Conversation) terminalSlab(m ConversationMsg, width int) string {
 	promptLine := promptStyle.Render("$") + " " +
 		lipgloss.NewStyle().Foreground(c.styles.T.Text).Render(cmdText)
 
+	// While running, the ▙ chip rides on the SAME line as the command,
+	// pushed to the right edge of the slab.
+	if m.Status == "running" {
+		chip := lipgloss.NewStyle().Foreground(c.styles.T.Yellow).Render("running…")
+		pad := inner - lipgloss.Width(promptLine) - lipgloss.Width(chip)
+		if pad >= 2 {
+			promptLine += strings.Repeat(" ", pad) + chip
+		} else {
+			promptLine += "  " + chip
+		}
+	}
+
 	content := []string{promptLine}
 
 	switch {
-	case m.Status == "running":
-		content = append(content,
-			lipgloss.NewStyle().Foreground(c.styles.T.Yellow).Render("▙ running…"))
 	case strings.TrimSpace(m.Content) != "":
 		limit := c.tailLimit()
 		shown, hidden := tailLines(m.Content, limit)

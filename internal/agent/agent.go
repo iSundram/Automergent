@@ -585,7 +585,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 				Context:    executed.context,
 				StartedAt:  executed.startedAt,
 				FinishedAt: executed.finishedAt,
-				Duration:   executed.finishedAt.Sub(executed.startedAt),
+				Duration:   executedDuration(executed),
 				Result:     executed.result,
 				Decision:   executed.decision,
 			}
@@ -621,6 +621,18 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 
 func (a *Agent) emitTodoEvent(ctx context.Context, eventType string, state TodoEvent) {
 	a.Emit(eventType, state)
+}
+
+// executedDuration returns the tool's true execution time: the
+// post-approval measurement when the tool recorded one (all native tools
+// do), otherwise the wall-clock span as fallback.
+func executedDuration(e executedToolCall) time.Duration {
+	if e.result.Metadata != nil {
+		if ms, ok := e.result.Metadata["execDurationMs"].(int64); ok && ms >= 0 {
+			return time.Duration(ms) * time.Millisecond
+		}
+	}
+	return e.finishedAt.Sub(e.startedAt)
 }
 
 func buildToolResultMessage(requested []ai.ToolCall, executed []executedToolCall) ai.Message {
@@ -850,11 +862,21 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 		defer cancel()
 	}
 
+	// Permission-aware timing: the clock starts HERE — after pre-tool
+	// hooks and user approval — so waiting on a permission prompt never
+	// counts against the tool's duration.
+	execStart := time.Now()
 	result, err := t.Execute(ctx, tc.Args)
+	execDuration := time.Since(execStart)
+
 	a.runPostToolHooks(ctx, tc, result)
 	if path := toolAccessedPath(tc.Name, tc.Args); path != "" && a.skillPaths != nil {
 		a.skillPaths.record(path)
 	}
+	if result.Metadata == nil {
+		result.Metadata = make(map[string]any)
+	}
+	result.Metadata["execDurationMs"] = execDuration.Milliseconds()
 	return result, err
 }
 
