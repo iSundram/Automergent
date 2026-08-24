@@ -33,43 +33,28 @@ func (c *Conversation) toolStatusView(status string) (colorAlias, string) {
 // toolHeader assembles the shared one-line card header.
 func (c *Conversation) toolHeader(m ConversationMsg, width int, count int) string {
 	statusColor, statusText := c.toolStatusView(m.Status)
-	icon, accentColor, prettyName := c.toolBranding(m.ToolName)
+	prettyName := c.toolBrandingName(m.ToolName)
 	if count > 1 {
 		statusText = fmt.Sprintf("%s ×%d", statusText, count)
 	}
 
-	iconStyle := lipgloss.NewStyle().Foreground(accentColor).Bold(true)
 	statusStyle := lipgloss.NewStyle().Foreground(statusColor).Bold(true).Padding(0, 1)
 
-	nameStyled := c.styles.ToolName.Copy().Foreground(c.styles.T.Text).Render("  " + prettyName)
-	headerLeft := lipgloss.JoinHorizontal(lipgloss.Center, iconStyle.Render(icon), nameStyled, statusStyle.Render(statusText))
+	nameStyled := c.styles.ToolName.Copy().Foreground(c.styles.T.Text).Render(" " + prettyName)
+	headerLeft := lipgloss.JoinHorizontal(lipgloss.Center, nameStyled, statusStyle.Render(statusText))
 
-	pathText := m.ToolContext
 	durationText := ""
 	total := m.Duration
 	if total > 0 {
 		durationText = " " + c.styles.ToolDuration.Render(total.Round(time.Millisecond).String())
 	}
 
-	availableWidth := width - 6
-	leftWidth := lipgloss.Width(headerLeft)
-	maxPathWidth := availableWidth - leftWidth - lipgloss.Width(durationText) - 2
-
-	if maxPathWidth > 5 && pathText != "" {
-		if utf8.RuneCountInString(pathText) > maxPathWidth {
-			runes := []rune(pathText)
-			pathText = "…" + string(runes[len(runes)-maxPathWidth+1:])
-		}
-		pathText = c.styles.Dim.Render(pathText)
-	} else {
-		pathText = ""
+	left := headerLeft + durationText
+	pad := width - 6 - lipgloss.Width(left)
+	if pad < 1 {
+		pad = 1
 	}
-
-	spacerWidth := availableWidth - leftWidth - lipgloss.Width(pathText) - lipgloss.Width(durationText)
-	if spacerWidth < 1 {
-		spacerWidth = 1
-	}
-	return headerLeft + strings.Repeat(" ", spacerWidth) + pathText + durationText
+	return left + strings.Repeat(" ", pad)
 }
 
 // wrapCard frames card content with the tool's accent border.
@@ -380,6 +365,12 @@ func truncateContent(s string, reviewMode bool) string {
 	}
 	runes := []rune(s)
 	return string(runes[:maxRunes]) + " … [truncated, press Ctrl+R for full review mode]"
+}
+
+// toolBrandingName returns just the pretty display name.
+func (c *Conversation) toolBrandingName(name string) string {
+	_, _, pretty := c.toolBranding(name)
+	return pretty
 }
 
 func (c *Conversation) toolBranding(name string) (icon string, accent colorAlias, pretty string) {

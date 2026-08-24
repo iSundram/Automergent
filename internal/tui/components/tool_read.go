@@ -107,9 +107,9 @@ func (c *Conversation) renderReadGroup(group []ConversationMsg, width int) strin
 			if shown >= limit {
 				break
 			}
-			mark := lipgloss.NewStyle().Foreground(c.styles.T.Green).Render("✓")
+			mark := ""
 			if row.err || g.IsError {
-				mark = lipgloss.NewStyle().Foreground(c.styles.T.Red).Render("✗")
+				mark = lipgloss.NewStyle().Foreground(c.styles.T.Red).Render("✗ ")
 			}
 			parts := []string{ansiSafeTruncate(row.label, width-24)}
 			if row.ranges != "" {
@@ -118,7 +118,7 @@ func (c *Conversation) renderReadGroup(group []ConversationMsg, width int) strin
 			if row.size != "" {
 				parts = append(parts, c.styles.Dim.Render(row.size))
 			}
-			body.WriteString("\n  " + mark + " " + strings.Join(parts, " · "))
+			body.WriteString("\n  " + mark + strings.Join(parts, " · "))
 			shown++
 		}
 		if i < len(group)-1 && strings.Contains(g.ToolContext, ",") {

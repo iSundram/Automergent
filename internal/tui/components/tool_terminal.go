@@ -1,15 +1,19 @@
 package components
 
 // Terminal tool cards: bash, run_command, and the shell family.
-// Output renders as a tail box (last N lines on a different background)
-// with an "↑ N more" scroll hint; failures keep the same shape — the red
-// status in the header carries severity.
+// Design: one terminal slab — true-black background, "$ command" first,
+// raw output beneath, scroll hint below the slab. The command is shown
+// exactly once (never echoed in both header and body).
 
-import "strings"
+import (
+	"encoding/json"
+	"fmt"
+	"strings"
 
-const terminalFamilyKey = "run"
+	"charm.land/lipgloss/v2"
+)
 
-// terminalFamily reports shell-execution tools sharing the tail box.
+// terminalFamily reports shell-execution tools sharing the slab design.
 func terminalFamily(name string) bool {
 	switch name {
 	case "bash", "run_command", "read_shell", "write_shell", "stop_shell", "wait":
@@ -18,35 +22,108 @@ func terminalFamily(name string) bool {
 	return false
 }
 
-// renderTerminalCard renders one terminal call: header + command line +
-// boxed output tail (done/error) or spinner note while running.
+// terminalCommand extracts the executed command from args, falling back to
+// the card context (stripped of any "exec: " decoration).
+func terminalCommand(m ConversationMsg) string {
+	var args struct {
+		Command string `json:"command"`
+	}
+	if json.Unmarshal([]byte(m.ToolArgs), &args) == nil && strings.TrimSpace(args.Command) != "" {
+		return strings.TrimSpace(args.Command)
+	}
+	ctx := strings.TrimSpace(m.ToolContext)
+	ctx = strings.TrimPrefix(ctx, "exec: ")
+	return strings.TrimSpace(ctx)
+}
+
+// renderTerminalCard renders one terminal call as a terminal slab.
 func (c *Conversation) renderTerminalCard(m ConversationMsg, width int) string {
-	header := c.toolHeader(m, width, 1)
 	collapse := c.expandMode == ExpandCompact && !c.reviewMode
+
+	// The slab carries the command, so the header must not repeat it.
+	hdr := m
+	hdr.ToolContext = ""
+	header := c.toolHeader(hdr, width, 1)
 
 	var body strings.Builder
 
-	if m.ToolContext != "" {
-		body.WriteString("\n\n  " + c.styles.Dim.Render(ansiSafeTruncate(m.ToolContext, width-8)))
-	}
-
 	switch {
-	case m.Status == "running":
+	case collapse && m.Status != "running":
 		if hasSummary(m) {
-			body.WriteString("\n  " + c.styles.Dim.Copy().Italic(true).Render(oneLine(m.ToolSummary)))
-		}
-	case collapse:
-		if hasSummary(m) {
-			body.WriteString("\n  " + c.styles.Dim.Copy().Italic(true).Render(oneLine(m.ToolSummary)))
-		}
-	default:
-		if m.Content != "" {
-			body.WriteString("\n\n" + indentBlock(c.outputBox(m.Content, width)))
-		} else if hasSummary(m) {
 			body.WriteString("\n\n  " + c.styles.Dim.Copy().Italic(true).Render(oneLine(m.ToolSummary)))
+		} else if cmd := terminalCommand(m); cmd != "" {
+			body.WriteString("\n\n  " + c.styles.Dim.Render(ansiSafeTruncate("$ "+cmd, width-8)))
+		}
+
+	default:
+		body.WriteString("\n\n")
+		body.WriteString(indentBlock(c.terminalSlab(m, width)))
+		if m.Status != "running" && hasSummary(m) && c.expandMode == ExpandFull {
+			body.WriteString("\n  " + c.styles.Dim.Copy().Italic(true).Render(oneLine(m.ToolSummary)))
 		}
 	}
 
 	_, accent, _ := c.toolBranding("bash")
 	return wrapCard(accent, width, header+body.String())
+}
+
+// terminalSlab renders the black terminal block: "$ command" then the
+// output tail (last N lines), plus a scroll hint under the slab.
+func (c *Conversation) terminalSlab(m ConversationMsg, width int) string {
+	inner := width - 10
+	if inner < 12 {
+		inner = 12
+	}
+
+	promptStyle := lipgloss.NewStyle().Foreground(c.styles.T.Green).Bold(true)
+	cmdText := ansiSafeTruncate(strings.ReplaceAll(terminalCommand(m), "\n", " ⏎ "), inner-2)
+	promptLine := promptStyle.Render("$") + " " +
+		lipgloss.NewStyle().Foreground(c.styles.T.Text).Render(cmdText)
+
+	content := []string{promptLine}
+
+	switch {
+	case m.Status == "running":
+		content = append(content,
+			lipgloss.NewStyle().Foreground(c.styles.T.Yellow).Render("▙ running…"))
+	case strings.TrimSpace(m.Content) != "":
+		limit := c.tailLimit()
+		shown, hidden := tailLines(m.Content, limit)
+		for _, l := range shown {
+			l = strings.TrimRight(l, " \t")
+			if t := strings.TrimSpace(l); t == "" {
+				content = append(content, "")
+				continue
+			}
+			content = append(content,
+				lipgloss.NewStyle().Foreground(c.styles.T.Text).Render(ansiSafeTruncate(l, inner)))
+		}
+		if m.IsError {
+			content = append(content,
+				lipgloss.NewStyle().Foreground(c.styles.T.Red).Render(fmt.Sprintf("exit status: see above")))
+		}
+		if hidden > 0 {
+			content = append(content, "") // spacer before the outside hint
+			defer func() {}()             // keep structure explicit
+		}
+	}
+
+	slab := lipgloss.NewStyle().
+		Background(lipgloss.Color("#000000")).
+		Foreground(c.styles.T.Text).
+		Padding(0, 1).
+		Width(inner)
+
+	var b strings.Builder
+	b.WriteString(slab.Render(strings.Join(content, "\n")))
+
+	// Scroll hint OUTSIDE the slab so it never looks like output.
+	if m.Status != "running" && strings.TrimSpace(m.Content) != "" {
+		_, hidden := tailLines(m.Content, c.tailLimit())
+		if hidden > 0 {
+			b.WriteString("\n  " + c.styles.Dim.Render(
+				fmt.Sprintf("↑ %d more lines — ctrl+e expands", hidden)))
+		}
+	}
+	return b.String()
 }
