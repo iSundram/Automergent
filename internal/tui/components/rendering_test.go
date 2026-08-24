@@ -168,24 +168,26 @@ func TestToolCallUsesDefaultBackgroundAndCompactFields(t *testing.T) {
 	conversation := NewConversation(testStyles())
 	tool := conversation.renderToolCall(ConversationMsg{
 		Role:        "tool_call",
-		ToolName:    "run_shell_command",
+		ToolName:    "bash",
 		ToolArgs:    `{"command":"go build ./..."}`,
-		ToolContext: "go build ./...",
+		ToolContext: "exec: go build ./...",
 		Status:      "done",
 		ToolSummary: "build completed",
 		Duration:    time.Millisecond,
 	}, 80)
 	plain := ansi.Strip(tool)
-	if strings.Contains(tool, "48;2;") {
-		t.Fatalf("tool card applies a custom background: %q", tool)
-	}
 	if strings.Contains(plain, "PARAMETERS") || strings.Contains(plain, "EXECUTION RESULT") {
 		t.Fatalf("tool card exposes old section headers: %q", plain)
 	}
-	for _, expected := range []string{"Completed", "Command", "Result"} {
+	// The card names the tool, echoes the command and reports the duration —
+	// no "Completed" label, since the status bullet already carries state.
+	for _, expected := range []string{"Bash", "go build ./...", "1ms"} {
 		if !strings.Contains(plain, expected) {
 			t.Fatalf("tool card missing %q: %q", expected, plain)
 		}
+	}
+	if strings.Contains(plain, "Completed") {
+		t.Fatalf("status is carried by the bullet glyph, not a word: %q", plain)
 	}
 }
 

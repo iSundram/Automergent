@@ -96,7 +96,7 @@ func TestResumeSessionByIDRestoresStructuredConversation(t *testing.T) {
 	app.storage = storage
 	app.handleSlashCommand("/resume " + saved.ID)
 	view := ansiStrip(app.conversation.View())
-	for _, want := range []string{"inspect main.go", "checking the file", "Readfile", "Completed"} {
+	for _, want := range []string{"inspect main.go", "checking the file", "Read", "main.go"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("direct resume missing %q:\n%s", want, view)
 		}

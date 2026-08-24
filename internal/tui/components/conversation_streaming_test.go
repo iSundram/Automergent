@@ -42,7 +42,9 @@ func TestSmokeExpandCycleAndGrouping(t *testing.T) {
 	}
 	c.RenderIfDirty()
 	v := c.View()
-	if !strings.Contains(v, "×2") {
-		t.Fatalf("expected grouped ×2 card, got:\n%s", v)
+	// Two consecutive reads collapse into one card whose headline counts the
+	// files rather than repeating the tool name.
+	if !strings.Contains(v, "2 files") {
+		t.Fatalf("expected grouped read card counting 2 files, got:\n%s", v)
 	}
 }

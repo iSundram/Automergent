@@ -252,7 +252,7 @@ func TestResumeRestoresFullConversation(t *testing.T) {
 	a.width, a.height = 100, 40
 	a.layout()
 	conv := ansiStrip(a.conversation.View())
-	for _, want := range []string{"hello agent", "let me think about this", "I will check the file", "Readfile", "reading main.go", "Completed"} {
+	for _, want := range []string{"hello agent", "let me think about this", "I will check the file", "Read", "main.go"} {
 		if !strings.Contains(conv, want) {
 			t.Fatalf("resumed conversation missing %q:\n%s", want, conv)
 		}
