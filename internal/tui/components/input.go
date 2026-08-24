@@ -13,6 +13,7 @@ import (
 
 // Input is a multi-line text input component with history.
 type Input struct {
+	showPrompt    bool
 	ta            textarea.Model
 	styles        *themes.Styles
 	history       []string
@@ -30,7 +31,7 @@ func NewInput(styles *themes.Styles) Input {
 	ta.SetHeight(1)
 	ta.MaxHeight = 16
 	ta.CharLimit = 0
-	ta.Prompt = "❯ "
+	ta.Prompt = ""
 
 	// Inline look: accent prompt, muted placeholder, no boxes or highlights.
 	st := ta.Styles()
@@ -48,7 +49,7 @@ func NewInput(styles *themes.Styles) Input {
 
 	ta.Focus()
 
-	return Input{ta: ta, styles: styles, histIdx: -1, focused: true}
+	return Input{ta: ta, styles: styles, histIdx: -1, focused: true, showPrompt: true}
 }
 
 // SetWidth updates the input width.
@@ -96,11 +97,7 @@ func (i *Input) Reset() {
 // SetPromptVisible toggles the ❯ prompt marker. The dock clears it while it
 // owns the keyboard so exactly one surface shows the cursor.
 func (i *Input) SetPromptVisible(v bool) {
-	if v {
-		i.ta.Prompt = "❯ "
-	} else {
-		i.ta.Prompt = ""
-	}
+	i.showPrompt = v
 }
 
 // Focus gives the input focus.
@@ -367,7 +364,10 @@ func (i Input) View() string {
 	} else {
 		promptStyle = lipgloss.NewStyle().Foreground(i.styles.T.Subtext)
 	}
-	promptStr := promptStyle.Render("❯ ")
+	promptStr := ""
+	if i.showPrompt {
+		promptStr = promptStyle.Render("❯ ")
+	}
 
 	var renderedLines []string
 	for idx, line := range lines {
