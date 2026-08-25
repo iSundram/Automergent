@@ -1,27 +1,49 @@
 package app
 
 // Global key routing.
-// Moved verbatim from internal/tui/app.go.
+//
+// ESC and Ctrl+C are delegated to escape.go, which owns one ordered precedence
+// chain each. Everything else is dispatched here. The footer's hint row is
+// derived from the same precedence (uistate.go), so an advertised key always
+// does what the hint says.
 
 import (
-	tea "charm.land/bubbletea/v2"
-	"github.com/iSundram/Automergent/internal/tui/components"
 	"strings"
-	"time"
+
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/iSundram/Automergent/internal/tui/components"
 )
 
 func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
+	key := m.String()
+
+	// ESC and Ctrl+C resolve through their own chains, ahead of every other
+	// binding, so no pane can accidentally shadow them.
+	switch key {
+	case "esc":
+		cmd := a.handleEscape()
+		a.refreshChrome()
+		return cmd
+	case "ctrl+c":
+		cmd := a.handleCtrlC()
+		a.refreshChrome()
+		return cmd
+	}
+
+	// Any other key disarms the pending double-press confirmations: an armed
+	// "esc again to clear" must not survive the user typing something else.
+	a.disarmEscape()
+	a.ctrlCArmed = false
+	defer a.refreshChrome()
+
 	if a.showHelp {
-		if m.String() == "?" || m.String() == "esc" || m.String() == "q" {
+		if key == "?" || key == "q" {
 			a.showHelp = false
 		}
 		return nil
 	}
-	key := m.String()
-	if key == "esc" && a.thinking {
-		a.cancelActiveRun("Interrupted")
-		return nil
-	}
+
 	if a.palette.Visible() {
 		switch key {
 		case "enter":
@@ -61,29 +83,10 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 			pal, cmd := a.palette.Update(m)
 			a.palette = pal
 			return cmd
-		case "esc":
-			a.palette.Hide()
-			a.layout()
-			return nil
 		}
 	}
+
 	switch key {
-	case "ctrl+c":
-		now := time.Now()
-		if now.Sub(a.lastCtrlCAt) <= time.Second {
-			a.cancel()
-			return tea.Quit
-		}
-		a.lastCtrlCAt = now
-		if a.thinking {
-			a.cancelActiveRun("Interrupted")
-		} else {
-			a.statusBar.SetStatus("Press Ctrl+C again to exit")
-			return tea.Tick(2*time.Second, func(time.Time) tea.Msg {
-				return clearCtrlCStatusMsg{}
-			})
-		}
-		return nil
 	case "ctrl+q":
 		a.cancel()
 		return tea.Quit
@@ -119,6 +122,32 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		return nil
 	case "ctrl+t":
 		return a.dispatchByName("tree")
+	case "end":
+		// Jump to the newest output. Only claimed when the view is actually
+		// behind — otherwise the key falls through to the textarea, where `end`
+		// means end-of-line and taking it would be a regression.
+		if !a.conversation.AtBottom() {
+			a.conversation.GotoEnd()
+			return nil
+		}
+	case "ctrl+j":
+		// Send a message at the next tool boundary instead of waiting for the
+		// whole turn to finish.
+		if a.thinking {
+			if a.markQueueBoundary() {
+				a.layout()
+				return nil
+			}
+			a.setTransientNotice("nothing to send · type a message first")
+			return nil
+		}
+		// Idle: ctrl+j is a plain send, so the key means the same thing in both
+		// states rather than silently doing nothing.
+		return a.submitInput()
+	case "shift+tab":
+		// Cycle the approval mode. The palette claims shift+tab while open, so
+		// this is only reached when it is closed.
+		return a.cycleMode()
 	case "f1":
 		return a.dispatchByName("help")
 	case "f2":
@@ -157,27 +186,12 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		}
 		return nil
 	}
+
 	switch a.focus {
 	case "input":
-		if (key == "enter" || key == "ctrl+m") && !a.thinking {
-			prompt := strings.TrimSpace(a.input.Value())
-			if prompt != "" {
-				// If we are waiting for an ask_user response, send it
-				if a.askUserReplyCh != nil {
-					a.askUserReplyCh <- prompt
-					a.askUserReplyCh = nil
-					a.input.Reset()
-					a.statusBar.SetStatus("Thinking…")
-					return nil
-				}
-
-				a.input.Reset()
-				a.palette.Hide()
-				a.layout()
-				if strings.HasPrefix(prompt, "/") {
-					return a.handleSlashCommand(prompt)
-				}
-				return a.startAgent(prompt)
+		if key == "enter" || key == "ctrl+m" {
+			if cmd, handled := a.handleSubmitKey(); handled {
+				return cmd
 			}
 		}
 		inp, cmd := a.input.Update(m)
@@ -215,4 +229,62 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		return cmd
 	}
 	return nil
+}
+
+// handleSubmitKey handles Enter in the prompt. Reports whether the key was
+// consumed; when it was not, the keystroke falls through to the textarea (so
+// Enter on an empty prompt still inserts a newline where that is wanted).
+func (a *App) handleSubmitKey() (tea.Cmd, bool) {
+	prompt := strings.TrimSpace(a.input.Value())
+	if prompt == "" {
+		return nil, false
+	}
+
+	// A run in flight: queue instead of dropping the message on the floor.
+	if a.thinking {
+		// An ask_user prompt is the exception — the agent is blocked waiting
+		// for exactly this, so it is delivered immediately.
+		if a.askUserReplyCh != nil {
+			a.askUserReplyCh <- prompt
+			a.askUserReplyCh = nil
+			a.input.Reset()
+			a.statusBar.SetStatus("Thinking…")
+			a.layout()
+			return nil, true
+		}
+		a.enqueueMessage(prompt, false)
+		a.input.Reset()
+		a.palette.Hide()
+		a.updateActiveTokens()
+		a.layout()
+		return nil, true
+	}
+
+	return a.submitInput(), true
+}
+
+// submitInput sends the current prompt: locally for slash commands, to the
+// agent otherwise.
+func (a *App) submitInput() tea.Cmd {
+	prompt := strings.TrimSpace(a.input.Value())
+	if prompt == "" {
+		return nil
+	}
+	if a.askUserReplyCh != nil {
+		a.askUserReplyCh <- prompt
+		a.askUserReplyCh = nil
+		a.input.Reset()
+		a.statusBar.SetStatus("Thinking…")
+		a.layout()
+		return nil
+	}
+
+	a.input.Reset()
+	a.palette.Hide()
+	a.updateActiveTokens()
+	a.layout()
+	if strings.HasPrefix(prompt, "/") {
+		return a.handleSlashCommand(prompt)
+	}
+	return a.startAgent(prompt)
 }

@@ -10,6 +10,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/iSundram/Automergent/internal/tools"
+	"github.com/iSundram/Automergent/internal/tui/render"
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
@@ -63,24 +64,58 @@ type Conversation struct {
 	browsing   bool
 	expandMode ExpandMode
 	// dirty marks that streamed content changed but has not been rendered
-	// yet; rendering is coalesced onto a ~80ms tick by the App.
-	dirty       bool
-	dirtyFollow bool
-	styleEpoch  uint64 // bumped on theme/style changes to invalidate cache
+	// yet; rendering is coalesced onto a ~33ms tick by the App.
+	dirty bool
+	// detached records that the user scrolled away from the newest content.
+	//
+	// The zero value is "attached", which is deliberate: a fresh (or zero-value)
+	// Conversation follows the bottom, and it keeps following until the user
+	// scrolls. This replaces an older model that probed viewport.AtBottom() before
+	// every mutation and re-pinned only if the probe said yes. That probe is a
+	// guess about intent made from a coordinate, and it was wrong often enough to
+	// be the bug the user saw: any transient state where the offset did not
+	// happen to sit at the maximum — a resize mid-render, a coalesced tick that
+	// landed between a content grow and its re-pin, a tool card that shrank on
+	// completion — read as "the user scrolled away" and silently unpinned the view
+	// for the rest of the session. Intent is now recorded once, where it actually
+	// arrives (Update), instead of being re-derived on every append.
+	detached   bool
+	styleEpoch uint64 // bumped on theme/style changes to invalidate cache
 	// Builders used during streaming to avoid quadratic concatenation
 	currentBuilder        *strings.Builder
 	currentThoughtBuilder *strings.Builder
-	// Incremental markdown cache for the streaming message: the completed
-	// lines are expensive-rendered once and reused until they change.
-	streamMDKey   uint64
-	streamMDWidth int
-	streamMDOut   string
+	// streamer renders the in-flight assistant message incrementally: finalized
+	// blocks are glamour-parsed once, and the partial line is styled inline.
+	streamer *render.Streamer
+	// scrollEnd is the "jump to latest" pill, shown only while the view is
+	// behind the bottom.
+	scrollEnd ScrollEnd
+	// unseen counts rows appended while the view was scrolled away, so the pill
+	// can say how much was missed rather than just that something was.
+	unseen int
 }
 
-func (c *Conversation) refreshWithFollow(shouldFollow bool) {
+// refreshAndFollow re-renders and re-pins the view to the bottom unless the user
+// has scrolled away.
+//
+// newRows says whether this mutation added content the user has not seen. Only
+// appends pass true: a re-render at a new width, or a tool card filling in its
+// body, is not something missed, and counting it inflated the "N new" pill.
+func (c *Conversation) refreshAndFollow(newRows bool) {
 	c.refresh()
-	if shouldFollow {
+	if !c.detached {
 		c.viewport.GotoBottom()
+		c.unseen = 0
+		return
+	}
+	// Scrolled away, but the content may have shrunk out from under the offset
+	// (a tool card collapsing on completion, a narrower width). Being scrolled
+	// past the end is not a position the user chose, so clamp back onto it.
+	if c.viewport.PastBottom() {
+		c.viewport.GotoBottom()
+	}
+	if newRows {
+		c.unseen++
 	}
 }
 
@@ -89,7 +124,12 @@ func NewConversation(styles *themes.Styles) Conversation {
 	vp.MouseWheelEnabled = true
 	vp.KeyMap.Up.SetKeys("up")
 	vp.KeyMap.Down.SetKeys("down")
-	return Conversation{viewport: vp, styles: styles}
+	return Conversation{
+		viewport:  vp,
+		styles:    styles,
+		streamer:  render.NewStreamer(0),
+		scrollEnd: NewScrollEnd(styles),
+	}
 }
 
 func (c *Conversation) ensureViewport() {
@@ -103,12 +143,22 @@ func (c *Conversation) ensureViewport() {
 }
 
 // Invalidate drops all cached renders (call after a theme/style switch).
+//
+// The streamer needs no help here: it keys its own caches on
+// render.MarkdownGeneration() and drops them when the theme moves.
 func (c *Conversation) Invalidate() {
 	c.styleEpoch++
 	c.cache = nil
-	c.streamMDKey = 0
-	c.streamMDOut = ""
-	c.refresh()
+	c.refreshAndFollow(false)
+}
+
+// stream returns the streamer, creating it lazily so a zero-value Conversation
+// (as several tests construct) still works.
+func (c *Conversation) stream() *render.Streamer {
+	if c.streamer == nil {
+		c.streamer = render.NewStreamer(0)
+	}
+	return c.streamer
 }
 
 // NeedsRender reports whether streamed content awaits a coalesced render.
@@ -120,12 +170,36 @@ func (c *Conversation) RenderIfDirty() {
 	if !c.dirty {
 		return
 	}
-	follow := c.dirtyFollow
-	c.refresh()
-	if follow {
-		c.viewport.GotoBottom()
-	}
+	// Streamed tokens are not "unseen rows": the pill counts things you would
+	// scroll back for, and a growing paragraph is one row that keeps growing.
+	c.refreshAndFollow(false)
 	c.dirty = false
+}
+
+// GotoEnd jumps the view to the newest content and re-attaches it to the bottom.
+func (c *Conversation) GotoEnd() {
+	c.ensureViewport()
+	c.detached = false
+	c.viewport.GotoBottom()
+	c.unseen = 0
+}
+
+// AtBottom reports whether the view is pinned to the newest content.
+func (c *Conversation) AtBottom() bool {
+	c.ensureViewport()
+	return !c.detached && c.viewport.AtBottom()
+}
+
+// Unseen reports how many rows arrived while the view was scrolled away.
+func (c Conversation) Unseen() int { return c.unseen }
+
+// linesBehind reports how many lines separate the view from the bottom.
+func (c Conversation) linesBehind() int {
+	behind := c.viewport.TotalLineCount() - c.viewport.VisibleLineCount() - c.viewport.YOffset()
+	if behind < 0 {
+		return 0
+	}
+	return behind
 }
 
 // CycleExpand moves between auto → compact → full tool-detail modes and
@@ -155,13 +229,10 @@ func (c Conversation) ExpandMode() ExpandMode { return c.expandMode }
 
 func (c *Conversation) invalidateAll() {
 	c.cache = nil
-	c.streamMDKey = 0
-	c.streamMDOut = ""
 }
 
 func (c *Conversation) SetSize(w, h int) {
 	c.ensureViewport()
-	shouldFollow := c.viewport.AtBottom()
 	if w < 0 {
 		w = 0
 	}
@@ -179,13 +250,13 @@ func (c *Conversation) SetSize(w, h int) {
 	}
 	c.viewport.SetWidth(viewportWidth)
 	c.viewport.SetHeight(h)
-	c.refreshWithFollow(shouldFollow)
+	c.refreshAndFollow(false)
 }
 
 // SetEmptyState sets content shown only while the conversation has no messages.
 func (c *Conversation) SetEmptyState(content string) {
 	c.emptyState = content
-	c.refresh()
+	c.refreshAndFollow(false)
 }
 
 func (c *Conversation) SetBrowsing(enabled bool) {
@@ -201,7 +272,7 @@ func (c *Conversation) SetBrowsing(enabled bool) {
 		}
 		c.viewport.SetWidth(width)
 	}
-	c.refresh()
+	c.refreshAndFollow(false)
 }
 
 func (c *Conversation) AddMessage(role, content string, isError bool) {
@@ -212,9 +283,8 @@ func (c *Conversation) AddMessage(role, content string, isError bool) {
 // box). Used when restoring a session so resuming shows the conversation
 // exactly as it did while running.
 func (c *Conversation) AddMessageFull(role, content, thought string, isError bool) {
-	c.FinalizeStreaming()
 	c.ensureViewport()
-	shouldFollow := c.viewport.AtBottom()
+	c.FinalizeStreaming()
 	c.messages = append(c.messages, ConversationMsg{
 		Role:      role,
 		Content:   content,
@@ -222,12 +292,12 @@ func (c *Conversation) AddMessageFull(role, content, thought string, isError boo
 		IsError:   isError,
 		Timestamp: time.Now(),
 	})
-	c.refreshWithFollow(shouldFollow)
+	c.refreshAndFollow(true)
 }
 
 func (c *Conversation) AddToolLifecycleStart(id, name, args, context string) {
+	c.ensureViewport()
 	c.FinalizeStreaming()
-	shouldFollow := c.viewport.AtBottom()
 	if id != "" {
 		for i := len(c.messages) - 1; i >= 0; i-- {
 			if c.messages[i].Role == "tool_call" && c.messages[i].Status == "running" && c.messages[i].ToolID == id {
@@ -250,12 +320,12 @@ func (c *Conversation) AddToolLifecycleStart(id, name, args, context string) {
 		Status:      "running",
 		Timestamp:   time.Now(),
 	})
-	c.refreshWithFollow(shouldFollow)
+	c.refreshAndFollow(true)
 }
 
 func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, duration time.Duration, result tools.Result, reviewMode bool) {
+	c.ensureViewport()
 	c.FinalizeStreaming()
-	shouldFollow := c.viewport.AtBottom()
 	apply := func(i int) {
 		c.messages[i].Status = "done"
 		if result.IsError {
@@ -271,7 +341,9 @@ func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, d
 		if summary != "" {
 			c.messages[i].ToolSummary = summary
 		}
-		c.refreshWithFollow(shouldFollow)
+		// The row already exists and was already counted when it started
+		// running; filling in its result is not a new row.
+		c.refreshAndFollow(false)
 	}
 	if id != "" {
 		for i := len(c.messages) - 1; i >= 0; i-- {
@@ -307,14 +379,13 @@ func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, d
 		Duration:    duration,
 		Timestamp:   time.Now(),
 	})
-	c.refreshWithFollow(shouldFollow)
+	c.refreshAndFollow(true)
 }
 
 // AppendToken buffers streamed text. Rendering is deferred to RenderIfDirty
 // so a burst of tokens costs one paint, not one paint per token.
 func (c *Conversation) AppendToken(token string) {
 	c.ensureViewport()
-	c.dirtyFollow = c.viewport.AtBottom()
 	if len(c.messages) == 0 || !c.streaming {
 		c.messages = append(c.messages, ConversationMsg{
 			Role:      "assistant",
@@ -324,19 +395,28 @@ func (c *Conversation) AppendToken(token string) {
 		c.streaming = true
 		c.currentBuilder = &strings.Builder{}
 		c.currentBuilder.WriteString(token)
+		c.stream().Reset()
+		c.stream().Write(token)
 	} else {
 		last := &c.messages[len(c.messages)-1]
 		if last.Role == "assistant" {
 			if c.currentBuilder == nil {
 				c.currentBuilder = &strings.Builder{}
 				c.currentBuilder.WriteString(last.Content)
+				// The streamer must carry the same text the builder does, or the
+				// rendered prefix and the raw content diverge.
+				c.stream().Reset()
+				c.stream().Write(last.Content)
 			}
 			c.currentBuilder.WriteString(token)
+			c.stream().Write(token)
 		} else {
 			c.messages = append(c.messages, ConversationMsg{Role: "assistant", Content: "", Timestamp: time.Now()})
 			c.streaming = true
 			c.currentBuilder = &strings.Builder{}
 			c.currentBuilder.WriteString(token)
+			c.stream().Reset()
+			c.stream().Write(token)
 		}
 	}
 	c.dirty = true
@@ -345,7 +425,6 @@ func (c *Conversation) AppendToken(token string) {
 // AppendThought buffers streamed thinking text; see AppendToken.
 func (c *Conversation) AppendThought(thought string) {
 	c.ensureViewport()
-	c.dirtyFollow = c.viewport.AtBottom()
 	if len(c.messages) == 0 || !c.streaming {
 		c.messages = append(c.messages, ConversationMsg{
 			Role:      "assistant",
@@ -379,9 +458,11 @@ func (c *Conversation) Clear() {
 	c.streaming = false
 	c.currentBuilder = nil
 	c.currentThoughtBuilder = nil
-	c.streamMDKey = 0
-	c.streamMDOut = ""
-	c.refresh()
+	c.stream().Reset()
+	c.unseen = 0
+	// A cleared conversation is at its own bottom by definition.
+	c.detached = false
+	c.refreshAndFollow(false)
 }
 
 // FinalizeStreaming ends streaming mode and re-renders to apply markdown.
@@ -410,9 +491,8 @@ func (c *Conversation) FinalizeStreamingWithContent(final string) {
 		}
 		c.streaming = false
 		c.dirty = false
-		c.streamMDKey = 0
-		c.streamMDOut = ""
-		c.refresh()
+		c.stream().Reset()
+		c.refreshAndFollow(false)
 	}
 }
 
@@ -420,7 +500,7 @@ func (c *Conversation) FinalizeStreamingWithContent(final string) {
 func (c *Conversation) SetReviewMode(enabled bool) {
 	c.reviewMode = enabled
 	c.invalidateAll()
-	c.refresh()
+	c.refreshAndFollow(false)
 }
 
 // ReviewMode reports whether detailed tool output is enabled.
@@ -428,11 +508,17 @@ func (c Conversation) ReviewMode() bool {
 	return c.reviewMode
 }
 
+// UpdateToolContent replaces a running tool's body as its output streams in.
+//
+// It follows the bottom like every other mutator: a long-running shell writing
+// hundreds of lines used to grow the content silently under a pinned view,
+// pushing the newest output off-screen.
 func (c *Conversation) UpdateToolContent(id, content string) {
 	for i := len(c.messages) - 1; i >= 0; i-- {
 		if c.messages[i].ToolID == id {
+			c.ensureViewport()
 			c.messages[i].Content = content
-			c.refresh()
+			c.refreshAndFollow(false)
 			return
 		}
 	}

@@ -3,6 +3,7 @@ package ai
 import (
 	"context"
 	"net/http"
+	"time"
 )
 
 // Role identifies who authored a message.
@@ -180,4 +181,39 @@ type ProviderConfig struct {
 type Event struct {
 	Type    string
 	Payload any
+}
+
+// RetryInfo describes one retry attempt against a provider API. Providers that
+// retry internally report each attempt through a RetryObserver so the UI can
+// show that a request is being retried rather than appearing to hang.
+type RetryInfo struct {
+	// Provider and Model identify what was being called.
+	Provider string
+	Model    string
+	// Code is the classified error code, e.g. "RATE_LIMITED".
+	Code string
+	// Status is the transport status when there was one, e.g. "429".
+	Status string
+	// Message is the provider's error text. Callers must treat this as
+	// untrusted: it can embed request URLs, so sanitize before display.
+	Message string
+	// Attempt is the 1-based attempt that just failed; MaxAttempts is the
+	// policy's ceiling. Attempt == MaxAttempts means no further retry follows.
+	Attempt     int
+	MaxAttempts int
+	// Delay is how long the provider will wait before the next attempt.
+	Delay time.Duration
+}
+
+// Retriable reports whether another attempt follows this one.
+func (r RetryInfo) Retriable() bool { return r.Attempt < r.MaxAttempts }
+
+// RetryObserver is implemented by providers that retry API calls internally
+// and can report those attempts to a caller.
+//
+// Wrapping providers (caching, debug, and any future decorator) MUST forward
+// this to the wrapped provider. A wrapper that omits it makes the interface
+// assertion fail silently and retries become invisible again.
+type RetryObserver interface {
+	SetRetryObserver(func(RetryInfo))
 }

@@ -31,6 +31,31 @@ type RecapInfo struct {
 	UpdatedAt       time.Time
 }
 
+// APIErrorInfo is one recorded provider API failure, surfaced by /error.
+// Retried attempts and terminal failures are both recorded; Retrying tells
+// them apart.
+type APIErrorInfo struct {
+	At time.Time
+	// Code is the most specific identifier available: a transport status like
+	// "429" when there was one, otherwise a classified code.
+	Code string
+	// Detail is a short qualifier, e.g. "overloaded", "rate limited".
+	Detail string
+	// Message is the provider's error text, already sanitized of credentials.
+	Message string
+	// Suggestion is the provider's remediation hint, when it gave one.
+	Suggestion string
+	// RequestID correlates the failure with provider-side logs.
+	RequestID string
+
+	Provider string
+	Model    string
+
+	Attempt     int
+	MaxAttempts int
+	Retrying    bool
+}
+
 // Host is the interface that the App must implement to work with the command package.
 // This avoids import cycles: command package depends on this interface, App implements it.
 type Host interface {
@@ -123,6 +148,10 @@ type Host interface {
 	// Usage & policy introspection
 	SessionTokenTotals() (sessions int, totalIn, totalOut int)
 	SecurityPaths() (blocked, allowed []string)
+
+	// API error history (backs /error)
+	APIErrors() []APIErrorInfo
+	ClearAPIErrors()
 
 	// Interactive pickers (full-screen selector overlays)
 	OpenRewindPicker()

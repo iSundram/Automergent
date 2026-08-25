@@ -104,13 +104,13 @@ func (h Header) View() string {
 	}
 
 	// 1. Left Section: Brand & Phase
-	// Keep one trailing cell as part of the brand so adjacent header content
-	// never appears stuck to the final letter.
-	brandText := "⟡ AUTOMERGENT "
-	if h.width < 70 {
-		brandText = "⟡"
+	// BrandMark carries its own trailing space, so the wordmark follows it
+	// directly. Keep one trailing cell after the name too, so adjacent header
+	// content never appears stuck to the final letter.
+	brand := h.styles.BrandMark()
+	if h.width >= 70 {
+		brand += h.styles.HeaderBrand.Render(themes.BrandName + " ")
 	}
-	brand := h.styles.HeaderBrand.Render(brandText)
 
 	phaseLabel := ""
 	if h.width > 50 {

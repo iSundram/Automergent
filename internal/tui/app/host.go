@@ -4,6 +4,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"context"
 	"fmt"
+	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/sandbox"
@@ -166,8 +167,11 @@ func (a *App) Mode() string {
 }
 
 func (a *App) SetMode(mode string) {
+	mode = agent.CanonicalMode(mode)
 	a.cfg.Mode = mode
 	a.header.SetMode(mode)
+	a.statusBar.SetMode(mode)
+	a.refreshChrome()
 }
 
 func (a *App) ToggleFileTree() {

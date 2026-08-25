@@ -38,6 +38,7 @@ import (
 	toolsShell "github.com/iSundram/Automergent/internal/tools/shell"
 	toolsWeb "github.com/iSundram/Automergent/internal/tools/web"
 	"github.com/iSundram/Automergent/internal/tui"
+	"github.com/iSundram/Automergent/internal/tui/themes"
 	"github.com/iSundram/Automergent/internal/version"
 )
 
@@ -1318,6 +1319,10 @@ func formatComprehensiveExitMessage(sess *session.Session) string {
 	dim := lipgloss.NewStyle().Foreground(lipgloss.Color("245"))
 	command := lipgloss.NewStyle().Foreground(lipgloss.Color("153")).Bold(true)
 	success := lipgloss.NewStyle().Foreground(lipgloss.Color("114"))
+	// The banner prints after the TUI has torn down, so there is no live theme to
+	// read. Building styles from the default theme keeps the mark identical to the
+	// one the header and the conversation label just showed.
+	brand := themes.NewStyles(themes.Modern())
 
 	const width = 72
 	rule := dim.Render(strings.Repeat("─", width))
@@ -1334,7 +1339,7 @@ func formatComprehensiveExitMessage(sess *session.Session) string {
 
 	return strings.Join([]string{
 		"",
-		" " + accent.Render("⟡ AUTOMERGENT") + "   " + dim.Render("SESSION COMPLETE"),
+		" " + brand.BrandMark() + accent.Render(themes.BrandName) + "   " + dim.Render("SESSION COMPLETE"),
 		rule,
 		"",
 		field("Session", shortID),

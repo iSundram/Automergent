@@ -46,6 +46,54 @@ type Client struct {
 	limit   int
 	baseURL string
 	effort  string
+
+	// onRetry is notified of each retried API attempt. Guarded by retryMu
+	// because Complete runs on the agent goroutine while the observer is
+	// installed from the UI goroutine on provider switch.
+	retryMu sync.RWMutex
+	onRetry func(ai.RetryInfo)
+}
+
+// SetRetryObserver installs a callback notified of every retried API attempt.
+// Implements ai.RetryObserver.
+func (c *Client) SetRetryObserver(fn func(ai.RetryInfo)) {
+	c.retryMu.Lock()
+	c.onRetry = fn
+	c.retryMu.Unlock()
+}
+
+// retryObserver returns the installed observer, if any.
+func (c *Client) retryObserver() func(ai.RetryInfo) {
+	c.retryMu.RLock()
+	defer c.retryMu.RUnlock()
+	return c.onRetry
+}
+
+// notifyRetry reports one failed attempt to the observer. It classifies the
+// error through the same AutomergentError codes mapError produces, so the UI
+// shows the same code the error log records.
+func (c *Client) notifyRetry(attempt, maxAttempts int, err error, delay time.Duration) {
+	fn := c.retryObserver()
+	if fn == nil {
+		return
+	}
+	info := ai.RetryInfo{
+		Provider:    "google",
+		Model:       c.model,
+		Message:     err.Error(),
+		Attempt:     attempt,
+		MaxAttempts: maxAttempts,
+		Delay:       delay,
+	}
+	var oce *automergentErrors.AutomergentError
+	if errors.As(err, &oce) && oce != nil {
+		info.Code = string(oce.Code)
+		info.Message = oce.Message
+		if status, ok := oce.Context["status_code"]; ok {
+			info.Status = fmt.Sprint(status)
+		}
+	}
+	fn(info)
 }
 
 func New(cfg ai.ProviderConfig) *Client {
@@ -463,11 +511,18 @@ func buildGenerateContentConfig(c *Client, req ai.CompletionRequest) *genai.Gene
 }
 
 func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.CompletionResponse, error) {
+	// Both pre-flight failures are classified rather than returned as bare
+	// fmt.Errorf: they reach the UI through the same EventError path as API
+	// failures, and the error log shows a code for every entry.
 	if c.initErr != nil {
-		return nil, fmt.Errorf("google: client initialization failed: %w", c.initErr)
+		return nil, automergentErrors.Wrap(c.initErr, automergentErrors.CodeConfigInvalid,
+			"google: client initialization failed").
+			WithResource(c.baseURL).
+			WithSuggestion("Check the provider API key and base URL (/api-key, /base-url)")
 	}
 	if err := req.Validate(); err != nil {
-		return nil, fmt.Errorf("google: invalid message sequence: %w", err)
+		return nil, automergentErrors.Wrap(err, automergentErrors.CodeInvalidInput,
+			"google: invalid message sequence")
 	}
 	contents := buildContents(req.Messages)
 	if len(contents) == 0 {
@@ -478,6 +533,12 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 	// Wrap the request in a retry loop
 	policy := automergentErrors.AggressiveRetryPolicy()
 	policy.MaxAttempts = 10
+	// Report each retried attempt so the UI can show "retrying (3/10)" rather
+	// than appearing to hang for the duration of the backoff.
+	maxAttempts := policy.MaxAttempts
+	policy.OnRetry = func(attempt int, err error, delay time.Duration) {
+		c.notifyRetry(attempt, maxAttempts, err, delay)
+	}
 
 	if !req.Stream {
 		resp, retryResult := automergentErrors.RetryWithValue(ctx, policy, func() (*genai.GenerateContentResponse, error) {

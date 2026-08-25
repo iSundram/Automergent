@@ -53,7 +53,21 @@ func (a *App) waitForCoordinatorEvent() tea.Cmd {
 func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	// Live-update active token estimate on every agent event.
 	a.updateActiveTokens()
+	defer a.refreshChrome()
 	switch ev.Type {
+	case agent.EventRetry:
+		// A retried attempt: the request has not failed, so the run continues.
+		// Surfacing it is what keeps a rate-limited request from looking hung.
+		if info, ok := ev.Payload.(ai.RetryInfo); ok {
+			a.handleRetryEvent(info)
+		}
+		return a.waitForAgentEvent()
+	case agent.EventSteered:
+		if text, ok := ev.Payload.(string); ok && strings.TrimSpace(text) != "" {
+			a.statusBar.SetStatus("Steering applied")
+			_ = text // already logged when queued; avoids a duplicate line
+		}
+		return a.waitForAgentEvent()
 	case agent.EventToken:
 		if tok, ok := ev.Payload.(string); ok {
 			a.conversation.AppendToken(tok)
@@ -62,6 +76,9 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 				a.runTokens++
 			}
 		}
+		// Tokens arriving means the request went through: any retry sequence
+		// that preceded them is over.
+		a.clearRetryState()
 		wait := a.waitForAgentEvent()
 		if !a.streamTickPending {
 			a.streamTickPending = true
@@ -87,6 +104,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			}
 			a.conversation.AddToolLifecycleStart(te.ID, te.Name, argText, ctx)
 			a.stats.ToolCallCount++
+			a.activeTool = te.Name
 			a.statusBar.SetStatus(fmt.Sprintf("⚙ %s…", te.Name))
 		} else if tc, ok := ev.Payload.(ai.ToolCall); ok {
 			argText := ""
@@ -98,11 +116,14 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			ctx := extractToolContext(tc.Name, tc.Args)
 			a.conversation.AddToolLifecycleStart(tc.ID, tc.Name, argText, ctx)
 			a.stats.ToolCallCount++
+			a.activeTool = tc.Name
 			a.statusBar.SetStatus(fmt.Sprintf("⚙ %s…", tc.Name))
 		}
 		return a.waitForAgentEvent()
 	case agent.EventToolDone:
 		a.refreshGitBranch()
+		a.activeTool = ""
+		a.runToolCount++
 		if td, ok := ev.Payload.(agent.ToolDoneEvent); ok {
 			a.conversation.AddToolLifecycleDone(td.ID, td.Name, td.Context, td.Result.Summary, td.Duration, td.Result, a.conversation.ReviewMode())
 		} else if r, ok := ev.Payload.(tools.Result); ok {
@@ -193,6 +214,10 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		a.spin.Stop()
 		a.spin.SetLabel("thinking")
 		a.streamTickPending = false
+		a.activeTool = ""
+		a.clearRetryState()
+		// A completed run supersedes any earlier interruption badge.
+		a.lastOutcome = outcomeNone
 		a.conversation.RenderIfDirty()
 		text, _ := ev.Payload.(string)
 		if a.streamedReply {
@@ -217,6 +242,12 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		if strings.TrimSpace(text) != "" && !a.streamedReply {
 			a.conversation.AddMessage("assistant", text, false)
 		}
+		// A message queued during this run is delivered now that the turn is
+		// over. One per turn: the reply to the first may change whether the
+		// rest still make sense.
+		if cmd := a.drainQueue(); cmd != nil {
+			return cmd
+		}
 		return nil
 	case agent.EventCompacted:
 		a.statusBar.SetStatus("Context compacted")
@@ -234,6 +265,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		a.spin.Stop()
 		a.spin.SetLabel("thinking")
 		a.streamTickPending = false
+		a.activeTool = ""
 		a.conversation.RenderIfDirty()
 		a.conversation.FinalizeStreaming() // Re-render with markdown
 		a.layout()                         // Reclaim space from spinner
@@ -243,12 +275,27 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			if isCancellationError(errStr) {
 				a.conversation.AddMessage("system", msg, false)
 				a.statusBar.SetStatus("Cancelled")
+				a.lastOutcome = outcomeCancelled
+				a.clearRetryState()
 				return nil
 			}
+			// File the failure before clearing retry state: the attempt count
+			// from the retry sequence is what makes "failed after 10 attempts"
+			// accurate.
+			a.recordTerminalAPIError(err)
+			a.clearRetryState()
+			a.lastOutcome = outcomeError
 			a.conversation.AddMessage("assistant", msg, true)
 			if strings.Contains(errStr, "401") || strings.Contains(errStr, "authentication_error") {
 				a.conversation.AddMessage("system", "Tip: You can set the API key using: /api-key <key>", false)
 			}
+			if rec, ok := a.latestAPIError(); ok {
+				a.conversation.AddMessage("system",
+					fmt.Sprintf("Recorded as %s — /error shows the full log.", rec.displayCode()), false)
+			}
+		} else {
+			a.lastOutcome = outcomeError
+			a.clearRetryState()
 		}
 		a.statusBar.SetStatus("Error")
 		return nil
@@ -297,6 +344,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 					// Non-file tools use confirm component
 					permission := permissionInfoForTool(tc, name)
 					a.confirm.ShowPermission(permission)
+					a.permissionTool = name
 					a.statusBar.SetPermission(permission.Tool)
 					a.layout()
 					if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {

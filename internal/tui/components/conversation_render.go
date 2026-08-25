@@ -4,7 +4,6 @@ package components
 // Moved verbatim from conversation.go.
 
 import (
-	"fmt"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -35,13 +34,18 @@ func (c *Conversation) renderUser(m ConversationMsg, msgW, w int) string {
 }
 
 // renderAssistant builds one assistant row. During streaming the completed
-// portion is markdown-cached incrementally and only the trailing partial line
-// is rewrapped, so long responses stay smooth.
+// blocks are markdown-rendered once each and the trailing partial line is styled
+// inline, so long responses stay smooth and still look like markdown.
 func (c *Conversation) renderAssistant(m ConversationMsg, isLast bool, prevTool bool, msgW, w int) string {
+	// The body is indented one column inside the bubble, so it must be wrapped
+	// to one column less than the bubble's width. Wrapping to responseW and then
+	// indenting put every full line one cell over budget, which the terminal
+	// resolved by wrapping it again.
 	responseW := w - 2
-	if responseW < 1 {
-		responseW = 1
+	if responseW < 2 {
+		responseW = 2
 	}
+	bodyW := responseW - 1
 
 	liveStreaming := c.streaming && isLast
 
@@ -65,59 +69,53 @@ func (c *Conversation) renderAssistant(m ConversationMsg, isLast bool, prevTool 
 		sb.WriteString("\n")
 	}
 
-	labelStr := " ⟡ Automergent "
+	// The label is the bare brand mark. The wordmark used to sit here too, but it
+	// repeated on every assistant turn and the name adds nothing the mark does
+	// not already say. Errors keep a word because a blue glyph alone does not
+	// tell you what went wrong; BrandMark already ends in a space, so it is
+	// appended directly.
+	label := " " + c.styles.BrandMark()
 	if m.IsError {
-		labelStr = " ⟡ Automergent (Error) "
+		label += c.styles.Error.Render("Error")
 	}
-	label := c.styles.AssistantLabel.Render(labelStr)
 
 	var content string
 	switch {
 	case m.IsError:
-		content = c.styles.Error.MaxWidth(responseW).Render(strings.TrimSpace(m.Content))
+		content = c.styles.Error.MaxWidth(bodyW).Render(strings.TrimSpace(m.Content))
 	case liveStreaming:
-		content = c.streamingBody(m.Content, responseW)
+		content = c.streamingBody(m.Content, bodyW)
 	default:
-		content = render.MarkdownWithWidth(strings.TrimSpace(m.Content), responseW)
+		// MarkdownStream, not MarkdownWithWidth: a finished answer must occupy
+		// exactly the lines it occupied a tick earlier, while it was still
+		// streaming. See render.MarkdownStream.
+		content = render.MarkdownStream(strings.TrimSpace(m.Content), bodyW)
 	}
-	content = ansi.Hardwrap(content, responseW, true)
+	content = ansi.Hardwrap(content, bodyW, true)
 
 	response := c.styles.AssistantBubble.MaxWidth(responseW).Render(indentLines(content, 1))
 	sb.WriteString(label + "\n" + response + "\n\n")
 	return sb.String()
 }
 
-// streamingBody renders partial assistant text: markdown for completed lines
-// (cached until they change), plain wrapping for the trailing fragment.
+// streamingBody renders partial assistant text through the incremental
+// streamer: finalized blocks come from cache, the open block costs one render,
+// and the partial line is styled inline so markers never show as literals.
 func (c *Conversation) streamingBody(content string, width int) string {
-	text := strings.TrimSpace(content)
-	if text == "" {
+	if strings.TrimSpace(content) == "" {
 		return ""
 	}
-	trimmedLeading := strings.HasPrefix(content, " ") // irrelevant; kept simple
-	_ = trimmedLeading
-
-	idx := strings.LastIndexByte(content, '\n')
-	if idx < 0 {
-		// No completed line yet: cheap wrap only.
-		return wrapPlain(text, width)
+	s := c.stream()
+	s.SetWidth(width)
+	// The streamer is fed by AppendToken. If a caller mutated the message
+	// content some other way (session restore, a provider's final text arriving
+	// mid-stream), the two have diverged — rebuild from the authoritative copy.
+	if s.Raw() != content {
+		s.Reset()
+		s.SetWidth(width)
+		s.Write(content)
 	}
-
-	stable := content[:idx]
-	tail := strings.TrimRight(content[idx+1:], " \t")
-
-	key := hashMessage(c.styleEpoch, 0, false, ConversationMsg{Content: stable}, fmt.Sprintf("mdw:%d", width))
-	if key != c.streamMDKey || c.streamMDWidth != width || c.streamMDOut == "" {
-		c.streamMDOut = render.MarkdownWithWidth(strings.TrimSpace(stable), width)
-		c.streamMDKey = key
-		c.streamMDWidth = width
-	}
-
-	out := c.streamMDOut
-	if tail != "" {
-		out += "\n" + wrapPlain(tail, width)
-	}
-	return out
+	return s.View(true)
 }
 
 func wrapPlain(s string, width int) string {
@@ -174,11 +172,17 @@ func (c *Conversation) renderThoughtBox(thought string, width int) string {
 		return ""
 	}
 
-	// Render thinking header OUTSIDE the box (like ⟡ Automergent label)
+	// Render thinking header OUTSIDE the box (like the brand label)
 	header := c.styles.Dim.Copy().Bold(true).Render("💭 Thinking")
 
-	// Apply markdown rendering like the main response does
-	renderedContent := render.Markdown(trimmed)
+	// Markdown-render to the box's *inner* width. Rendering unwrapped and
+	// letting lipgloss re-wrap split glamour's ANSI spans mid-sequence, which
+	// leaked escape codes into the visible text.
+	inner := width - 4 // 2 border columns + 2 padding columns
+	if inner < 8 {
+		inner = 8
+	}
+	renderedContent := render.MarkdownWithWidth(trimmed, inner)
 
 	// Ensure we have content to show
 	if strings.TrimSpace(renderedContent) == "" {
@@ -193,6 +197,6 @@ func (c *Conversation) renderThoughtBox(thought string, width int) string {
 		Padding(0, 1).
 		Render(renderedContent)
 
-	// Return header above box (matching Automergent label pattern)
+	// Return header above box (matching the brand label pattern)
 	return header + "\n" + box
 }

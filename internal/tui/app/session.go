@@ -30,11 +30,16 @@ func (a *App) startAgent(prompt string) tea.Cmd {
 	a.runTokens = 0
 	a.runStart = time.Now()
 	a.tokRate = 0
+	a.activeTool = ""
+	a.runToolCount = 0
+	a.lastOutcome = outcomeNone
+	a.clearRetryState()
 	a.spin.SetLabel("thinking")
 	a.spin.Start()
 	a.conversation.AddMessage("user", prompt, false)
 	a.updateActiveTokens()
 	a.statusBar.SetStatus("Thinking…")
+	a.refreshChrome()
 	a.layout() // Adjust for thinking spinner
 	go func() { _ = a.ag.Run(a.ctx, prompt) }()
 	return a.waitForAgentEvent()
@@ -212,6 +217,11 @@ func (a *App) cancelActiveRun(status string) {
 	a.spin.Stop()
 	a.spin.SetLabel("thinking")
 	a.streamTickPending = false
+	a.activeTool = ""
+	a.clearRetryState()
+	// A queued message belonged to the run being cancelled: delivering it into
+	// the next, unrelated run would be surprising.
+	a.clearQueue()
 	a.conversation.RenderIfDirty()
 
 	// Unblock a structured ask_user session in flight

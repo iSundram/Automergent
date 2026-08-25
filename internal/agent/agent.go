@@ -58,6 +58,11 @@ type Agent struct {
 	// session messages, or rendered in the user-facing prompt.
 	toolProfile map[string]bool
 
+	// steer carries user messages injected mid-run. The turn loop drains it at
+	// tool boundaries, so a queued message reaches the model before the next
+	// call instead of waiting for the whole turn to finish.
+	steer chan string
+
 	// New prompt system for staged prompt delivery
 	promptSystem     *promptpkg.PromptSystem
 	promptSystemOnce sync.Once
@@ -201,6 +206,13 @@ const (
 	EventTodoSnapshot = "todo_snapshot"
 	EventTodoUpdate   = "todo_update"
 	EventInitAction   = "init_action"
+	// EventRetry reports one retried provider API attempt. Payload is an
+	// ai.RetryInfo. Emitted while the retry is pending, so the UI can show
+	// progress instead of appearing to hang through the backoff.
+	EventRetry = "retry"
+	// EventSteered reports that a queued user message was injected mid-run at
+	// a tool boundary. Payload is the message text.
+	EventSteered = "steered"
 )
 
 const (
@@ -218,11 +230,16 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 		sess:                sess,
 		tools:               reg,
 		events:              make(chan Event, 8192),
+		steer:               make(chan string, 8),
 		sessionAllowedTools: make(map[string]bool),
 		approvalSource:      "tui",
 		skillPaths:          newSkillTracker(12),
 		editReview:          nil,
 	}
+
+	// Surface provider-internal retries as events so the UI can show that a
+	// request is being retried rather than appearing to hang.
+	agent.installRetryObserver(provider)
 
 	if cfg != nil && cfg.NoTUI {
 		agent.approvalSource = "headless"
@@ -361,8 +378,70 @@ func (a *Agent) GetModel() string {
 // SetProvider swaps the runtime provider used for subsequent completions.
 func (a *Agent) SetProvider(p ai.Provider) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.provider = p
+	a.mu.Unlock()
+	// The new provider has no observer installed yet: without this, retries go
+	// silent after any /provider or /model switch.
+	a.installRetryObserver(p)
+}
+
+// installRetryObserver wires provider-internal retry reporting into the event
+// stream. Providers that do not implement ai.RetryObserver are left alone.
+func (a *Agent) installRetryObserver(p ai.Provider) {
+	ro, ok := p.(ai.RetryObserver)
+	if !ok {
+		return
+	}
+	ro.SetRetryObserver(func(info ai.RetryInfo) {
+		a.Emit(EventRetry, info)
+	})
+}
+
+// Steer queues a user message for injection at the next tool boundary of the
+// running turn. It never blocks: a full buffer means the user has already
+// queued more than the run can absorb, and reports false so the caller can
+// keep the message in its own queue instead.
+func (a *Agent) Steer(text string) bool {
+	if strings.TrimSpace(text) == "" {
+		return false
+	}
+	select {
+	case a.steer <- text:
+		return true
+	default:
+		return false
+	}
+}
+
+// drainSteer moves any queued steering messages into the conversation as user
+// messages. Called at tool boundaries, where inserting a user turn is valid.
+// Reports how many messages were injected.
+func (a *Agent) drainSteer() int {
+	injected := 0
+	for {
+		select {
+		case text := <-a.steer:
+			msg := ai.NewTextMessage(ai.RoleUser, text)
+			a.sess.AddMessage(msg)
+			a.recordToTranscript(msg)
+			a.Emit(EventSteered, text)
+			injected++
+		default:
+			return injected
+		}
+	}
+}
+
+// ClearSteerQueue discards pending steering messages. Called on cancellation so
+// a queued message cannot leak into the next, unrelated run.
+func (a *Agent) ClearSteerQueue() {
+	for {
+		select {
+		case <-a.steer:
+		default:
+			return
+		}
+	}
 }
 
 // Session returns the current session.
@@ -599,6 +678,9 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		resultMsg := buildToolResultMessage(toolCalls, executedCalls)
 		a.sess.AddMessage(resultMsg)
 		a.recordToTranscript(resultMsg)
+		// Tool boundary: a user message inserted here reaches the model on the
+		// next call, which is what "steer the run" means.
+		a.drainSteer()
 		a.injectLongRunContext(runMeta, true)
 
 	}
@@ -811,7 +893,7 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 	}
 	a.mu.RUnlock()
 
-	if !allowed && t.RequiresConfirmation(a.cfg.Mode) {
+	if !allowed && a.needsConfirmation(tc, t) {
 		res := a.requestConfirmation(tc)
 		if !res.Allow {
 			msg := "user declined tool execution"

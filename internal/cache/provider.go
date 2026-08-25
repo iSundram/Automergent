@@ -100,6 +100,18 @@ func (cp *CachingProvider) TokenCount(messages []ai.Message) (int, error) {
 	return cp.provider.TokenCount(messages)
 }
 
+// SetRetryObserver forwards the observer to the wrapped provider so retries
+// stay visible through the cache layer. Implements ai.RetryObserver.
+func (cp *CachingProvider) SetRetryObserver(fn func(ai.RetryInfo)) {
+	if ro, ok := cp.provider.(ai.RetryObserver); ok {
+		ro.SetRetryObserver(fn)
+	}
+}
+
+// Unwrap returns the wrapped provider, letting callers reach capabilities this
+// wrapper does not itself re-expose.
+func (cp *CachingProvider) Unwrap() ai.Provider { return cp.provider }
+
 // Complete performs a completion with caching support.
 func (cp *CachingProvider) Complete(ctx context.Context, req ai.CompletionRequest) (ai.CompletionResponse, error) {
 	snapshot := cp.buildSnapshot(req)

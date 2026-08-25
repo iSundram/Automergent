@@ -81,18 +81,30 @@ func handleProvider(host Host, args []string) Result {
 
 func handleMode(host Host, args []string) Result {
 	if len(args) == 0 {
-		host.AddSystemMessage(fmt.Sprintf("Current mode: %s\nUsage: /mode <edit|plan>", host.Mode()))
+		var b strings.Builder
+		fmt.Fprintf(&b, "Current mode: %s — %s\n\nAvailable modes:\n",
+			host.Mode(), agent.ModeDescription(host.Mode()))
+		for _, mode := range agent.AllModes() {
+			marker := "  "
+			if agent.CanonicalMode(host.Mode()) == mode {
+				marker = "▸ "
+			}
+			fmt.Fprintf(&b, "%s%-13s %s\n", marker, mode, agent.ModeDescription(mode))
+		}
+		b.WriteString("\nUsage: /mode <manual|accept-edits|auto|plan> · shift+tab cycles")
+		host.AddSystemMessage(b.String())
 		return Done(nil)
 	}
 
 	mode := args[0]
 	if !agent.IsValid(mode) {
-		host.CommandError("Error: usage /mode <edit|plan>")
+		host.CommandError("Error: usage /mode <manual|accept-edits|auto|plan>")
 		return Done(nil)
 	}
 
+	mode = agent.CanonicalMode(mode)
 	host.SetMode(mode)
-	host.AddSystemMessage(fmt.Sprintf("Mode switched to %s", mode))
+	host.AddSystemMessage(fmt.Sprintf("Mode switched to %s — %s", mode, agent.ModeDescription(mode)))
 	host.PersistProjectConfig()
 	host.SetStatus("Mode updated")
 	return Done(nil)

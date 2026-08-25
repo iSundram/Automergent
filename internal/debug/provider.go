@@ -58,3 +58,15 @@ func (d *DebugProvider) TokenCount(messages []ai.Message) (int, error) {
 func (d *DebugProvider) ContextLimit() int {
 	return d.provider.ContextLimit()
 }
+
+// SetRetryObserver forwards the observer to the wrapped provider so retries
+// stay visible through the debug layer. Implements ai.RetryObserver.
+func (d *DebugProvider) SetRetryObserver(fn func(ai.RetryInfo)) {
+	if ro, ok := d.provider.(ai.RetryObserver); ok {
+		ro.SetRetryObserver(fn)
+	}
+}
+
+// Unwrap returns the wrapped provider, letting callers reach capabilities this
+// wrapper does not itself re-expose.
+func (d *DebugProvider) Unwrap() ai.Provider { return d.provider }

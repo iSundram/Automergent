@@ -472,6 +472,18 @@ func Default() *Registry {
 	}, handleStats)
 
 	r.MustRegister(Command{
+		Name:             "error",
+		Aliases:          []string{"errors"},
+		Description:      "Show recorded API errors and retries",
+		Category:         "System",
+		Icon:             "󰀦",
+		ArgsHint:         "[clear|<n>]",
+		Immediate:        true,
+		SupportsHeadless: true,
+		WhenToUse:        "After a request failed or took unusually long",
+	}, handleErrors)
+
+	r.MustRegister(Command{
 		Name:        "help",
 		Description: "Open keyboard and command help",
 		Category:    "System",

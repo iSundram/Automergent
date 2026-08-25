@@ -273,7 +273,8 @@ func (m Model) View() tea.View {
 	if version == "" {
 		version = "detecting…"
 	}
-	left := lipgloss.NewStyle().Foreground(m.theme.Accent).Bold(true).Render("⟡ AUTOMERGENT")
+	left := m.styles.BrandMark() +
+		lipgloss.NewStyle().Foreground(m.theme.Accent).Bold(true).Render(themes.BrandName)
 	center := lipgloss.NewStyle().Foreground(m.theme.Subtext).Bold(true).Render(stateLabel)
 	right := lipgloss.NewStyle().Foreground(m.theme.Muted).Render(version)
 	gap1 := max(1, contentWidth/2-lipgloss.Width(center)/2-lipgloss.Width(left))

@@ -212,20 +212,39 @@ func ansiSafeTruncate(s string, max int) string {
 
 // Update forwards messages to the viewport so scroll mode (and mouse
 // scrolling in browsing mode) keeps working.
+//
+// This is also the one place the follow/detach decision is made. Every scroll a
+// user can perform — wheel, arrows, page keys, home/end — arrives here and
+// nowhere else, so the offset after forwarding is the offset the user asked for:
+// off the bottom means detach, back on it means re-attach. Deciding here rather
+// than in the mutators is what makes the bottom actually sticky, because content
+// arriving on its own can no longer be mistaken for the user moving away from it.
 func (c Conversation) Update(msg tea.Msg) (Conversation, tea.Cmd) {
-	if _, ok := msg.(tea.MouseMsg); ok {
-		vp, cmd := c.viewport.Update(msg)
-		c.viewport = vp
-		return c, cmd
-	}
 	vp, cmd := c.viewport.Update(msg)
 	c.viewport = vp
+	c.detached = !c.viewport.AtBottom()
+	if !c.detached {
+		c.unseen = 0
+	}
 	return c, cmd
 }
 
-// View renders the viewport with a manual scrollbar while browsing.
+// View renders the viewport, the scroll-to-end pill when the view is behind,
+// and a manual scrollbar while browsing.
+//
+// The pill state is computed here rather than in refresh() because scrolling
+// changes it without changing the content: a wheel event or an arrow key moves
+// YOffset through viewport.Update and never reaches a mutator. The value
+// receiver means these writes are local to the call, which is exactly right —
+// they are a function of the scroll position at paint time.
 func (c Conversation) View() string {
 	content := c.viewport.View()
+
+	behind := c.linesBehind()
+	c.scrollEnd.SetWidth(c.viewport.Width())
+	c.scrollEnd.Set(behind > 0 && len(c.messages) > 0, c.unseen, behind)
+	content = c.scrollEnd.Overlay(content)
+
 	if !c.browsing || c.viewport.TotalLineCount() <= c.viewport.VisibleLineCount() {
 		return content
 	}

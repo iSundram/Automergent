@@ -45,6 +45,9 @@ type mockHost struct {
 
 	setModeCalls []string
 
+	apiErrors          []APIErrorInfo
+	clearAPIErrorCalls int
+
 	toggleFileTreeCalls   int
 	toggleDiffPaneCalls   int
 	toggleLSPPanelCalls   int
@@ -147,6 +150,8 @@ func (m *mockHost) Reset() {
 	m.ensureProviderConfigCalls = nil
 	m.persistProjectConfigCalls = 0
 	m.setModeCalls = nil
+	m.apiErrors = nil
+	m.clearAPIErrorCalls = 0
 	m.toggleFileTreeCalls = 0
 	m.toggleDiffPaneCalls = 0
 	m.toggleLSPPanelCalls = 0
@@ -617,6 +622,19 @@ func (m *mockHost) SecurityPaths() ([]string, []string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string{}, m.secBlocked...), append([]string{}, m.secAllowed...)
+}
+
+func (m *mockHost) APIErrors() []APIErrorInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]APIErrorInfo{}, m.apiErrors...)
+}
+
+func (m *mockHost) ClearAPIErrors() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.apiErrors = nil
+	m.clearAPIErrorCalls++
 }
 
 func (m *mockHost) OpenRewindPicker() {

@@ -16,6 +16,7 @@ func (a *App) layout() {
 	a.header.SetWidth(a.width)
 	a.statusBar.SetWidth(a.width)
 	a.input.SetWidth(a.width)
+	a.infoLine.SetWidth(a.width)
 	a.palette.SetSize(a.width, a.height)
 	a.selector.SetSize(a.width, a.height)
 	a.confirm.SetSize(a.width, a.height)
@@ -51,6 +52,11 @@ func (a *App) layout() {
 		footerH = lipgloss.Height(a.confirm.View())
 	}
 	if a.thinking {
+		footerH++
+	}
+	// The `└─` info line sits above the prompt (under the spinner while running).
+	// It is always rendered, so it always costs a row.
+	if a.infoLineVisible() {
 		footerH++
 	}
 	// Palette and secondary confirmations render inline below the input.
@@ -104,6 +110,19 @@ func (a *App) layout() {
 		a.conversation.SetSize(mainW, mainH)
 	}
 	a.sessionBrowser.SetSize(a.width, a.height*3/4)
+}
+
+// infoLineVisible reports whether the `└─` hint line should be rendered. It is
+// suppressed in zen mode and while a full-screen overlay owns the display,
+// where it would either be noise or unreachable.
+func (a *App) infoLineVisible() bool {
+	if a.zenMode || a.width <= 0 {
+		return false
+	}
+	if a.showHelp || a.selector.Visible() || a.diffPane.Visible() {
+		return false
+	}
+	return a.infoLine.View() != ""
 }
 
 // showLogo reports whether the terminal logo should replace the header:
@@ -188,10 +207,19 @@ func (a *App) View() tea.View {
 		sections = append(sections, a.toasts.View())
 	}
 
-	// Footer: spinner, input, then inline palette/confirmation panels below the input.
+	// Footer: spinner, info line, input, then inline palette/confirmation panels
+	// below the input.
 	var footer []string
 	if a.thinking {
 		footer = append(footer, "  "+a.spin.View())
+	}
+	// The `└─` info line sits between the spinner it explains and the prompt it
+	// advises, so it reads as a continuation of the run status rather than as
+	// something typed. It is never rendered below the input.
+	if a.infoLineVisible() {
+		if line := a.infoLine.View(); line != "" {
+			footer = append(footer, line)
+		}
 	}
 	if a.confirm.Visible() {
 		footer = append(footer, a.confirm.View())

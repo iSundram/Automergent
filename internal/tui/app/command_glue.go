@@ -6,6 +6,7 @@ package app
 import (
 	tea "charm.land/bubbletea/v2"
 	"fmt"
+	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/tui/commands"
 	"github.com/iSundram/Automergent/internal/tui/components"
 	"github.com/sahilm/fuzzy"
@@ -63,9 +64,24 @@ func (a *App) updatePalette() {
 		items = a.fuzzyFilter(providerItems, filter)
 
 	case "mode":
-		modeItems := []components.PaletteItem{
-			{Label: "edit", Description: "Allow edits with permission", Value: "edit", Icon: "󰏫", Category: "Modes", Current: a.cfg.Mode == "edit"},
-			{Label: "plan", Description: "Plan and inspect without edits", Value: "plan", Icon: "󰈙", Category: "Modes", Current: a.cfg.Mode == "plan"},
+		// Icons run from most to least gated, matching AllModes' order.
+		modeIcons := map[string]string{
+			"manual":       "󰌾",
+			"accept-edits": "󰏫",
+			"auto":         "󰐊",
+			"plan":         "󰈙",
+		}
+		current := agent.CanonicalMode(a.cfg.Mode)
+		var modeItems []components.PaletteItem
+		for _, mode := range agent.AllModes() {
+			modeItems = append(modeItems, components.PaletteItem{
+				Label:       mode,
+				Description: agent.ModeDescription(mode),
+				Value:       mode,
+				Icon:        modeIcons[mode],
+				Category:    "Modes",
+				Current:     mode == current,
+			})
 		}
 		items = a.fuzzyFilter(modeItems, filter)
 

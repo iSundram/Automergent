@@ -111,6 +111,39 @@ type App struct {
 	lastCtrlCAt        time.Time
 	askUserReplyCh     chan string
 
+	// Bottom-chrome state. infoLine renders the `└─` hint line; the rest is
+	// derived UI state consumed by uistate.go (see refreshChrome).
+	infoLine components.InfoLine
+
+	// escArmed/lastEscAt implement the double-ESC input clear.
+	escArmed   bool
+	lastEscAt  time.Time
+	ctrlCArmed bool
+
+	// msgQueue holds messages typed while a run is in flight.
+	msgQueue []queuedMessage
+
+	// activeTool is the tool currently executing, "" when none is.
+	activeTool string
+	// runToolCount counts tools completed in the current (or last) run, so an
+	// interruption can report how far it got.
+	runToolCount int
+	// permissionTool names the tool a visible permission prompt is asking about.
+	permissionTool string
+	// lastOutcome is the sticky result of the last run: one of the outcome*
+	// constants in errorlog.go.
+	lastOutcome string
+
+	// API error history and live retry state backing /error and the footer's
+	// retry indicator.
+	apiErrors    []apiErrorRecord
+	retrying     bool
+	retryAttempt int
+	retryMax     int
+	retryCode    string
+	retryDetail  string
+	retryDelay   time.Duration
+
 	// pendingDiffHide is set when confirmation completes and diff should be hidden
 	pendingDiffHide bool
 
@@ -146,6 +179,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		header:             components.NewHeader(styles),
 		logo:               components.NewLogo(styles),
 		statusBar:          components.NewStatusBar(styles),
+		infoLine:           components.NewInfoLine(styles),
 		toasts:             components.NewToasts(styles),
 		questionnaire:      components.NewQuestionnaire(styles),
 		dock:               components.NewBottomDock(styles),
@@ -189,7 +223,14 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	app.helpOverlay.SetSlashCommands(app.commands.HelpRows())
 	app.header.SetModel(cfg.Model)
 	app.header.SetProvider(cfg.Provider)
+	// Normalise a legacy "edit" mode from a persisted config to its current
+	// name so the chip and the approval gate agree on what mode this is.
+	cfg.Mode = agent.CanonicalMode(cfg.Mode)
+	if cfg.Mode == "" {
+		cfg.Mode = "manual"
+	}
 	app.header.SetMode(cfg.Mode)
+	app.statusBar.SetMode(cfg.Mode)
 	app.header.SetPhase(string(agent.DetectPhase(sess.Messages)))
 	app.header.SetTokens(sess.TotalInputTokens + sess.TotalOutputTokens)
 	app.stats.InputTokens = sess.TotalInputTokens
@@ -203,6 +244,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	}
 	// Initialize active token estimate
 	app.updateActiveTokens()
+	app.refreshChrome()
 	return app
 }
 
@@ -244,8 +286,16 @@ func (a *App) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// streamTickInterval is the coalescing cadence for streamed output. 80ms was
+// 12.5 fps, slow enough that text arrived in visible chunks rather than
+// flowing; 33ms is ~30 fps, which reads as continuous. The tick is
+// self-terminating (it only reschedules while NeedsRender), and the streamer
+// now renders one block per tick instead of the whole prefix, so the higher
+// rate costs less work than the old one did.
+const streamTickInterval = 33 * time.Millisecond
+
 func scheduleStreamTick() tea.Cmd {
-	return tea.Tick(80*time.Millisecond, func(time.Time) tea.Msg {
+	return tea.Tick(streamTickInterval, func(time.Time) tea.Msg {
 		return streamTickMsg{}
 	})
 }
@@ -440,10 +490,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return a, a.input.Focus()
 	case clearCtrlCStatusMsg:
-		// Only clear if still showing the Ctrl+C message
-		if a.statusBar.View() != "" && !a.thinking {
+		// The arm window expired: a later Ctrl+C starts over rather than
+		// quitting on a press the user made minutes ago.
+		a.ctrlCArmed = false
+		if !a.thinking && a.lastOutcome == outcomeNone {
 			a.statusBar.SetStatus("Ready")
 		}
+		a.refreshChrome()
 	case hideDiffPaneMsg:
 		// Safely hide diff pane from main event loop (not from goroutine)
 		if a.diffPane.Visible() {
@@ -485,12 +538,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		cmds = append(cmds, cmd)
 		if !a.confirm.Visible() {
 			a.statusBar.ClearPermission()
+			a.permissionTool = ""
 			// Check if we need to hide diff pane after confirmation
 			if a.pendingDiffHide && a.diffPane.Visible() {
 				a.diffPane.Toggle()
 				a.pendingDiffHide = false
 			}
 			a.layout()
+			a.refreshChrome()
 		}
 	}
 	return a, tea.Batch(cmds...)
