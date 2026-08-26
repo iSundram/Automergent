@@ -12,7 +12,6 @@ import (
 	"github.com/iSundram/Automergent/internal/cache"
 	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/debug"
-	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -152,50 +151,96 @@ func (a *App) compactContext() tea.Cmd {
 }
 
 func buildProviderFromConfig(cfg *config.Config) (ai.Provider, error) {
-	pc := cfg.Providers[cfg.Provider]
-	enablePromptCache := shouldEnablePromptCache(cfg, cfg.Provider)
+	primary, err := buildProviderForConfig(cfg, cfg.Provider, cfg.Model)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build fallback chain when configured.
+	var fallbacks []ai.Provider
+	var labels []string
+	for _, fb := range cfg.ProviderFallback {
+		fp, err := buildProviderForConfig(cfg, fb.Provider, fb.Model)
+		if err != nil {
+			continue // skip invalid entries; validated at /provider fallback add time
+		}
+		fallbacks = append(fallbacks, fp)
+		labels = append(labels, fb.Provider+"/"+fb.Model)
+	}
+	if len(fallbacks) > 0 {
+		chain := append([]ai.Provider{primary}, fallbacks...)
+		chainLabels := append([]string{cfg.Provider + "/" + cfg.Model}, labels...)
+		primary = ai.NewFallbackChain(chain, chainLabels)
+	}
+
+	// Prompt cache wrapper.
+	if shouldWrapPromptCacheProvider(cfg, primary) {
+		primary = cache.NewCachingProvider(primary, cache.NewPromptCache())
+	}
+
+	// Debug wrapper (only for the active provider to avoid duplicate loggers).
+	if cfg.Debug.Enabled {
+		sessionID := debug.NewSessionID()
+		logger, err := debug.NewLogger(cfg.Debug, sessionID)
+		if err == nil && logger != nil {
+			primary = debug.NewDebugProvider(primary, logger)
+		}
+	}
+
+	return primary, nil
+}
+
+// buildProviderForConfig constructs a provider for an arbitrary name+model
+// from the stored config. It resolves credentials (config key → env → secret
+// store), applies per-model credential overrides and returns the raw provider
+// without fallback/cache/debug wrappers.
+func buildProviderForConfig(cfg *config.Config, name, model string) (ai.Provider, error) {
+	pc := cfg.Providers[name]
+
+	apiKey := pc.APIKey
+	if apiKey == "" {
+		if key, err := config.GetProviderAPIKey(cfg, name); err == nil && key != "" {
+			apiKey = key
+		}
+	}
+	baseURL := pc.BaseURL
+	if mc, ok := pc.Models[model]; ok {
+		if mc.APIKey != "" {
+			apiKey = mc.APIKey
+		}
+		if mc.BaseURL != "" {
+			baseURL = mc.BaseURL
+		}
+	}
+
+	enablePromptCache := shouldEnablePromptCache(cfg, name)
 	aiCfg := ai.ProviderConfig{
-		APIKey:             pc.APIKey,
-		BaseURL:            pc.BaseURL,
-		DefaultModel:       cfg.Model,
+		APIKey:             apiKey,
+		BaseURL:            baseURL,
+		DefaultModel:       model,
 		OrgID:              pc.OrgID,
+		Project:            pc.Project,
+		Location:           pc.Location,
+		Backend:            pc.Backend,
 		Effort:             pc.Effort,
 		ThinkingLevel:      pc.ThinkingLevel,
 		PromptCacheEnabled: &enablePromptCache,
+		Headers:            pc.Headers,
+		Temperature:        pc.Temperature,
+		MaxTokens:          pc.MaxTokens,
+		TimeoutSeconds:     pc.TimeoutSeconds,
+		MaxRetries:         pc.MaxRetries,
 	}
 
-	var provider ai.Provider
-	switch cfg.Provider {
+	switch name {
 	case "google":
-		provider = googleProvider.New(aiCfg)
+		return googleProvider.New(aiCfg), nil
 	default:
-		if p, ok := ai.Get(cfg.Provider); ok {
-			provider = p
-			break
+		if p, ok := ai.Get(name); ok {
+			return p, nil
 		}
-		return nil, fmt.Errorf("unknown provider %q", cfg.Provider)
+		return nil, fmt.Errorf("unknown provider %q", name)
 	}
-
-	if shouldWrapPromptCacheProvider(cfg, provider) {
-		provider = cache.NewCachingProvider(provider, cache.NewPromptCache())
-	}
-
-	// Wrap with debug provider if debug mode is enabled
-	fmt.Fprintf(os.Stderr, "[DEBUG] buildProviderFromConfig: Debug.Enabled=%v, Debug.Directory=%s, Debug.SaveRequests=%v, Debug.SaveResponses=%v\n", cfg.Debug.Enabled, cfg.Debug.Directory, cfg.Debug.SaveRequests, cfg.Debug.SaveResponses)
-	if cfg.Debug.Enabled {
-		sessionID := debug.NewSessionID()
-		fmt.Fprintf(os.Stderr, "[DEBUG] Creating debug logger with sessionID=%s\n", sessionID)
-		logger, err := debug.NewLogger(cfg.Debug, sessionID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create debug logger: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "[DEBUG] Logger created: %v\n", logger != nil)
-		if logger != nil {
-			provider = debug.NewDebugProvider(provider, logger)
-		}
-	}
-
-	return provider, nil
 }
 
 func shouldEnablePromptCache(cfg *config.Config, provider string) bool {

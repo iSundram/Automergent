@@ -608,8 +608,6 @@ func SetConfigField(cfg *Config, path string, value any) error {
 		return setNotificationField(&cfg.Notifications, parts[1], value)
 	case "diagnostics":
 		return setDiagnosticsField(&cfg.Diagnostics, parts[1], value)
-	case "coordinator":
-		return setCoordinatorField(&cfg.Coordinator, parts[1], value)
 	}
 
 	return fmt.Errorf("unknown field: %s", path)
@@ -784,33 +782,6 @@ func setDiagnosticsField(d *DiagnosticsConfig, key string, value any) error {
 		d.CacheDurationSec = toInt(value)
 	default:
 		return fmt.Errorf("unknown diagnostics field: %s", key)
-	}
-	return nil
-}
-
-// setCoordinatorField sets a coordinator config field.
-func setCoordinatorField(c *CoordinatorConfig, key string, value any) error {
-	switch key {
-	case "enabled":
-		c.Enabled = toBool(value)
-	case "defaultTimeout":
-		c.DefaultTimeout = toString(value)
-	case "maxRetries":
-		c.MaxRetries = toInt(value)
-	case "qualityThreshold":
-		c.QualityThreshold = toFloat(value)
-	case "consensusThreshold":
-		c.ConsensusThreshold = toInt(value)
-	case "resourceLimits.maxTokensPerTask":
-		c.ResourceLimits.MaxTokensPerTask = toInt(value)
-	case "resourceLimits.maxConcurrentTasks":
-		c.ResourceLimits.MaxConcurrentTasks = toInt(value)
-	case "resourceLimits.maxMemoryMB":
-		c.ResourceLimits.MaxMemoryMB = toInt(value)
-	case "resourceLimits.rateLimitPerMinute":
-		c.ResourceLimits.RateLimitPerMinute = toInt(value)
-	default:
-		return fmt.Errorf("unknown coordinator field: %s", key)
 	}
 	return nil
 }

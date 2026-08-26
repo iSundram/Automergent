@@ -91,7 +91,7 @@ func DefaultSchema() *Schema {
 				Type:        TypeString,
 				Required:    true,
 				Default:     "google",
-				Enum:        []string{"google"},
+				Enum:        ProviderNames(),
 				Description: "AI provider to use",
 			},
 			"model": {

@@ -77,8 +77,6 @@ type Config struct {
 	ProviderFallback []FallbackProvider `mapstructure:"providerFallback" yaml:"providerFallback,omitempty"`
 
 	Notifications NotificationConfig `mapstructure:"notifications" yaml:"notifications"`
-	// Coordinator holds multi-agent coordination settings.
-	Coordinator CoordinatorConfig `mapstructure:"coordinator" yaml:"coordinator"`
 
 	// Hooks holds PreToolUse/PostToolUse lifecycle hooks.
 	Hooks HooksConfig `mapstructure:"hooks" yaml:"hooks"`
@@ -279,21 +277,40 @@ type LogConfig struct {
 
 // ProviderConfig holds per-provider settings.
 type ProviderConfig struct {
-	APIKey        string                 `mapstructure:"apiKey" yaml:"apiKey,omitempty"`
-	BaseURL       string                 `mapstructure:"baseUrl" yaml:"baseUrl,omitempty"`
-	DefaultModel  string                 `mapstructure:"defaultModel" yaml:"defaultModel,omitempty"`
-	OrgID         string                 `mapstructure:"orgId" yaml:"orgId,omitempty"`
-	Project       string                 `mapstructure:"project" yaml:"project,omitempty"`
-	Location      string                 `mapstructure:"location" yaml:"location,omitempty"`
-	Effort        string                 `mapstructure:"effort" yaml:"effort,omitempty"`
-	ThinkingLevel string                 `mapstructure:"thinkingLevel" yaml:"thinkingLevel,omitempty"`
-	Models        map[string]ModelConfig `mapstructure:"models" yaml:"models,omitempty"`
+	APIKey       string `mapstructure:"apiKey" yaml:"apiKey,omitempty"`
+	BaseURL      string `mapstructure:"baseUrl" yaml:"baseUrl,omitempty"`
+	DefaultModel string `mapstructure:"defaultModel" yaml:"defaultModel,omitempty"`
+	OrgID        string `mapstructure:"orgId" yaml:"orgId,omitempty"`
+	Project      string `mapstructure:"project" yaml:"project,omitempty"`
+	Location     string `mapstructure:"location" yaml:"location,omitempty"`
+	// Backend selects between provider backends when the provider ships more
+	// than one (Google: "aistudio" or "vertex"). Empty = provider default.
+	Backend       string `mapstructure:"backend" yaml:"backend,omitempty"`
+	Effort        string `mapstructure:"effort" yaml:"effort,omitempty"`
+	ThinkingLevel string `mapstructure:"thinkingLevel" yaml:"thinkingLevel,omitempty"`
+
+	// Advanced request tuning. All optional; zero values mean "provider or
+	// request defaults apply".
+	Temperature    *float64          `mapstructure:"temperature" yaml:"temperature,omitempty"`
+	MaxTokens      int               `mapstructure:"maxTokens" yaml:"maxTokens,omitempty"`
+	TimeoutSeconds int               `mapstructure:"timeoutSeconds" yaml:"timeoutSeconds,omitempty"`
+	MaxRetries     int               `mapstructure:"maxRetries" yaml:"maxRetries,omitempty"`
+	Headers        map[string]string `mapstructure:"headers" yaml:"headers,omitempty"`
+
+	Models map[string]ModelConfig `mapstructure:"models" yaml:"models,omitempty"`
 }
 
-// ModelConfig holds model-scoped provider settings.
+// ModelConfig holds model-scoped provider settings. APIKey/BaseURL override
+// the provider-level credentials for that model (e.g. a model served from a
+// different gateway); the remaining fields register custom/self-hosted models
+// so they show up in /model list with accurate metadata.
 type ModelConfig struct {
-	APIKey  string `mapstructure:"apiKey" yaml:"apiKey,omitempty"`
-	BaseURL string `mapstructure:"baseUrl" yaml:"baseUrl,omitempty"`
+	APIKey       string  `mapstructure:"apiKey" yaml:"apiKey,omitempty"`
+	BaseURL      string  `mapstructure:"baseUrl" yaml:"baseUrl,omitempty"`
+	DisplayName  string  `mapstructure:"displayName" yaml:"displayName,omitempty"`
+	ContextLimit int     `mapstructure:"contextLimit" yaml:"contextLimit,omitempty"`
+	InputPrice   float64 `mapstructure:"inputPrice" yaml:"inputPrice,omitempty"`
+	OutputPrice  float64 `mapstructure:"outputPrice" yaml:"outputPrice,omitempty"`
 }
 
 // FallbackProvider defines a fallback AI provider/model.
@@ -307,26 +324,6 @@ type NotificationConfig struct {
 	Desktop        bool `mapstructure:"desktop" yaml:"desktop"`
 	Bell           bool `mapstructure:"bell" yaml:"bell"`
 	ContextWarning bool `mapstructure:"contextWarning" yaml:"contextWarning"`
-}
-
-// CoordinatorConfig holds multi-agent coordination settings.
-type CoordinatorConfig struct {
-	Enabled            bool                      `mapstructure:"enabled" yaml:"enabled"`
-	WorkersPerRole     map[string]int            `mapstructure:"workersPerRole" yaml:"workersPerRole,omitempty"`
-	ModelOverrides     map[string]string         `mapstructure:"modelOverrides" yaml:"modelOverrides,omitempty"` // role → model
-	DefaultTimeout     string                    `mapstructure:"defaultTimeout" yaml:"defaultTimeout,omitempty"`
-	MaxRetries         int                       `mapstructure:"maxRetries" yaml:"maxRetries,omitempty"`
-	QualityThreshold   float64                   `mapstructure:"qualityThreshold" yaml:"qualityThreshold,omitempty"`
-	ConsensusThreshold int                       `mapstructure:"consensusThreshold" yaml:"consensusThreshold,omitempty"`
-	ResourceLimits     CoordinatorResourceLimits `mapstructure:"resourceLimits" yaml:"resourceLimits,omitempty"`
-}
-
-// CoordinatorResourceLimits defines resource constraints for the coordinator.
-type CoordinatorResourceLimits struct {
-	MaxTokensPerTask   int `mapstructure:"maxTokensPerTask" yaml:"maxTokensPerTask,omitempty"`
-	MaxConcurrentTasks int `mapstructure:"maxConcurrentTasks" yaml:"maxConcurrentTasks,omitempty"`
-	MaxMemoryMB        int `mapstructure:"maxMemoryMB" yaml:"maxMemoryMB,omitempty"`
-	RateLimitPerMinute int `mapstructure:"rateLimitPerMinute" yaml:"rateLimitPerMinute,omitempty"`
 }
 
 // DiagnosticsConfig holds error detection configuration.

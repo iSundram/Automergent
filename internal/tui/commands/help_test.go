@@ -36,7 +36,7 @@ func TestHelpRowsMergeAliasesAndHints(t *testing.T) {
 	if got := byKey["/diff"]; !strings.Contains(got, "/changes") {
 		t.Fatalf("aliases not merged into help key: %q", got)
 	}
-	if got := byKey["/model"]; !strings.Contains(got, "[name|reset]") {
+	if got := byKey["/model"]; !strings.Contains(got, "[name|") {
 		t.Fatalf("args hint missing from help key: %q", got)
 	}
 	if got := byKey["/sessions"]; !strings.Contains(got, "/session") {

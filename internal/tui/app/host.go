@@ -91,12 +91,24 @@ func (a *App) SwitchProvider(provider, model string) error {
 	return a.switchProvider(provider, model)
 }
 
+// ProviderAuthSource reports where a provider's key comes from, never what it
+// is. config.ProviderAPIKeySource mirrors the resolution order
+// config.GetProviderAPIKey uses, so "config" here means the same config the
+// runtime would actually read — and returning the source rather than a bool
+// answers the question users actually have when a key is set in two places.
+func (a *App) ProviderAuthSource(provider string) string {
+	if a.cfg == nil {
+		return ""
+	}
+	return config.ProviderAPIKeySource(a.cfg, provider)
+}
+
 func (a *App) FetchModels() tea.Cmd {
 	return a.fetchModels()
 }
 
 func (a *App) ModelsAvailable() []ai.Model {
-	return a.availableModels
+	return a.modelsAvailable()
 }
 
 func (a *App) InputTokens() int {
@@ -156,6 +168,25 @@ func (a *App) SetProviderConfig(provider string, pc config.ProviderConfig) {
 		a.cfg.Providers = map[string]config.ProviderConfig{}
 	}
 	a.cfg.Providers[provider] = pc
+}
+
+func (a *App) RefreshModels() tea.Cmd {
+	return a.refreshModels()
+}
+
+func (a *App) TestProvider(provider string) tea.Cmd {
+	return a.testProvider(provider)
+}
+
+func (a *App) ProviderFallbacks() []config.FallbackProvider {
+	out := make([]config.FallbackProvider, len(a.cfg.ProviderFallback))
+	copy(out, a.cfg.ProviderFallback)
+	return out
+}
+
+func (a *App) SetProviderFallbacks(fps []config.FallbackProvider) {
+	a.cfg.ProviderFallback = make([]config.FallbackProvider, len(fps))
+	copy(a.cfg.ProviderFallback, fps)
 }
 
 func (a *App) PersistProjectConfig() error {

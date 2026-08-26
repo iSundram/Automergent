@@ -79,6 +79,24 @@ type Host interface {
 	SwitchProvider(provider, model string) error
 	FetchModels() tea.Cmd
 	ModelsAvailable() []ai.Model
+	// RefreshModels forces a live re-fetch of the active provider's model
+	// list (backs /model refresh).
+	RefreshModels() tea.Cmd
+	// TestProvider builds a provider from its stored config (without
+	// switching the active provider) and runs a live connectivity check
+	// against it (backs /provider test). The outcome is delivered
+	// asynchronously as a system message.
+	TestProvider(provider string) tea.Cmd
+	// ProviderAuthSource reports where the provider's API key resolves from
+	// ("config", "env NAME", "secret store") or "" when unset. Never reveals
+	// the key itself.
+	ProviderAuthSource(provider string) string
+	// ProviderFallbacks is the configured fallback chain (backs
+	// /provider fallback).
+	ProviderFallbacks() []config.FallbackProvider
+	// SetProviderFallbacks replaces the fallback chain. Callers persist and
+	// re-apply the provider afterwards.
+	SetProviderFallbacks(fps []config.FallbackProvider)
 
 	// Token / Context
 	InputTokens() int

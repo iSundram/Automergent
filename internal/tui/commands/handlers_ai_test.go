@@ -156,7 +156,7 @@ func TestHandleMode(t *testing.T) {
 			args:  []string{"invalid"},
 			setup: func(m *mockHost) {},
 			verify: func(m *mockHost, t *testing.T) {
-				if len(m.errorMessages) != 1 || !contains(m.errorMessages[0], "edit|plan") {
+				if len(m.errorMessages) != 1 || !contains(m.errorMessages[0], "auto|plan") {
 					t.Fatalf("expected error for invalid mode, got: %v", m.errorMessages)
 				}
 			},

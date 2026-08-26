@@ -14,7 +14,6 @@ import (
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
 	contextmgr "github.com/iSundram/Automergent/internal/context"
-	"github.com/iSundram/Automergent/internal/coordinator"
 	"github.com/iSundram/Automergent/internal/editreview"
 	"github.com/iSundram/Automergent/internal/errors"
 	promptpkg "github.com/iSundram/Automergent/internal/prompt"
@@ -49,10 +48,6 @@ type Agent struct {
 	// Persistent components
 	contextManager     *contextmgr.Manager
 	contextManagerRoot string
-	coordinator        *coordinator.Engine
-	coordinatorOnce    sync.Once
-	coordinatorCtx     context.Context
-	coordinatorCancel  context.CancelFunc
 
 	// toolProfile is ephemeral per request. It is never persisted, added to
 	// session messages, or rendered in the user-facing prompt.
@@ -75,8 +70,6 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 	if model != "" {
 		childCfg.Model = model
 	}
-	// Child agents must not trigger the coordinator (prevents infinite recursion).
-	childCfg.Coordinator.Enabled = false
 
 	// 2. Create a clean child session.
 	childSess := session.New()
@@ -505,8 +498,8 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	// Apply triage wrapper for first message if using legacy mode
 	firstUserPrompt := originalUserPrompt
 
-	// Persist the user-authored message before any optional coordinator path
-	// can return. The triage wrapper exists only in the request copy below.
+	// Persist the user-authored message before any path that can return early.
+	// The triage wrapper exists only in the request copy below.
 	userMsg := ai.NewTextMessage(ai.RoleUser, firstUserPrompt)
 	if firstUserPrompt != originalUserPrompt {
 		userMsg.Metadata = map[string]any{
@@ -1347,13 +1340,6 @@ func (a *Agent) Shutdown() error {
 func (a *Agent) Close() error {
 	var err error
 	a.closeOnce.Do(func() {
-		// Stop coordinator if running
-		if a.coordinatorCancel != nil {
-			a.coordinatorCancel()
-		}
-		if a.coordinator != nil {
-			_ = a.coordinator.Stop(context.Background())
-		}
 		// Mark closed under lock then close the channel
 		a.mu.Lock()
 		if !a.eventsClosed {
@@ -1363,66 +1349,6 @@ func (a *Agent) Close() error {
 		a.mu.Unlock()
 	})
 	return err
-}
-
-// Coordinator returns the coordinator engine, initializing it on first use if enabled.
-func (a *Agent) Coordinator() *coordinator.Engine {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
-	if a.coordinator != nil {
-		return a.coordinator
-	}
-
-	if !a.cfg.Coordinator.Enabled {
-		return nil
-	}
-
-	// Initialize coordinator
-	cfg := coordinator.DefaultConfig()
-	cfg.WorkersPerRole = make(map[coordinator.AgentRole]int)
-	for roleStr, count := range a.cfg.Coordinator.WorkersPerRole {
-		cfg.WorkersPerRole[coordinator.AgentRole(roleStr)] = count
-	}
-	if a.cfg.Coordinator.DefaultTimeout != "" {
-		if d, err := time.ParseDuration(a.cfg.Coordinator.DefaultTimeout); err == nil {
-			cfg.DefaultTimeout = d
-		}
-	}
-	cfg.MaxRetries = a.cfg.Coordinator.MaxRetries
-	cfg.QualityThreshold = a.cfg.Coordinator.QualityThreshold
-	cfg.ConsensusThreshold = a.cfg.Coordinator.ConsensusThreshold
-	cfg.ResourceLimits.MaxTokensPerTask = a.cfg.Coordinator.ResourceLimits.MaxTokensPerTask
-	cfg.ResourceLimits.MaxConcurrentTasks = a.cfg.Coordinator.ResourceLimits.MaxConcurrentTasks
-	cfg.ResourceLimits.MaxMemoryMB = a.cfg.Coordinator.ResourceLimits.MaxMemoryMB
-	cfg.ResourceLimits.RateLimitPerMinute = a.cfg.Coordinator.ResourceLimits.RateLimitPerMinute
-	cfg.Model = a.cfg.Model
-	cfg.FallbackModel = a.cfg.Model
-
-	// Map model overrides from string keys to AgentRole keys.
-	if len(a.cfg.Coordinator.ModelOverrides) > 0 {
-		cfg.ModelOverrides = make(map[coordinator.AgentRole]string)
-		for roleStr, model := range a.cfg.Coordinator.ModelOverrides {
-			cfg.ModelOverrides[coordinator.AgentRole(roleStr)] = model
-		}
-	}
-
-	// Create executor that uses the agent's sub-agent mechanism with context manager.
-	// Use NewAgentExecutorAdapterWithModel to avoid deadlock: Coordinator() holds a.mu.Lock()
-	// and GetModel() tries a.mu.RLock() which deadlocks on sync.RWMutex.
-	exec := coordinator.NewAgentExecutorAdapterWithModel(a, a.cfg.Model)
-
-	a.coordinatorCtx, a.coordinatorCancel = context.WithCancel(context.Background())
-	a.coordinator = coordinator.NewEngine(cfg, exec)
-
-	// Start coordinator
-	if err := a.coordinator.Start(a.coordinatorCtx); err != nil {
-		a.Emit(EventError, fmt.Errorf("coordinator start: %w", err))
-		a.coordinator = nil
-		return nil
-	}
-
-	return a.coordinator
 }
 
 // ContextToolRegistration reports whether context operations were made available.
@@ -1478,30 +1404,6 @@ func (a *Agent) RegisterContextTools() ContextToolRegistration {
 	}
 
 	return ContextToolRegistration{Enabled: len(names) > 0, Names: names, Reason: reason}
-}
-
-// initializeCoordinatorWithPromptSystem initializes the coordinator with the prompt system.
-func (a *Agent) initializeCoordinatorWithPromptSystem() error {
-	a.coordinatorOnce.Do(func() {
-		if a.cfg == nil || !a.cfg.Coordinator.Enabled {
-			return
-		}
-
-		exec := coordinator.NewAgentExecutorAdapterWithModel(a, a.cfg.Model)
-		a.coordinatorCtx, a.coordinatorCancel = context.WithCancel(context.Background())
-
-		// Convert config.CoordinatorConfig to coordinator.CoordinatorConfig
-		coordCfg := a.convertCoordinatorConfig(a.cfg.Coordinator)
-
-		// Use NewEngineWithPromptManager to wire the new prompt system
-		a.coordinator = coordinator.NewEngineWithPromptManager(&coordCfg, exec, a.promptSystem.Manager)
-
-		if err := a.coordinator.Start(a.coordinatorCtx); err != nil {
-			a.Emit(EventError, fmt.Errorf("coordinator start: %w", err))
-			a.coordinator = nil
-		}
-	})
-	return nil
 }
 
 // getSystemPrompt returns THE system prompt. There is a single builder —
@@ -1584,26 +1486,6 @@ func (a *Agent) AdaptiveCalculator() *contextmgr.AdaptiveTokenCalculator {
 		return mgr.AdaptiveCalculator()
 	}
 	return nil
-}
-
-func (a *Agent) convertCoordinatorConfig(cfg config.CoordinatorConfig) coordinator.CoordinatorConfig {
-	return coordinator.CoordinatorConfig{
-		MaxWorkers:         10,
-		WorkersPerRole:     map[coordinator.AgentRole]int{},
-		ModelOverrides:     map[coordinator.AgentRole]string{},
-		DefaultTimeout:     5 * time.Minute,
-		MaxRetries:         3,
-		EnableWorkStealing: true,
-		QualityThreshold:   0.7,
-		ConsensusThreshold: 2,
-		ResourceLimits: coordinator.ResourceLimits{
-			MaxTokensPerTask:   100000,
-			MaxConcurrentTasks: 5,
-			MaxMemoryMB:        512,
-			RateLimitPerMinute: 60,
-		},
-		EventsBufferSize: 1024,
-	}
 }
 
 // runPromptSystemPipeline runs the new internal/prompt system pipeline for a user request.

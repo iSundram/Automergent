@@ -9,19 +9,19 @@ func Default() *Registry {
 	// --- AI & Model ---
 	r.MustRegister(Command{
 		Name:             "model",
-		Description:      "Switch AI model",
+		Description:      "Switch, list, or manage models for the active provider",
 		Category:         "AI & Model",
 		Icon:             "󰊕",
-		ArgsHint:         "[name|reset]",
+		ArgsHint:         "[name|list|add|remove|refresh|reset]",
 		SupportsHeadless: true,
 	}, handleModel)
 
 	r.MustRegister(Command{
 		Name:             "provider",
-		Description:      "Switch AI provider",
+		Description:      "Manage AI providers (switch, setup, test, fallback)",
 		Category:         "AI & Model",
 		Icon:             "󰒋",
-		ArgsHint:         "[name] [model]",
+		ArgsHint:         "[use|list|setup|test|set|unset|backend|fallback] ...",
 		SupportsHeadless: true,
 	}, handleProvider)
 

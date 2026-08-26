@@ -19,6 +19,15 @@ import (
 const (
 	defaultBaseURL = "https://generativelanguage.googleapis.com/v1beta"
 	defaultModel   = "gemini-3.6-flash"
+
+	// backendAIStudio is the Gemini API (AI Studio); backendVertex is Vertex
+	// AI (Google Cloud). These strings appear in user config.
+	backendAIStudio = "aistudio"
+	backendVertex   = "vertex"
+
+	// modelsCacheTTL bounds how long the live model list is reused before
+	// the next Models call hits the API again.
+	modelsCacheTTL = 5 * time.Minute
 )
 
 // isGemini25 returns true if the model is a Gemini 2.5 series model.
@@ -46,6 +55,17 @@ type Client struct {
 	limit   int
 	baseURL string
 	effort  string
+	backend string
+
+	// Provider-level request defaults and transport tuning.
+	temperature *float64
+	maxTokens   int
+	maxRetries  int
+
+	// Live model list cache, refreshed on demand by LiveModels.
+	modelsMu       sync.Mutex
+	cachedModels   []ai.Model
+	modelsCachedAt time.Time
 
 	// onRetry is notified of each retried API attempt. Guarded by retryMu
 	// because Complete runs on the agent goroutine while the observer is
@@ -97,36 +117,86 @@ func (c *Client) notifyRetry(attempt, maxAttempts int, err error, delay time.Dur
 }
 
 func New(cfg ai.ProviderConfig) *Client {
-	base := cfg.BaseURL
-	if base == "" {
-		base = defaultBaseURL
-	}
 	model := cfg.DefaultModel
 	if model == "" {
 		model = defaultModel
+	}
+
+	// Backend selection: explicit config wins; otherwise a configured
+	// project+location implies Vertex AI (Google Cloud), and anything else is
+	// the Gemini API (AI Studio).
+	backend := cfg.Backend
+	if backend == "" {
+		if cfg.Project != "" && cfg.Location != "" {
+			backend = backendVertex
+		} else {
+			backend = backendAIStudio
+		}
 	}
 
 	cc := &genai.ClientConfig{
 		APIKey:     cfg.APIKey,
 		HTTPClient: cfg.HTTPClient,
 	}
+	if cc.HTTPClient == nil && cfg.TimeoutSeconds > 0 {
+		cc.HTTPClient = &http.Client{Timeout: time.Duration(cfg.TimeoutSeconds) * time.Second}
+	}
 
-	// Vertex AI (Google Cloud) is used when a project and location are set.
-	// This satisfies the Google Cloud infrastructure requirement: requests go
-	// to {location}-aiplatform.googleapis.com instead of the plain Gemini API.
-	if cfg.Project != "" && cfg.Location != "" {
+	// Extra headers ride along for custom endpoints (gateways, proxies with
+	// their own auth schemes) on either backend.
+	httpOpts := genai.HTTPOptions{}
+	if len(cfg.Headers) > 0 {
+		h := http.Header{}
+		for k, v := range cfg.Headers {
+			h.Set(k, v)
+		}
+		httpOpts.Headers = h
+	}
+
+	base := cfg.BaseURL
+	if base == "" {
+		base = defaultBaseURL
+	}
+
+	if backend == backendVertex {
 		cc.Backend = genai.BackendVertexAI
 		cc.Project = cfg.Project
 		cc.Location = cfg.Location
-	} else if base != "" {
-		// The genai SDK appends its own API version (v1beta) to the base URL,
-		// so a config base URL that already ends in /v1beta must have that
-		// segment stripped, otherwise requests go to .../v1beta/v1beta/... and
-		// fail forever.
-		cc.HTTPOptions = genai.HTTPOptions{BaseURL: stripAPIVersion(base)}
+		// Vertex derives its endpoint from the location; baseURL is kept only
+		// for error messages and status output.
+		if cfg.Location != "" {
+			base = fmt.Sprintf("https://%s-aiplatform.googleapis.com", cfg.Location)
+		} else {
+			base = "https://aiplatform.googleapis.com"
+		}
+	} else {
+		if cfg.Backend == backendAIStudio {
+			// An explicit backend choice overrides the SDK's own
+			// GOOGLE_GENAI_USE_VERTEXAI environment inference.
+			cc.Backend = genai.BackendGeminiAPI
+		}
+		if cfg.BaseURL != "" {
+			// The genai SDK appends its own API version (v1beta) to the base
+			// URL, so a config base URL that already ends in /v1beta must have
+			// that segment stripped, otherwise requests go to
+			// .../v1beta/v1beta/... and fail forever.
+			httpOpts.BaseURL = stripAPIVersion(cfg.BaseURL)
+		}
+	}
+	if httpOpts.BaseURL != "" || httpOpts.Headers != nil {
+		cc.HTTPOptions = httpOpts
 	}
 
-	c := &Client{model: model, limit: 1000000, baseURL: base, effort: cfg.Effort}
+	c := &Client{
+		model:       model,
+		limit:       1000000,
+		baseURL:     base,
+		effort:      cfg.Effort,
+		backend:     backend,
+		temperature: cfg.Temperature,
+		maxTokens:   cfg.MaxTokens,
+		maxRetries:  cfg.MaxRetries,
+	}
 	client, err := genai.NewClient(context.Background(), cc)
 	if err != nil {
 		c.initErr = err
@@ -138,6 +208,10 @@ func New(cfg ai.ProviderConfig) *Client {
 
 func (c *Client) Name() string      { return "google" }
 func (c *Client) ContextLimit() int { return c.limit }
+
+// Backend reports which Google backend is in force: "aistudio" (Gemini API)
+// or "vertex" (Vertex AI).
+func (c *Client) Backend() string { return c.backend }
 
 // stripAPIVersion removes a trailing API version segment (e.g. /v1beta) from a
 // base URL, because the genai SDK always appends its own API version to the
@@ -204,23 +278,147 @@ func isEmptyPart(p *genai.Part) bool {
 	return true
 }
 
-func (c *Client) Models(_ context.Context) ([]ai.Model, error) {
-	return []ai.Model{
-		{ID: "gemini-3.6-flash", Name: "Gemini 3.6 Flash", ContextLimit: 1048576},
-		{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", ContextLimit: 1048576},
-		{ID: "gemini-3.5-flash-lite", Name: "Gemini 3.5 Flash-Lite", ContextLimit: 1048576},
-		{ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash-Lite", ContextLimit: 1048576},
-		{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview", ContextLimit: 2097152},
-		{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview", ContextLimit: 1048576},
-		{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", ContextLimit: 2097152},
-		{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", ContextLimit: 1048576},
-		{ID: "gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash-Lite", ContextLimit: 1048576},
-		{ID: "gemini-2.5-flash-preview", Name: "Gemini 2.5 Flash Preview", ContextLimit: 1048576},
-		{ID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash", ContextLimit: 1048576},
-		{ID: "gemini-2.0-flash-001", Name: "Gemini 2.0 Flash", ContextLimit: 1048576},
-		{ID: "gemini-2.0-flash-lite", Name: "Gemini 2.0 Flash-Lite", ContextLimit: 1048576},
-		{ID: "gemini-2.0-flash-lite-001", Name: "Gemini 2.0 Flash-Lite", ContextLimit: 1048576},
-	}, nil
+// curatedModels is the offline fallback and enrichment source for the live
+// model list: display names, context limits and pricing for known models. New
+// curated entries that the API does not list yet remain selectable.
+var curatedModels = []ai.Model{
+	{ID: "gemini-3.6-flash", Name: "Gemini 3.6 Flash", ContextLimit: 1048576},
+	{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", ContextLimit: 1048576},
+	{ID: "gemini-3.5-flash-lite", Name: "Gemini 3.5 Flash-Lite", ContextLimit: 1048576},
+	{ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash-Lite", ContextLimit: 1048576},
+	{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview", ContextLimit: 2097152},
+	{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview", ContextLimit: 1048576},
+	{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", ContextLimit: 2097152},
+	{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", ContextLimit: 1048576},
+	{ID: "gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash-Lite", ContextLimit: 1048576},
+	{ID: "gemini-2.5-flash-preview", Name: "Gemini 2.5 Flash Preview", ContextLimit: 1048576},
+	{ID: "gemini-2.0-flash", Name: "Gemini 2.0 Flash", ContextLimit: 1048576},
+	{ID: "gemini-2.0-flash-001", Name: "Gemini 2.0 Flash", ContextLimit: 1048576},
+	{ID: "gemini-2.0-flash-lite", Name: "Gemini 2.0 Flash-Lite", ContextLimit: 1048576},
+	{ID: "gemini-2.0-flash-lite-001", Name: "Gemini 2.0 Flash-Lite", ContextLimit: 1048576},
+}
+
+// Models returns the provider's model list. It serves the live list from
+// cache when fresh, refreshes from the models.list API otherwise, and falls
+// back to the curated static list when the API is unreachable — so the
+// palette and /model list never come up empty on a flaky network.
+func (c *Client) Models(ctx context.Context) ([]ai.Model, error) {
+	if cached := c.cachedModelList(); cached != nil {
+		return cached, nil
+	}
+	models, err := c.LiveModels(ctx)
+	if err != nil {
+		return append([]ai.Model{}, curatedModels...), nil
+	}
+	return models, nil
+}
+
+// LiveModels enumerates models through the models.list API (works for both
+// AI Studio and Vertex AI backends), enriches them with curated metadata and
+// refreshes the cache. Unlike Models it reports errors instead of falling
+// back, which is what /provider test needs to detect broken credentials.
+func (c *Client) LiveModels(ctx context.Context) ([]ai.Model, error) {
+	if c.initErr != nil {
+		return nil, c.initErr
+	}
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	var live []ai.Model
+	for m, err := range c.client.Models.All(ctx) {
+		if err != nil {
+			return nil, c.mapError(err)
+		}
+		if model, ok := convertListedModel(m); ok {
+			live = append(live, model)
+		}
+	}
+	if len(live) == 0 {
+		return nil, fmt.Errorf("google: model listing returned no usable models")
+	}
+	merged := mergeCuratedModels(live)
+
+	c.modelsMu.Lock()
+	c.cachedModels = merged
+	c.modelsCachedAt = time.Now()
+	c.modelsMu.Unlock()
+	return merged, nil
+}
+
+// InvalidateModelsCache forces the next Models call to hit the API. Used by
+// /model refresh.
+func (c *Client) InvalidateModelsCache() {
+	c.modelsMu.Lock()
+	c.modelsCachedAt = time.Time{}
+	c.modelsMu.Unlock()
+}
+
+func (c *Client) cachedModelList() []ai.Model {
+	c.modelsMu.Lock()
+	defer c.modelsMu.Unlock()
+	if c.cachedModels == nil || time.Since(c.modelsCachedAt) > modelsCacheTTL {
+		return nil
+	}
+	return append([]ai.Model{}, c.cachedModels...)
+}
+
+// convertListedModel maps an API model resource to ai.Model. Names arrive as
+// "models/gemini-2.0-flash" (AI Studio) or
+// "projects/…/publishers/google/models/gemini-…" (Vertex); the model ID is the
+// last path segment. Non-generative resources (embeddings, tuned artifacts)
+// are dropped.
+func convertListedModel(m *genai.Model) (ai.Model, bool) {
+	id := m.Name
+	if i := strings.LastIndex(id, "/"); i >= 0 {
+		id = id[i+1:]
+	}
+	if id == "" {
+		return ai.Model{}, false
+	}
+	if len(m.SupportedActions) > 0 {
+		usable := false
+		for _, a := range m.SupportedActions {
+			if a == "generateContent" {
+				usable = true
+				break
+			}
+		}
+		if !usable {
+			return ai.Model{}, false
+		}
+	} else if !strings.Contains(id, "gemini") {
+		return ai.Model{}, false
+	}
+	name := m.DisplayName
+	if name == "" {
+		name = id
+	}
+	return ai.Model{ID: id, Name: name, ContextLimit: int(m.InputTokenLimit)}, true
+}
+
+// mergeCuratedModels enriches live entries with curated names, context limits
+// (only when the API omitted them) and pricing, and appends curated models
+// the API does not list (e.g. brand-new previews) so they stay selectable.
+func mergeCuratedModels(live []ai.Model) []ai.Model {
+	byID := make(map[string]int, len(live))
+	for i, m := range live {
+		byID[m.ID] = i
+	}
+	for _, curated := range curatedModels {
+		if i, ok := byID[curated.ID]; ok {
+			if live[i].Name == live[i].ID {
+				live[i].Name = curated.Name
+			}
+			if live[i].ContextLimit == 0 {
+				live[i].ContextLimit = curated.ContextLimit
+			}
+			live[i].InputPrice = curated.InputPrice
+			live[i].OutputPrice = curated.OutputPrice
+		} else {
+			live = append(live, curated)
+		}
+	}
+	return live
 }
 
 func (c *Client) TokenCount(messages []ai.Message) (int, error) {
@@ -441,11 +639,19 @@ func buildGenerateContentConfig(c *Client, req ai.CompletionRequest) *genai.Gene
 	if tools := functionDeclarations(req.Tools); len(tools) > 0 {
 		config.Tools = tools
 	}
-	if req.MaxTokens > 0 {
-		config.MaxOutputTokens = int32(req.MaxTokens)
+	maxTokens := req.MaxTokens
+	if maxTokens == 0 {
+		maxTokens = c.maxTokens
 	}
-	if req.Temperature > 0 {
-		temp := float32(req.Temperature)
+	if maxTokens > 0 {
+		config.MaxOutputTokens = int32(maxTokens) //nolint:gosec // bounded by provider limits
+	}
+	temperature := req.Temperature
+	if temperature == 0 && c.temperature != nil {
+		temperature = *c.temperature
+	}
+	if temperature > 0 {
+		temp := float32(temperature)
 		config.Temperature = &temp
 	}
 	// Enable thinking mode if configured
@@ -532,7 +738,11 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 
 	// Wrap the request in a retry loop
 	policy := automergentErrors.AggressiveRetryPolicy()
-	policy.MaxAttempts = 10
+	if c.maxRetries > 0 {
+		policy.MaxAttempts = c.maxRetries
+	} else {
+		policy.MaxAttempts = 10
+	}
 	// Report each retried attempt so the UI can show "retrying (3/10)" rather
 	// than appearing to hang for the duration of the backoff.
 	maxAttempts := policy.MaxAttempts

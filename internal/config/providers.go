@@ -132,25 +132,23 @@ func DefaultBackend(provider string) string {
 	return ""
 }
 
-// effectiveBackend resolves which backend name is in force for reporting:
-// explicit config wins, then project/location inference, then the catalog
-// default.
-func EffectiveBackend(pc ProviderConfig) string {
+// EffectiveBackend resolves which backend is in force for a provider:
+// explicit config wins, then project/location inference (for providers with
+// a "vertex" backend), then the catalog default. "default" is returned for
+// providers with a single implicit backend.
+func EffectiveBackend(provider string, pc ProviderConfig) string {
 	if pc.Backend != "" {
 		return pc.Backend
 	}
-	if pc.Project != "" && pc.Location != "" {
-		return "vertex"
-	}
-	if DefaultBackendFor(pc) != "" {
-		return DefaultBackendFor(pc)
+	if spec, ok := providerSpecs[provider]; ok && len(spec.Backends) > 0 {
+		for _, b := range spec.Backends {
+			if b == "vertex" && pc.Project != "" && pc.Location != "" {
+				return "vertex"
+			}
+		}
+		if spec.DefaultBackend != "" {
+			return spec.DefaultBackend
+		}
 	}
 	return "default"
-}
-
-// DefaultBackendFor is a helper around DefaultBackend kept for EffectiveBackend
-// readability without threading the provider name through.
-func DefaultBackendFor(pc ProviderConfig) string {
-	_ = pc
-	return ""
 }

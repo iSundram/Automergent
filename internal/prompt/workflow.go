@@ -192,7 +192,7 @@ type TodoResult struct {
 	Warnings  []string
 }
 
-// Artifact represents a produced artifact (reused from coordinator).
+// Artifact represents a produced artifact.
 type Artifact struct {
 	Type     string
 	Path     string

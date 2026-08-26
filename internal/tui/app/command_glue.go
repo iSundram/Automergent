@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"fmt"
 	"github.com/iSundram/Automergent/internal/agent"
+	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/tui/commands"
 	"github.com/iSundram/Automergent/internal/tui/components"
 	"github.com/sahilm/fuzzy"
@@ -25,10 +26,14 @@ func (a *App) updatePalette() {
 
 	case "model":
 		var modelItems []components.PaletteItem
-		for _, m := range a.availableModels {
+		for _, m := range a.modelsAvailable() {
+			desc := fmt.Sprintf("Limit: %d", m.ContextLimit)
+			if m.InputPrice > 0 || m.OutputPrice > 0 {
+				desc += fmt.Sprintf(" $%.4g/$%.4g", m.InputPrice, m.OutputPrice)
+			}
 			modelItems = append(modelItems, components.PaletteItem{
 				Label:       m.ID,
-				Description: fmt.Sprintf("Model (Limit: %d)", m.ContextLimit),
+				Description: desc,
 				Value:       m.ID,
 				Icon:        "󰊕",
 				Category:    "Models",
@@ -41,22 +46,14 @@ func (a *App) updatePalette() {
 			items = a.fuzzyFilter(modelItems, filter)
 		}
 	case "provider":
-		providerDescriptions := map[string]string{
-			"google": "Gemini models by Google",
-		}
-		providerIcons := map[string]string{
-			"google": "󰊭",
-		}
 		var providerItems []components.PaletteItem
 		for _, p := range a.availableProviders {
-			desc := providerDescriptions[p]
+			spec, _ := config.ProviderSpecFor(p)
+			desc := spec.Description
 			if desc == "" {
 				desc = "AI provider"
 			}
-			icon := providerIcons[p]
-			if icon == "" {
-				icon = "🔌"
-			}
+			icon := config.ProviderIcon(p)
 			providerItems = append(providerItems, components.PaletteItem{
 				Label: p, Description: desc, Value: p, Icon: icon, Category: "Providers", Current: p == a.cfg.Provider,
 			})

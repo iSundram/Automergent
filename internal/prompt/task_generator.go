@@ -42,22 +42,3 @@ func BuildTaskPrompts(tasks []TaskSpec, initResults *InitResults) []PromptPart {
 
 	return parts
 }
-
-// ConvertToCoordinatorTasks converts TaskSpecs to generic maps for coordinator submission.
-func ConvertToCoordinatorTasks(tasks []TaskSpec) []map[string]any {
-	var result []map[string]any
-	for _, task := range tasks {
-		result = append(result, map[string]any{
-			"id":           task.ID,
-			"type":         task.Type,
-			"role":         task.Role,
-			"priority":     task.Priority,
-			"dependencies": task.Dependencies,
-			"prompt":       task.Prompt,
-			"context":      task.Context,
-			"tools":        task.Tools,
-			"description":  task.Description,
-		})
-	}
-	return result
-}

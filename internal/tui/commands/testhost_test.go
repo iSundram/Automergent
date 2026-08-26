@@ -24,6 +24,8 @@ type mockHost struct {
 	theme       string
 	keybindings string
 	thinking    bool
+	defaultModel string
+	apiKey       string
 
 	// Call recording
 	systemMessages    []string
@@ -40,10 +42,15 @@ type mockHost struct {
 	fetchModelsCalls    int
 
 	ensureProviderConfigCalls []string
-	providerConfigs           map[string]config.ProviderConfig
+	providerConfigs map[string]config.ProviderConfig
 	persistProjectConfigCalls int
 
 	setModeCalls []string
+
+	refreshModelsCalls int
+	testProviderCalls  []string
+	authSources        map[string]string
+	fallbacks          []config.FallbackProvider
 
 	apiErrors          []APIErrorInfo
 	clearAPIErrorCalls int
@@ -129,7 +136,8 @@ func NewMockHost() *mockHost {
 		providerConfigs: map[string]config.ProviderConfig{
 			"google": {APIKey: "test-key"},
 		},
-		ctx: context.Background(),
+		authSources: map[string]string{"google": "config"},
+		ctx:         context.Background(),
 	}
 }
 
@@ -168,6 +176,9 @@ func (m *mockHost) Reset() {
 	m.showHelpCalls = 0
 	m.setThemeCalls = nil
 	m.setKeybindingCalls = nil
+	m.refreshModelsCalls = 0
+	m.testProviderCalls = nil
+	m.fallbacks = nil
 }
 
 // --- Host interface implementation ---
@@ -653,4 +664,42 @@ func (m *mockHost) OpenSettingsPicker() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.settingsPickerCalls++
+}
+
+func (m *mockHost) RefreshModels() tea.Cmd {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.refreshModelsCalls++
+	return nil
+}
+
+func (m *mockHost) TestProvider(provider string) tea.Cmd {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.testProviderCalls = append(m.testProviderCalls, provider)
+	return nil
+}
+
+func (m *mockHost) ProviderAuthSource(provider string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if src, ok := m.authSources[provider]; ok {
+		return src
+	}
+	return ""
+}
+
+func (m *mockHost) ProviderFallbacks() []config.FallbackProvider {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]config.FallbackProvider, len(m.fallbacks))
+	copy(out, m.fallbacks)
+	return out
+}
+
+func (m *mockHost) SetProviderFallbacks(fps []config.FallbackProvider) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.fallbacks = make([]config.FallbackProvider, len(fps))
+	copy(m.fallbacks, fps)
 }

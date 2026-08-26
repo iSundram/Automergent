@@ -171,10 +171,26 @@ type ProviderConfig struct {
 	OrgID              string
 	Project            string
 	Location           string
+	// Backend selects between provider backends when the provider ships more
+	// than one (Google: "aistudio" for the Gemini API, "vertex" for Vertex AI).
+	// Empty means the provider chooses (Google: project+location implies
+	// Vertex, otherwise the Gemini API).
+	Backend            string
 	Effort             string
 	ThinkingLevel      string
 	HTTPClient         *http.Client
 	PromptCacheEnabled *bool
+	// Headers are extra HTTP headers sent with every request (gateways,
+	// proxies, custom auth schemes for custom endpoints).
+	Headers map[string]string
+	// Temperature and MaxTokens are provider-level defaults applied when the
+	// completion request leaves them at zero.
+	Temperature *float64
+	MaxTokens   int
+	// TimeoutSeconds bounds each API call when > 0.
+	TimeoutSeconds int
+	// MaxRetries caps the in-provider retry attempts when > 0.
+	MaxRetries int
 }
 
 // Event is a generic event emitted during a completion.

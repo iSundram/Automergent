@@ -32,10 +32,6 @@ type sessionsLoadedMsg struct {
 	sessions []*session.Session
 }
 type projectApprovalMsg struct{ response agent.ConfirmationResponse }
-type coordinatorEventMsg struct {
-	phase   string
-	running bool
-}
 
 type App struct {
 	cfg               *config.Config
@@ -199,7 +195,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		showSessionPicker:  showSessionPicker,
 		statusMsg:          "Ready",
 		focus:              "input",
-		availableProviders: []string{"google"},
+		availableProviders: config.ProviderNames(),
 		commands:           commands.Default(),
 	}
 	sort.Strings(app.availableProviders)
@@ -280,8 +276,6 @@ func (a *App) Init() tea.Cmd {
 		cmds = append(cmds, a.startAgent(a.initialPrompt))
 	}
 
-	// Start coordinator event listener if available
-	cmds = append(cmds, a.startCoordinatorListener())
 
 	return tea.Batch(cmds...)
 }
@@ -413,12 +407,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
-	case coordinatorEventMsg:
-		a.header.SetPhase(m.phase)
-		if m.running {
-			a.statusBar.SetStatus(fmt.Sprintf("Coordinator: %s phase", m.phase))
-		}
-		cmds = append(cmds, a.waitForCoordinatorEvent())
 	case spinner.TickMsg:
 		sp, cmd := a.spin.Update(msg)
 		a.spin = sp
@@ -455,6 +443,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.availableModels = m
 		a.fetchingModels = false
 		a.updatePalette()
+	case providerTestMsg:
+		if m.success {
+			a.conversation.AddMessage("system", m.message, false)
+			a.statusBar.SetStatus("Provider test passed")
+		} else {
+			a.conversation.AddMessage("assistant", m.message, true)
+			a.statusBar.SetStatus("Provider test failed")
+		}
 	case sessionsLoadedMsg:
 		a.sessionBrowser.SetSessions(m.sessions)
 		a.sessionBrowser.SetCurrent(a.sess.ID)

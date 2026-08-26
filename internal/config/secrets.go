@@ -462,12 +462,8 @@ func GetProviderAPIKey(cfg *Config, providerName string) (string, error) {
 		return pc.APIKey, nil
 	}
 
-	// Check environment variables
-	envKeys := map[string][]string{
-		"google": {"GOOGLE_API_KEY", "GEMINI_API_KEY"},
-	}
-
-	for _, envKey := range envKeys[providerName] {
+	// Check environment variables (provider-specific names from the catalog)
+	for _, envKey := range ProviderEnvKeys(providerName) {
 		if value := os.Getenv(envKey); value != "" {
 			return value, nil
 		}
@@ -480,4 +476,31 @@ func GetProviderAPIKey(cfg *Config, providerName string) (string, error) {
 	}
 
 	return sm.Get(providerName + "_api_key")
+}
+
+// ProviderAPIKeySource reports where a provider's API key resolves from,
+// without revealing the key itself: "config", "config (secret ref)",
+// "env NAME", "secret store", or "" when no key is set anywhere.
+// It mirrors the resolution order of GetProviderAPIKey.
+func ProviderAPIKeySource(cfg *Config, providerName string) string {
+	if pc, ok := cfg.Providers[providerName]; ok && pc.APIKey != "" {
+		if strings.HasPrefix(pc.APIKey, "${") {
+			return "config (secret ref)"
+		}
+		return "config"
+	}
+
+	for _, envKey := range ProviderEnvKeys(providerName) {
+		if os.Getenv(envKey) != "" {
+			return "env " + envKey
+		}
+	}
+
+	sm, err := NewSecretManager(BackendFile)
+	if err == nil {
+		if value, err := sm.Get(providerName + "_api_key"); err == nil && value != "" {
+			return "secret store"
+		}
+	}
+	return ""
 }

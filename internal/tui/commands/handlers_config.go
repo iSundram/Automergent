@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/iSundram/Automergent/internal/config"
 )
 
 // --- Configuration Handlers ---
@@ -107,7 +109,7 @@ func handleProviderAPIKey(host Host, args []string) Result {
 	}
 
 	provider := args[0]
-	if !isSupportedProvider(provider) {
+	if !config.IsKnownProvider(provider) {
 		host.CommandError(fmt.Sprintf("Unknown provider %q", provider))
 		return Done(nil)
 	}
@@ -136,7 +138,7 @@ func handleProviderBaseURL(host Host, args []string) Result {
 	}
 
 	provider := args[0]
-	if !isSupportedProvider(provider) {
+	if !config.IsKnownProvider(provider) {
 		host.CommandError(fmt.Sprintf("Unknown provider %q", provider))
 		return Done(nil)
 	}
@@ -165,11 +167,4 @@ func handleProviderBaseURL(host Host, args []string) Result {
 	return Done(nil)
 }
 
-func isSupportedProvider(name string) bool {
-	switch name {
-	case "google":
-		return true
-	default:
-		return false
-	}
-}
+

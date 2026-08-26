@@ -16,40 +16,6 @@ import (
 	"strings"
 )
 
-func (a *App) startCoordinatorListener() tea.Cmd {
-	coord := a.ag.Coordinator()
-	if coord == nil {
-		return nil
-	}
-
-	return a.waitForCoordinatorEvent()
-}
-
-func (a *App) waitForCoordinatorEvent() tea.Cmd {
-	coord := a.ag.Coordinator()
-	if coord == nil {
-		return nil
-	}
-	return func() tea.Msg {
-		event := <-coord.Events()
-		switch event.Type {
-		case "phase_start":
-			phaseName := "research"
-			if p, ok := event.Payload.(string); ok {
-				phaseName = strings.ToLower(p)
-			}
-			return coordinatorEventMsg{phase: phaseName, running: true}
-		case "phase_complete":
-			phaseName := "execute"
-			if p, ok := event.Payload.(string); ok {
-				phaseName = strings.ToLower(p)
-			}
-			return coordinatorEventMsg{phase: phaseName, running: false}
-		}
-		return nil
-	}
-}
-
 func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	// Live-update active token estimate on every agent event.
 	a.updateActiveTokens()
