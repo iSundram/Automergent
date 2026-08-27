@@ -120,7 +120,7 @@ func (a *App) handleEscape() tea.Cmd {
 
 	// 12. Clear typed input, on a confirmed second press.
 	case a.input.Value() != "":
-		if a.escArmed && time.Since(a.lastEscAt) <= escClearWindow {
+		if escArmActive(a.lastEscAt) {
 			// Reset (not SetValue("")) pushes the text into input history, so
 			// ctrl+p brings it back if the clear was a mistake.
 			a.input.Reset()
@@ -131,7 +131,12 @@ func (a *App) handleEscape() tea.Cmd {
 		}
 		a.escArmed = true
 		a.lastEscAt = time.Now()
-		return nil
+		// Expire the armed hint like ctrl+c does: without this, the info line
+		// keeps saying "press esc again to clear" after the window closed and
+		// the next esc silently re-arms instead of clearing.
+		return tea.Tick(escClearWindow, func(time.Time) tea.Msg {
+			return clearEscArmMsg{}
+		})
 	}
 
 	// 13. Nothing to cancel.
@@ -170,6 +175,13 @@ func (a *App) forwardEscape() tea.Cmd {
 func (a *App) disarmEscape() {
 	a.escArmed = false
 	a.lastEscAt = time.Time{}
+}
+
+// escArmActive reports whether the armed double-ESC window is still open.
+// Both the ESC chain and the derived UI state gate on this, so the hint can
+// never advertise a clear that the window no longer allows.
+func escArmActive(armedAt time.Time) bool {
+	return !armedAt.IsZero() && time.Since(armedAt) <= escClearWindow
 }
 
 // handleCtrlC resolves Ctrl+C against the current state.

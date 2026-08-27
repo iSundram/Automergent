@@ -74,7 +74,8 @@ func (p CommandPalette) Selected() *PaletteItem {
 	if len(p.items) == 0 {
 		return nil
 	}
-	return &p.items[p.cursor]
+	item := p.items[p.cursor]
+	return &item
 }
 
 func (p CommandPalette) previousCategory() int {
@@ -204,18 +205,20 @@ func (p CommandPalette) addScrollbar(rows []string, viewport int) []string {
 		if i >= thumbTop && i < thumbTop+thumbSize {
 			bar = "┃"
 		}
-		rows[i] = lipgloss.NewStyle().Width(p.width-2).MaxWidth(p.width-2).Render(row) +
+		// rows[i] is already rendered at (p.width-2) by renderItem/renderCategory;
+		// appending the scrollbar glyph + trailing space brings total to p.width.
+		rows[i] = row +
 			lipgloss.NewStyle().Foreground(p.styles.T.BorderNormal).Render(bar) + " "
 	}
 	return rows
 }
 
 func (p CommandPalette) MaxVisibleItems() int {
-	maxItems := 8
-	if p.height > 0 && p.height < 18 {
-		maxItems = p.height - 9
+	const overhead = 9 // rule + header + blank + rows + blank + rule + footer
+	if p.height > 0 {
+		return max(1, p.height-overhead)
 	}
-	return max(1, maxItems)
+	return 8 // default when height is not yet known
 }
 
 func (p CommandPalette) Height() int {
@@ -295,10 +298,18 @@ func (p CommandPalette) renderMatch(label string, base lipgloss.Style) string {
 	if start < 0 {
 		return base.Render(label)
 	}
-	end := start + len(query)
-	return base.Render(label[:start]) +
-		base.Foreground(p.styles.T.Accent).Underline(true).Render(label[start:end]) +
-		base.Render(label[end:])
+	// Use rune-based slicing so multi-byte characters (CJK, emoji) never
+	// produce a mid-rune boundary panic or garbled output.
+	labelRunes := []rune(label)
+	queryRunes := []rune(query)
+	runeStart := len([]rune(label[:start]))
+	runeEnd := runeStart + len(queryRunes)
+	if runeEnd > len(labelRunes) {
+		runeEnd = len(labelRunes)
+	}
+	return base.Render(string(labelRunes[:runeStart])) +
+		base.Foreground(p.styles.T.Accent).Underline(true).Render(string(labelRunes[runeStart:runeEnd])) +
+		base.Render(string(labelRunes[runeEnd:]))
 }
 
 func joinEnds(left, right string, width int) string {

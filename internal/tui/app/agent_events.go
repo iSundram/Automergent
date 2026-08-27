@@ -297,10 +297,14 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 
 					oldData, _ := os.ReadFile(path)
 					diff := computeSimpleDiff(path, string(oldData), newContent)
-					a.diffPane.SetContent(diff)
 					a.conversation.UpdateToolContent(tc.ID, diff)
 
-					// Use diff component for confirmation (not separate confirm component)
+					// Open (or refresh) this file's tab: it moves to the
+					// front of the recency-ordered strip and becomes the
+					// selected view, with previously edited files to its right.
+					a.diffPane.OpenFile(path, diff)
+
+					// Confirmation rides on the fullscreen diff view.
 					if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
 						a.diffPane.ShowWithConfirm(bridgeConfirmation(replyCh))
 						a.pendingDiffHide = true

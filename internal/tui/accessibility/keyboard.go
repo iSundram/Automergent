@@ -358,6 +358,7 @@ func DefaultBindings() []KeyBinding {
 
 		// Panes
 		{Key: "ctrl+d", Action: "toggle-diff", Description: "Toggle diff pane", Context: "global", Category: "Panes", Aliases: []string{"f2"}},
+		{Key: "ctrl+w", Action: "next-diff-tab", Description: "Open modified-files view / next diff tab", Context: "global", Category: "Panes"},
 		{Key: "ctrl+t", Action: "toggle-tree", Description: "Toggle file tree", Context: "global", Category: "Panes"},
 		{Key: "ctrl+l", Action: "toggle-lsp", Description: "Toggle LSP panel", Context: "global", Category: "Panes"},
 		{Key: "ctrl+r", Action: "toggle-review", Description: "Toggle review mode", Context: "global", Category: "Panes"},

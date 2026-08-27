@@ -378,15 +378,17 @@ func TestCtrlCSingleInterruptsAndDoubleExits(t *testing.T) {
 	app := newTestApp(t)
 	app.thinking = true
 	app.spin.Start()
-	cmd := app.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
-	if cmd != nil {
-		t.Fatalf("expected first ctrl+c to interrupt but not quit")
-	}
+	// First press interrupts; the returned command is only the arm-expiry
+	// tick, never a quit.
+	_ = app.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if app.thinking {
 		t.Fatalf("expected interrupted run after first ctrl+c")
 	}
+	if !app.ctrlCArmed {
+		t.Fatalf("expected ctrl+c arm after interrupting")
+	}
 	app.lastCtrlCAt = time.Now()
-	cmd = app.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	cmd := app.handleKey(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
 	if cmd == nil {
 		t.Fatalf("expected second ctrl+c to quit")
 	}

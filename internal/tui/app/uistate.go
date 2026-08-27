@@ -39,13 +39,20 @@ func (a *App) uiState() tips.State {
 		return tips.StatePaletteOpen
 
 	// Armed confirmations: these describe a key the user just pressed, so they
-	// outrank the ambient state they were pressed in.
+	// outrank the ambient state they were pressed in. The ESC arm is gated on
+	// its window so a lapsed hint never advertises a clear that won't happen.
 	case a.ctrlCArmed && a.thinking:
 		return tips.StateStopFirst
 	case a.ctrlCArmed:
 		return tips.StateConfirmQuit
-	case a.escArmed:
+	case a.escArmed && escArmActive(a.lastEscAt):
 		return tips.StateConfirmClear
+
+	// A legacy ask_user reply channel pending without the questionnaire pane:
+	// Enter answers the agent directly here, which must not be advertised as
+	// "enter queues a message".
+	case a.askUserReplyCh != nil:
+		return tips.StateAwaitingAnswer
 
 	// Focus-owning panes.
 	case a.dockFocusActive():
@@ -91,7 +98,14 @@ func (a *App) tipContext() tips.Context {
 		ctx.MaxAttempts = a.retryMax
 		ctx.ErrCode = a.retryCode
 		ctx.Detail = a.retryDetail
-		ctx.NextRetryIn = a.retryDelay
+		// Compute remaining delay dynamically so the countdown ticks live.
+		if !a.retryDelayAt.IsZero() && a.retryDelay > 0 {
+			remaining := a.retryDelay - time.Since(a.retryDelayAt)
+			if remaining < 0 {
+				remaining = 0
+			}
+			ctx.NextRetryIn = remaining
+		}
 	} else if a.lastOutcome == outcomeError {
 		if rec, ok := a.latestAPIError(); ok {
 			ctx.ErrCode = rec.displayCode()

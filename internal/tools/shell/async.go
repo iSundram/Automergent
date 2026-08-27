@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/iSundram/Automergent/internal/tools"
@@ -40,6 +41,39 @@ type AsyncSession struct {
 
 	// Whether this session was exposed as a background operation.
 	background bool
+
+	// Cached view of the output for the dock's once-a-second sampling, updated
+	// on write so readers never rescan the buffers. See live.go.
+	lastLine  atomicString
+	sawStderr atomic.Bool
+}
+
+// Lock acquires the session mutex.
+func (s *AsyncSession) Lock() { s.mu.Lock() }
+
+// Unlock releases the session mutex.
+func (s *AsyncSession) Unlock() { s.mu.Unlock() }
+
+// IsCompleted returns whether the session has finished.
+func (s *AsyncSession) IsCompleted() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Completed
+}
+
+// Cancel cancels the session context.
+func (s *AsyncSession) Cancel() {
+	if s.cancel != nil {
+		s.cancel()
+	}
+}
+
+// Kill terminates the process.
+func (s *AsyncSession) Kill() error {
+	if s.Cmd.Process == nil {
+		return nil
+	}
+	return s.Cmd.Process.Kill()
 }
 
 // SessionManager manages async shell sessions.
@@ -86,6 +120,87 @@ type SessionNotification struct {
 var globalManager = &SessionManager{
 	sessions: make(map[string]*AsyncSession),
 	history:  make(map[string]SessionRecord),
+}
+
+// defaultAutoBackgroundSeconds is the threshold for auto-backgrounding sync commands.
+const defaultAutoBackgroundSeconds = 8
+
+// commandsExcludedFromBackground are commands that should never be auto-backgrounded.
+// These are typically short-lived or interactive commands.
+var commandsExcludedFromBackground = []string{
+	"sleep",
+	"wait",
+	"read",
+	"echo",
+	"printf",
+	"test",
+	"[",
+	"[[",
+	"pwd",
+	"hostname",
+	"date",
+	"whoami",
+	"id",
+	"uname",
+	"which",
+	"whereis",
+	"file",
+	"stat",
+	"ls",
+	"dir",
+	"cat",
+	"head",
+	"tail",
+	"less",
+	"more",
+	"grep",
+	"awk",
+	"sed",
+	"cut",
+	"sort",
+	"uniq",
+	"wc",
+	"tr",
+	"tee",
+	"xargs",
+	"env",
+	"printenv",
+	"export",
+	"unset",
+	"cd",
+	"pushd",
+	"popd",
+	"dirs",
+	"true",
+	"false",
+	"yes",
+	"seq",
+	"shuf",
+	"rev",
+	"base64",
+	"md5sum",
+	"sha1sum",
+	"sha256sum",
+}
+
+// shouldExcludeFromBackground checks if a command should not be auto-backgrounded.
+func shouldExcludeFromBackground(command string) bool {
+	cmdLower := strings.TrimSpace(strings.ToLower(command))
+	
+	// Get the first word (the command name)
+	parts := strings.Fields(cmdLower)
+	if len(parts) == 0 {
+		return false
+	}
+	baseCmd := parts[0]
+	
+	// Check if it's in the exclusion list
+	for _, excluded := range commandsExcludedFromBackground {
+		if baseCmd == excluded {
+			return true
+		}
+	}
+	return false
 }
 
 // GetManager returns the global session manager.
@@ -290,10 +405,11 @@ func NewAsyncRunnerTool(timeout time.Duration) *AsyncRunnerTool {
 func (t *AsyncRunnerTool) Name() string { return "bash" }
 func (t *AsyncRunnerTool) Description() string {
 	return `Execute shell commands in sync or async mode.
-- mode="sync" (default): Run and wait for completion
+- mode="sync" (default): Run and wait for completion, auto-backgrounds after 8s for long commands
 - mode="async": Run in background, returns shell_id for read_shell/write_shell
 - detach=true: Process survives session shutdown (for servers)
-- Use initial_wait in sync mode to get early output before backgrounding`
+- Use initial_wait in sync mode to get early output before backgrounding
+- Commands like sleep, wait, echo are never auto-backgrounded`
 }
 
 // Meta documents bash in the system prompt.
@@ -427,6 +543,11 @@ func (t *AsyncRunnerTool) executeSync(ctx context.Context, command, cwd string, 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
+	// Auto-background after 8 seconds for eligible commands
+	if initialWait <= 0 && !shouldExcludeFromBackground(command) {
+		initialWait = defaultAutoBackgroundSeconds
+	}
+
 	// If no initial_wait requested, keep original blocking behavior.
 	if initialWait <= 0 {
 		cmd := exec.CommandContext(ctx, "bash", "-c", command)
@@ -533,9 +654,7 @@ func (t *AsyncRunnerTool) executeSync(ctx context.Context, command, cwd string, 
 		for {
 			n, rerr := stdoutPipe.Read(buf)
 			if n > 0 {
-				session.mu.Lock()
-				session.Stdout.Write(buf[:n])
-				session.mu.Unlock()
+				session.noteStdout(buf[:n])
 			}
 			if rerr != nil {
 				break
@@ -548,9 +667,7 @@ func (t *AsyncRunnerTool) executeSync(ctx context.Context, command, cwd string, 
 		for {
 			n, rerr := stderrPipe.Read(buf)
 			if n > 0 {
-				session.mu.Lock()
-				session.Stderr.Write(buf[:n])
-				session.mu.Unlock()
+				session.noteStderr(buf[:n])
 			}
 			if rerr != nil {
 				break
@@ -699,9 +816,7 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 		for {
 			n, rerr := stdoutPipe.Read(buf)
 			if n > 0 {
-				session.mu.Lock()
-				session.Stdout.Write(buf[:n])
-				session.mu.Unlock()
+				session.noteStdout(buf[:n])
 			}
 			if rerr != nil {
 				break
@@ -714,9 +829,7 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 		for {
 			n, rerr := stderrPipe.Read(buf)
 			if n > 0 {
-				session.mu.Lock()
-				session.Stderr.Write(buf[:n])
-				session.mu.Unlock()
+				session.noteStderr(buf[:n])
 			}
 			if rerr != nil {
 				break

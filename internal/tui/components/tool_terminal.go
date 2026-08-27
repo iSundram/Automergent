@@ -3,38 +3,80 @@ package components
 // Execution families: terminal (bash, run_command), shellsession (read_shell,
 // write_shell, stop_shell, wait) and shelllist (list_shells).
 //
-// The slab is the signature block here: a dark full-bleed surface carrying
-// "$ command" then the raw output tail, so a shell transcript reads like a
-// terminal instead of like prose. The command appears exactly once — on the
-// slab's first row, never echoed in both the call line and the body.
+// The slab is the signature block here: a theme-Surface panel carrying the
+// "$ command" row and the merged output tail. The command appears exactly
+// once — on the $ row; the call line above it carries only the tool name, a
+// hairline, the exit chip and the duration.
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 )
 
-// renderTerminalCard renders bash / run_command: a call line, then the slab.
+// renderTerminalCard renders bash / run_command.
 //
-//	● Bash  go test ./...                                               4.2s
-//	  ▓ $ go test ./...                                    ▓
-//	  ▓ ok  internal/tui/components   0.412s                ▓
-//	  ↑ 12 more lines — ctrl+e expands
+//	● Bash ────────────────────────────────────── ✗ exit 2    7ms
+//	  $ make build
+//	  make: *** No rule to make target 'build'.  Stop.
+//	  ↑ 6 more lines — ctrl+e expands
+//
+// The command lives ONCE, on the slab's $ row — the call line carries only the
+// tool name, a hairline out to the outcome chip (exit status while done,
+// "◌ running…" in flight, silence on quiet success) and the duration. Output
+// is one merged stream: the tools' "[stderr]" section markers and their
+// "command failed:" preambles are stripped, the chip already says it.
 func (c *Conversation) renderTerminalCard(m ConversationMsg, width int) string {
-	cmd := terminalCommand(m)
-	head := c.callLine(m, width, cmd, c.terminalChips(m), durationChip(m.Duration))
-
-	if !c.showDetail() {
-		return head
+	slab := c.showDetail() &&
+		(m.Status == "running" || strings.TrimSpace(m.Content) != "")
+	if !slab {
+		// No body to paint (quiet success, compact mode): carry the command on
+		// the call line itself so it is stated exactly once, wherever it is.
+		return c.callLine(m, width, terminalCommand(m), c.terminalChips(m), durationChip(m.Duration))
 	}
-	if strings.TrimSpace(m.Content) == "" && m.Status != "running" {
-		return head
-	}
-	return join(head, c.terminalSlab(m, width))
+	return join(c.terminalHead(m, width), c.terminalSlab(m, width))
 }
 
-// terminalChips reports the async-vs-sync shape and outcome of a command.
+// terminalHead is the terminal family's call line: glyph, name, meta chips,
+// then a hairline stretching to a right-aligned trailer of exit chip + time.
+func (c *Conversation) terminalHead(m ConversationMsg, width int) string {
+	spec := specFor(m.ToolName)
+	name := lipgloss.NewStyle().
+		Foreground(spec.Accent(c.styles.T)).
+		Bold(true).
+		Render(spec.Display)
+
+	left := gutter + c.statusGlyph(m) + " " + name
+
+	chips := c.terminalChips(m)
+	if chip := strings.Join(chips, glyphSep); chip != "" {
+		left += "  " + c.styles.Dim.Render(chip)
+	}
+
+	trailer := c.commandOutcome(m)
+	dur := durationChip(m.Duration)
+	if dur != "" && trailer != "" {
+		trailer += "  "
+	}
+	trailer += c.styles.Dim.Render(dur)
+
+	line := left
+	if tw := lipgloss.Width(trailer); tw > 0 {
+		rule := width - lipgloss.Width(left) - tw - 4
+		if rule >= 3 {
+			line += "  " + c.styles.Dim.Render(strings.Repeat("─", rule)) + "  "
+		} else {
+			line += strings.Repeat(" ", max(3, width-lipgloss.Width(line)-tw))
+		}
+		line += trailer
+	}
+	return line
+}
+
+// terminalChips reports the async-vs-sync shape of a command. Failure is NOT
+// chipped here — the head's exit trailer owns that.
 func (c *Conversation) terminalChips(m ConversationMsg) []string {
 	var chips []string
 	if id := metaString(m, "shell_id"); id != "" {
@@ -44,9 +86,6 @@ func (c *Conversation) terminalChips(m ConversationMsg) []string {
 		} else {
 			chips = append(chips, "async")
 		}
-	}
-	if m.IsError {
-		chips = append(chips, "failed")
 	}
 	return chips
 }
@@ -62,38 +101,26 @@ func terminalCommand(m ConversationMsg) string {
 	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(m.ToolContext), "exec: "))
 }
 
-// terminalSlab paints the dark command block: "$ command" first, then the last
-// N lines of output, with a scroll hint below the slab when lines were hidden.
+// terminalSlab paints the command block on the theme's surface: "$ command"
+// first, then the last N lines of merged output, with a scroll hint below the
+// slab when lines were hidden.
 func (c *Conversation) terminalSlab(m ConversationMsg, width int) string {
 	inner := slabInner(width)
 
 	textFg := lipgloss.NewStyle().Foreground(c.styles.T.Text)
-	prompt := lipgloss.NewStyle().Foreground(c.styles.T.Green).Bold(true)
-	bg := lipgloss.NewStyle().Background(c.slabBackground())
+	prompt := lipgloss.NewStyle().Foreground(c.styles.T.Accent).Bold(true)
 
 	// Multi-line commands collapse onto one row with a visible ⏎ so the slab
 	// keeps a stable height regardless of how the model formatted the command.
 	cmdVis := strings.ReplaceAll(terminalCommand(m), "\n", " "+glyphReturn+" ")
 
-	var rows []string
-	if m.Status == "running" {
-		// The running chip is right-aligned on the command row itself, so an
-		// in-flight command needs no extra line.
-		chip := lipgloss.NewStyle().Foreground(c.styles.T.Yellow).Render("running…")
-		left := prompt.Render("$") + " " + textFg.Render(ansiSafeTruncate(cmdVis, inner-12))
-		pad := inner - lipgloss.Width(left) - lipgloss.Width(chip)
-		if pad < 1 {
-			pad = 1
-		}
-		rows = append(rows, bg.Render(" "+left+strings.Repeat(" ", pad)+chip+" "))
-	} else {
-		rows = append(rows, c.slabRow("$ "+cmdVis, inner))
-	}
+	rows := []string{c.slabRowTrailer(
+		prompt.Render("$")+" "+textFg.Render(cmdVis), "", inner)}
 
 	hidden := 0
 	if strings.TrimSpace(m.Content) != "" {
-		var shown []string
-		shown, hidden = tailLines(m.Content, c.tailLimit())
+		shown, hid := tailLines(mergedStream(m.Content), c.tailLimit())
+		hidden = hid
 		for _, l := range shown {
 			rows = append(rows, c.slabRow(l, inner))
 		}
@@ -106,6 +133,56 @@ func (c *Conversation) terminalSlab(m ConversationMsg, width int) string {
 		}
 	}
 	return out
+}
+
+// mergedStream strips the shell tools' stream bookkeeping — "[stderr]" /
+// "[stdout]" section markers and "command failed: …" preambles — leaving one
+// plain output stream. Failure is already announced by the head's exit chip;
+// printing it again inside the body was pure duplication.
+func mergedStream(content string) string {
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
+	kept := make([]string, 0, len(lines))
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		switch {
+		case t == "", t == "[stderr]", t == "[stdout]":
+			continue
+		case strings.HasPrefix(t, "command failed:"), strings.HasPrefix(t, "command error:"):
+			continue
+		}
+		kept = append(kept, l)
+	}
+	return strings.Join(kept, "\n")
+}
+
+// commandOutcome is the right-aligned chip on a command row: a pulsing
+// "running…" while in flight, a red exit status on failure, silence on quiet
+// success.
+func (c *Conversation) commandOutcome(m ConversationMsg) string {
+	if m.Status == "running" {
+		return lipgloss.NewStyle().Foreground(c.styles.T.Yellow).Render("running…")
+	}
+	if code, ok := exitCodeOf(m); ok && code != 0 {
+		return c.exitChip(code)
+	}
+	if m.IsError {
+		return lipgloss.NewStyle().Foreground(c.styles.T.Red).Render(fmt.Sprintf("%s failed", glyphFail))
+	}
+	return ""
+}
+
+// exitCodeOf reads a command's exit status from Result.Metadata, which arrives
+// numeric or string depending on which path recorded it.
+func exitCodeOf(m ConversationMsg) (int, bool) {
+	if v, ok := metaInt(m, "exit_code"); ok {
+		return v, true
+	}
+	if s := metaString(m, "exit_code"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
 }
 
 // renderShellSessionCard renders read_shell / write_shell / stop_shell / wait —

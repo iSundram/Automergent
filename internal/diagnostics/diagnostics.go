@@ -10,14 +10,19 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	sitter "github.com/smacker/go-tree-sitter"
 
+	diagcache "github.com/iSundram/Automergent/internal/diagnostics/cache"
 	"github.com/iSundram/Automergent/internal/diagnostics/compiler"
+	"github.com/iSundram/Automergent/internal/diagnostics/linters"
 	"github.com/iSundram/Automergent/internal/diagnostics/parsers"
 	"github.com/iSundram/Automergent/internal/diagnostics/recovery"
 	"github.com/iSundram/Automergent/internal/diagnostics/types"
 )
+
+var linterRegistry = linters.NewLinterRegistry()
 
 // Diagnostic is re-exported from types for convenience.
 type Diagnostic = types.Diagnostic
@@ -42,16 +47,41 @@ func Analyze(path, content string) []Diagnostic {
 		return nil
 	}
 
-	return analyzeWithCache(path, lang, content)
+	// First run tree-sitter + semantic analysis
+	diags := analyzeWithCache(path, lang, content)
+
+	// Then run external linters if available and enabled
+	linterDiags, err := linterRegistry.Lint(context.Background(), lang, path, content)
+	if err == nil && len(linterDiags) > 0 {
+		diags = append(diags, linterDiags...)
+		// Re-dedup after adding linter results
+		diags = dedup(diags)
+	}
+
+	return diags
 }
 
 func analyzeWithCache(path string, lang parsers.Language, content string) []Diagnostic {
+	// Try persistent cache first
+	if pc := diagcache.GetGlobalCache(); pc != nil {
+		if cached, ok := pc.Get(path, content, 24*time.Hour); ok {
+			return cached
+		}
+	}
+
+	// Fall back to in-memory cache
 	key := cacheKey(path, content)
 	if cached, ok := cacheGet(key); ok {
 		return cached
 	}
 	result := analyze(lang, content)
 	cachePut(key, result)
+
+	// Also store in persistent cache
+	if pc := diagcache.GetGlobalCache(); pc != nil {
+		pc.Put(path, content, string(lang), result, 24*time.Hour)
+	}
+
 	return result
 }
 
@@ -63,13 +93,15 @@ func analyze(lang parsers.Language, content string) []Diagnostic {
 
 	pr, err := parsers.Parse(context.Background(), lang, []byte(content))
 	if err != nil {
-		return []Diagnostic{{
+		d := Diagnostic{
 			Line:     0,
 			Severity: "error",
 			Code:     "parse-failure",
 			Message:  fmt.Sprintf("failed to parse file: %s", err),
 			Source:   "orteds",
-		}}
+		}
+		d.WithDefaults()
+		return []Diagnostic{d}
 	}
 
 	var diags []Diagnostic
@@ -86,30 +118,51 @@ func analyze(lang parsers.Language, content string) []Diagnostic {
 			if text != "" {
 				msg = fmt.Sprintf("syntax error: %s", text)
 			}
-			diags = append(diags, Diagnostic{
-				Line:     int(node.StartPoint().Row) + 1,
-				Column:   int(node.StartPoint().Column),
-				Severity: "error",
-				Code:     "syntax-error",
-				Message:  msg,
-				Source:   source,
-			})
+			d := Diagnostic{
+				Line:       int(node.StartPoint().Row) + 1,
+				Column:     int(node.StartPoint().Column),
+				EndLine:    int(node.EndPoint().Row) + 1,
+				EndColumn:  int(node.EndPoint().Column),
+				Severity:   "error",
+				Code:       "syntax-error",
+				Message:    msg,
+				Source:     source,
+				Tags:       []string{"syntax"},
+				Suggestions: []string{"Check brackets, quotes, and delimiters near the reported location"},
+			}
+			d.WithDefaults()
+			diags = append(diags, d)
 		}
 		if node.IsMissing() {
-			diags = append(diags, Diagnostic{
-				Line:     int(node.StartPoint().Row) + 1,
-				Column:   int(node.StartPoint().Column),
-				Severity: "error",
-				Code:     "missing-token",
-				Message:  fmt.Sprintf("missing %s", node.Type()),
-				Source:   source,
-			})
+			d := Diagnostic{
+				Line:       int(node.StartPoint().Row) + 1,
+				Column:     int(node.StartPoint().Column),
+				EndLine:    int(node.EndPoint().Row) + 1,
+				EndColumn:  int(node.EndPoint().Column),
+				Severity:   "error",
+				Code:       "missing-token",
+				Message:    fmt.Sprintf("missing %s", node.Type()),
+				Source:     source,
+				Tags:       []string{"syntax"},
+				Suggestions: []string{"Add the missing " + node.Type()},
+			}
+			d.WithDefaults()
+			diags = append(diags, d)
 		}
 		return true
 	})
 
 	// Language-specific rules.
 	diags = append(diags, languageRules(lang, pr)...)
+
+	// Apply defaults to all language-specific diagnostics
+	for i := range diags {
+		diags[i].WithDefaults()
+	}
+
+	// Run external linters if available (only if file path is provided)
+	// Note: linters need a file path to work properly, so we skip in this context
+	// The file-based Analyze function should call linters separately
 
 	return dedup(diags)
 }
@@ -185,14 +238,25 @@ func checkGoRules(pr *parsers.ParseResult) []Diagnostic {
 	}
 	first := root.Child(0)
 	if first == nil || first.Type() != "package_clause" {
-		diags = append(diags, Diagnostic{
-			Line:     1,
-			Severity: "error",
-			Code:     "missing-package",
-			Message:  "Go files must start with a 'package' declaration",
-			Source:   "tree-sitter-go",
-		})
+		d := Diagnostic{
+			Line:       1,
+			Column:     0,
+			EndLine:    1,
+			EndColumn:  1,
+			Severity:   "error",
+			Code:       "missing-package",
+			Message:    "Go files must start with a 'package' declaration",
+			Source:     "tree-sitter-go",
+			Tags:       []string{"syntax", "go"},
+			Suggestions: []string{"Add `package <name>` at the top of the file", "Keep the package name consistent with the directory name"},
+		}
+		d.WithDefaults()
+		diags = append(diags, d)
 	}
+
+	// Add semantic rules
+	diags = append(diags, parsers.CheckGoSemanticRules(pr)...)
+
 	return diags
 }
 
@@ -214,27 +278,42 @@ func checkPythonRules(pr *parsers.ParseResult) []Diagnostic {
 			hasSpaces = true
 		}
 		if hasTabs && hasSpaces {
-			diags = append(diags, Diagnostic{
-				Line:     i + 1,
-				Severity: "error",
-				Code:     "indentation-error",
-				Message:  "inconsistent use of tabs and spaces in indentation",
-				Source:   "tree-sitter-python",
-			})
+			d := Diagnostic{
+				Line:       i + 1,
+				Column:     0,
+				EndLine:    i + 1,
+				EndColumn:  len(line),
+				Severity:   "error",
+				Code:       "indentation-error",
+				Message:    "inconsistent use of tabs and spaces in indentation",
+				Source:     "tree-sitter-python",
+				Tags:       []string{"style", "python"},
+				Suggestions: []string{"Convert all indentation to spaces (recommended: 4 spaces)", "Convert all indentation to tabs", "Configure editor to use consistent indentation"},
+			}
+			d.WithDefaults()
+			diags = append(diags, d)
 			break
 		}
 	}
+
+	// Add semantic rules
+	diags = append(diags, parsers.CheckPythonSemanticRules(pr)...)
+
 	return diags
 }
 
 // ─── JavaScript rules ────────────────────────────────────────────────────────
 
 func checkJavaScriptRules(pr *parsers.ParseResult) []Diagnostic {
-	return checkJSCommon(pr, "javascript")
+	diags := checkJSCommon(pr, "javascript")
+	diags = append(diags, parsers.CheckTSSemanticRules(pr)...)
+	return diags
 }
 
 func checkTypeScriptRules(pr *parsers.ParseResult) []Diagnostic {
-	return checkJSCommon(pr, "typescript")
+	diags := checkJSCommon(pr, "typescript")
+	diags = append(diags, parsers.CheckTSSemanticRules(pr)...)
+	return diags
 }
 
 func checkJSCommon(pr *parsers.ParseResult, srcLang string) []Diagnostic {
@@ -245,14 +324,20 @@ func checkJSCommon(pr *parsers.ParseResult, srcLang string) []Diagnostic {
 	parsers.Walk(pr.Root, func(node *sitter.Node) bool {
 		if node.Type() == "await_expression" {
 			if !insideAsyncFunction(node) {
-				diags = append(diags, Diagnostic{
-					Line:     int(node.StartPoint().Row) + 1,
-					Column:   int(node.StartPoint().Column),
-					Severity: "error",
-					Code:     "await-outside-async",
-					Message:  "'await' used outside of an async function",
-					Source:   source,
-				})
+				d := Diagnostic{
+					Line:       int(node.StartPoint().Row) + 1,
+					Column:     int(node.StartPoint().Column),
+					EndLine:    int(node.EndPoint().Row) + 1,
+					EndColumn:  int(node.EndPoint().Column),
+					Severity:   "error",
+					Code:       "await-outside-async",
+					Message:    "'await' used outside of an async function",
+					Source:     source,
+					Tags:       []string{"syntax", "async", srcLang},
+					Suggestions: []string{"Mark the enclosing function as async", "Remove the await if the function cannot be async", "Wrap in an IIFE if at top level"},
+				}
+				d.WithDefaults()
+				diags = append(diags, d)
 			}
 		}
 		return true
@@ -299,86 +384,329 @@ func checkRustRules(pr *parsers.ParseResult) []Diagnostic {
 				}
 			}
 			if !hasBody {
-				diags = append(diags, Diagnostic{
-					Line:     int(node.StartPoint().Row) + 1,
-					Column:   int(node.StartPoint().Column),
-					Severity: "error",
-					Code:     "unclosed-macro",
-					Message:  "unclosed macro invocation",
-					Source:   "tree-sitter-rust",
-				})
+				d := Diagnostic{
+					Line:       int(node.StartPoint().Row) + 1,
+					Column:     int(node.StartPoint().Column),
+					EndLine:    int(node.EndPoint().Row) + 1,
+					EndColumn:  int(node.EndPoint().Column),
+					Severity:   "error",
+					Code:       "unclosed-macro",
+					Message:    "unclosed macro invocation",
+					Source:     "tree-sitter-rust",
+					Tags:       []string{"syntax", "macro", "rust"},
+					Suggestions: []string{"Add the missing token tree (e.g., `{}`, `()`, `[]`)" , "Check for missing closing delimiter", "Verify macro syntax matches definition"},
+				}
+				d.WithDefaults()
+				diags = append(diags, d)
 			}
 		}
 		return true
 	})
+
+	// Add semantic rules
+	diags = append(diags, parsers.CheckRustSemanticRules(pr)...)
+
 	return diags
 }
 
 // ─── Java rules ──────────────────────────────────────────────────────────────
 
 func checkJavaRules(pr *parsers.ParseResult) []Diagnostic {
+	var diags []Diagnostic
 	// Tree-sitter ERROR nodes cover the primary Java issues.
-	return nil
+	diags = append(diags, parsers.CheckJavaSemanticRules(pr)...)
+	return diags
 }
 
 // ─── C rules ─────────────────────────────────────────────────────────────────
 
 func checkCRules(pr *parsers.ParseResult) []Diagnostic {
-	return nil
+	var diags []Diagnostic
+	// Check for missing main function (warning, not error)
+	hasMain := false
+	parsers.Walk(pr.Root, func(node *sitter.Node) bool {
+		if node.Type() == "function_definition" {
+			nameNode := node.ChildByFieldName("declarator")
+			if nameNode != nil {
+				for i := uint32(0); i < nameNode.ChildCount(); i++ {
+					ch := nameNode.Child(int(i))
+					if ch != nil && ch.Type() == "identifier" && string(pr.Content[ch.StartByte():ch.EndByte()]) == "main" {
+						hasMain = true
+						return false
+					}
+				}
+			}
+		}
+		return true
+	})
+	if !hasMain {
+		d := Diagnostic{
+			Line:       1,
+			Column:     0,
+			Severity:   "info",
+			Code:       "missing-main",
+			Message:    "no main function found (expected for executables)",
+			Source:     "tree-sitter-c",
+			Tags:       []string{"style", "c"},
+			Suggestions: []string{"Add int main(void) { return 0; } for executables", "Ignore if this is a library/header file"},
+		}
+		d.WithDefaults()
+		diags = append(diags, d)
+	}
+	return diags
 }
 
 // ─── C++ rules ───────────────────────────────────────────────────────────────
 
 func checkCPPRules(pr *parsers.ParseResult) []Diagnostic {
-	return nil
+	var diags []Diagnostic
+	// Check for using namespace std in header files (common issue)
+	content := string(pr.Content)
+	if strings.Contains(content, "using namespace std") {
+		lines := strings.Split(content, "\n")
+		for i, line := range lines {
+			if strings.Contains(line, "using namespace std") {
+				d := Diagnostic{
+					Line:       i + 1,
+					Column:     strings.Index(line, "using namespace std"),
+					EndLine:    i + 1,
+					EndColumn:  strings.Index(line, "using namespace std") + len("using namespace std"),
+					Severity:   "warning",
+					Code:       "using-namespace-std",
+					Message:    "avoid 'using namespace std' in headers (pollutes global namespace)",
+					Source:     "tree-sitter-cpp",
+					Tags:       []string{"style", "cpp", "best-practice"},
+					Suggestions: []string{"Use fully qualified names (std::vector)", "Move using declaration to source file", "Use namespace aliases if needed"},
+				}
+				d.WithDefaults()
+				diags = append(diags, d)
+				break
+			}
+		}
+	}
+	return diags
 }
 
 // ─── C# rules ────────────────────────────────────────────────────────────────
 
 func checkCSharpRules(pr *parsers.ParseResult) []Diagnostic {
-	return nil
+	var diags []Diagnostic
+	// Check for missing namespace declaration
+	hasNamespace := false
+	parsers.Walk(pr.Root, func(node *sitter.Node) bool {
+		if node.Type() == "namespace_declaration" {
+			hasNamespace = true
+			return false
+		}
+		return true
+	})
+	if !hasNamespace {
+		d := Diagnostic{
+			Line:       1,
+			Column:     0,
+			Severity:   "warning",
+			Code:       "missing-namespace",
+			Message:    "file has no namespace declaration",
+			Source:     "tree-sitter-csharp",
+			Tags:       []string{"style", "csharp", "organization"},
+			Suggestions: []string{"Add namespace declaration matching project structure", "Use file-scoped namespace: namespace MyProject;"},
+		}
+		d.WithDefaults()
+		diags = append(diags, d)
+	}
+	return diags
 }
 
 // ─── Ruby rules ──────────────────────────────────────────────────────────────
 
 func checkRubyRules(pr *parsers.ParseResult) []Diagnostic {
-	return nil
+	var diags []Diagnostic
+	// Check for missing frozen_string_literal comment (performance)
+	content := string(pr.Content)
+	if !strings.HasPrefix(strings.TrimSpace(content), "# frozen_string_literal: true") {
+		d := Diagnostic{
+			Line:       1,
+			Column:     0,
+			Severity:   "hint",
+			Code:       "missing-frozen-string-literal",
+			Message:    "missing frozen_string_literal comment (improves performance)",
+			Source:     "tree-sitter-ruby",
+			Tags:       []string{"performance", "ruby", "style"},
+			Suggestions: []string{"Add # frozen_string_literal: true at top of file", "Configure RuboCop to enforce this"},
+		}
+		d.WithDefaults()
+		diags = append(diags, d)
+	}
+	return diags
 }
 
 // ─── PHP rules ───────────────────────────────────────────────────────────────
 
 func checkPHPRules(pr *parsers.ParseResult) []Diagnostic {
-	return nil
+	var diags []Diagnostic
+	// Check for missing strict_types declaration
+	content := string(pr.Content)
+	if !strings.Contains(content, "declare(strict_types=1)") {
+		d := Diagnostic{
+			Line:       1,
+			Column:     0,
+			Severity:   "hint",
+			Code:       "missing-strict-types",
+			Message:    "missing strict_types declaration (enables strict type checking)",
+			Source:     "tree-sitter-php",
+			Tags:       []string{"type-safety", "php", "best-practice"},
+			Suggestions: []string{"Add declare(strict_types=1); at top of file", "Enables strict scalar type declarations"},
+		}
+		d.WithDefaults()
+		diags = append(diags, d)
+	}
+	return diags
 }
 
 // ─── Swift rules ─────────────────────────────────────────────────────────────
 
 func checkSwiftRules(pr *parsers.ParseResult) []Diagnostic {
-	return nil
+	var diags []Diagnostic
+	// Check for force unwrapping (!) which can crash
+	parsers.Walk(pr.Root, func(node *sitter.Node) bool {
+		if node.Type() == "force_unwrap_expression" || node.Type() == "forced_unwrap" {
+			d := Diagnostic{
+				Line:       int(node.StartPoint().Row) + 1,
+				Column:     int(node.StartPoint().Column),
+				EndLine:    int(node.EndPoint().Row) + 1,
+				EndColumn:  int(node.EndPoint().Column),
+				Severity:   "warning",
+				Code:       "force-unwrap",
+				Message:    "force unwrap (!) can cause runtime crash if nil",
+				Source:     "tree-sitter-swift",
+				Tags:       []string{"safety", "swift", "crash-risk"},
+				Suggestions: []string{"Use optional binding (if let / guard let)", "Use nil-coalescing operator (??)", "Use optional chaining (?.)"},
+			}
+			d.WithDefaults()
+			diags = append(diags, d)
+		}
+		return true
+	})
+	return diags
 }
 
 // ─── Kotlin rules ────────────────────────────────────────────────────────────
 
 func checkKotlinRules(pr *parsers.ParseResult) []Diagnostic {
-	return nil
+	var diags []Diagnostic
+	// Check for !! operator (not-null assertion, can throw NPE)
+	parsers.Walk(pr.Root, func(node *sitter.Node) bool {
+		if node.Type() == "not_null_assertion" {
+			d := Diagnostic{
+				Line:       int(node.StartPoint().Row) + 1,
+				Column:     int(node.StartPoint().Column),
+				EndLine:    int(node.EndPoint().Row) + 1,
+				EndColumn:  int(node.EndPoint().Column),
+				Severity:   "warning",
+				Code:       "not-null-assertion",
+				Message:    "!! operator throws NPE if value is null",
+				Source:     "tree-sitter-kotlin",
+				Tags:       []string{"safety", "kotlin", "null-safety"},
+				Suggestions: []string{"Use safe call (?.) with let", "Use elvis operator (?:)", "Add explicit null check"},
+			}
+			d.WithDefaults()
+			diags = append(diags, d)
+		}
+		return true
+	})
+	return diags
 }
 
 // ─── Lua rules ───────────────────────────────────────────────────────────────
 
 func checkLuaRules(pr *parsers.ParseResult) []Diagnostic {
-	return nil
+	var diags []Diagnostic
+	// Check for global variable assignments (should use local)
+	parsers.Walk(pr.Root, func(node *sitter.Node) bool {
+		if node.Type() == "assignment_statement" {
+			// Check if LHS has no 'local' prefix
+			// This is a simplified check - tree-sitter may not expose this directly
+		}
+		return true
+	})
+	return diags
 }
 
 // ─── YAML rules ──────────────────────────────────────────────────────────────
 
 func checkYAMLRules(pr *parsers.ParseResult) []Diagnostic {
-	return nil
+	var diags []Diagnostic
+	// Check for duplicate keys (tree-sitter may not catch this)
+	// Basic check for common issues
+	content := string(pr.Content)
+	lines := strings.Split(content, "\n")
+	seen := make(map[string]int)
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") || trimmed == "" {
+			continue
+		}
+		if idx := strings.Index(trimmed, ":"); idx > 0 {
+			key := strings.TrimSpace(trimmed[:idx])
+			if prev, ok := seen[key]; ok {
+				d := Diagnostic{
+					Line:       i + 1,
+					Column:     0,
+					EndLine:    i + 1,
+					EndColumn:  len(trimmed),
+					Severity:   "warning",
+					Code:       "duplicate-key",
+					Message:    fmt.Sprintf("duplicate key '%s' (first at line %d)", key, prev+1),
+					Source:     "tree-sitter-yaml",
+					Tags:       []string{"data-integrity", "yaml"},
+					Suggestions: []string{"Remove duplicate key", "Merge values if intentional"},
+				}
+				d.WithDefaults()
+				diags = append(diags, d)
+			} else {
+				seen[key] = i
+			}
+		}
+	}
+	return diags
 }
 
 // ─── TOML rules ──────────────────────────────────────────────────────────────
 
 func checkTOMLRules(pr *parsers.ParseResult) []Diagnostic {
-	return nil
+	var diags []Diagnostic
+	// Check for duplicate keys
+	content := string(pr.Content)
+	lines := strings.Split(content, "\n")
+	seen := make(map[string]int)
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "#") || trimmed == "" {
+			continue
+		}
+		if idx := strings.Index(trimmed, "="); idx > 0 {
+			key := strings.TrimSpace(trimmed[:idx])
+			if prev, ok := seen[key]; ok {
+				d := Diagnostic{
+					Line:       i + 1,
+					Column:     0,
+					EndLine:    i + 1,
+					EndColumn:  len(trimmed),
+					Severity:   "warning",
+					Code:       "duplicate-key",
+					Message:    fmt.Sprintf("duplicate key '%s' (first at line %d)", key, prev+1),
+					Source:     "tree-sitter-toml",
+					Tags:       []string{"data-integrity", "toml"},
+					Suggestions: []string{"Remove duplicate key", "Use arrays/tables for multiple values"},
+				}
+				d.WithDefaults()
+				diags = append(diags, d)
+			} else {
+				seen[key] = i
+			}
+		}
+	}
+	return diags
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

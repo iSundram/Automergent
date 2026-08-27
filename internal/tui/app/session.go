@@ -220,7 +220,11 @@ func (a *App) cancelActiveRun(status string) {
 	a.activeTool = ""
 	a.clearRetryState()
 	// A queued message belonged to the run being cancelled: delivering it into
-	// the next, unrelated run would be surprising.
+	// the next, unrelated run would be surprising. Never do this silently —
+	// say how many messages the interrupt took with it.
+	if n := len(a.msgQueue); n > 0 {
+		status = strings.TrimSpace(status + " · " + pluralMessages(n) + " queued discarded")
+	}
 	a.clearQueue()
 	a.conversation.RenderIfDirty()
 

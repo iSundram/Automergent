@@ -215,11 +215,6 @@ func (a *App) ToggleDiffPane() {
 	a.layout()
 }
 
-func (a *App) ToggleLSPPanel() {
-	a.lspPanel.Toggle()
-	a.layout()
-}
-
 func (a *App) ToggleReviewMode() {
 	a.conversation.SetReviewMode(!a.conversation.ReviewMode())
 }
@@ -266,10 +261,6 @@ func (a *App) ShowingFileTree() bool {
 
 func (a *App) DiffPaneVisible() bool {
 	return a.diffPane.Visible()
-}
-
-func (a *App) LSPPanelVisible() bool {
-	return a.lspPanel.Visible()
 }
 
 func (a *App) ShowStats() {

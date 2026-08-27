@@ -23,14 +23,6 @@ func TestHandleDiff(t *testing.T) {
 	}
 }
 
-func TestHandleLSP(t *testing.T) {
-	m := NewMockHost()
-	handleLSP(m, []string{})
-	if m.toggleLSPPanelCalls != 1 {
-		t.Fatalf("expected ToggleLSPPanel called, got %d", m.toggleLSPPanelCalls)
-	}
-}
-
 func TestHandleSearch(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -554,6 +554,129 @@ func (o *Orchestrator) GetServer(name string) (ServerInfo, bool) {
 	return server.Info(), true
 }
 
+// ListResources returns all available resources from all servers.
+func (o *Orchestrator) ListResources() []ResourceInfo {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	var resources []ResourceInfo
+	seen := make(map[string]bool)
+	for _, server := range o.servers {
+		if !server.IsHealthy() {
+			continue
+		}
+		info := server.Info()
+		for _, r := range info.Resources {
+			if seen[r.URI] {
+				continue
+			}
+			seen[r.URI] = true
+			resources = append(resources, r)
+		}
+	}
+	return resources
+}
+
+// ReadResource reads a resource by URI from the appropriate server.
+func (o *Orchestrator) ReadResource(ctx context.Context, uri string) ([]ContentBlock, error) {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	for _, server := range o.servers {
+		if !server.IsHealthy() {
+			continue
+		}
+		info := server.Info()
+		for _, r := range info.Resources {
+			if r.URI == uri {
+				result, err := server.Call(ctx, "resources/read", map[string]any{"uri": uri})
+				if err != nil {
+					return nil, err
+				}
+				var response struct {
+					Contents []ContentBlock `json:"contents"`
+				}
+				if err := json.Unmarshal(result, &response); err != nil {
+					return nil, fmt.Errorf("parse resource: %w", err)
+				}
+				return response.Contents, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("resource %s not found", uri)
+}
+
+// ListPrompts returns all available prompts from all servers.
+func (o *Orchestrator) ListPrompts() []PromptInfo {
+	o.mu.RLock()
+	defer o.mu.RUnlock()
+
+	var prompts []PromptInfo
+	seen := make(map[string]bool)
+	for _, server := range o.servers {
+		if !server.IsHealthy() {
+			continue
+		}
+		info := server.Info()
+		for _, p := range info.Prompts {
+			key := p.Server + "/" + p.Name
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			prompts = append(prompts, p)
+		}
+	}
+	return prompts
+}
+
+// GetPrompt retrieves a prompt by name from the appropriate server.
+func (o *Orchestrator) GetPrompt(ctx context.Context, server, name string, args map[string]string) (*PromptResult, error) {
+	o.mu.RLock()
+	srv, ok := o.servers[server]
+	o.mu.RUnlock()
+
+	if !ok {
+		return nil, fmt.Errorf("server %s not found", server)
+	}
+	if !srv.IsHealthy() {
+		return nil, fmt.Errorf("server %s is unhealthy", server)
+	}
+
+	result, err := srv.Call(ctx, "prompts/get", map[string]any{
+		"name":      name,
+		"arguments": args,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var response struct {
+		Description string `json:"description"`
+		Messages    []struct {
+			Role    string         `json:"role"`
+			Content ContentBlock  `json:"content"`
+		} `json:"messages"`
+	}
+
+	if err := json.Unmarshal(result, &response); err != nil {
+		return nil, fmt.Errorf("parse prompt: %w", err)
+	}
+
+	messages := make([]PromptMessage, 0, len(response.Messages))
+	for _, m := range response.Messages {
+		messages = append(messages, PromptMessage{
+			Role:    m.Role,
+			Content: m.Content,
+		})
+	}
+
+	return &PromptResult{
+		Description: response.Description,
+		Messages:    messages,
+	}, nil
+}
+
 // HealthySummary returns a summary of server health.
 func (o *Orchestrator) HealthySummary() map[string]ServerStatus {
 	o.mu.RLock()

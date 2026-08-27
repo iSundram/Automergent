@@ -106,18 +106,21 @@ func (s *ManagedServer) Connect(ctx context.Context) error {
 	s.info.LastPing = &now
 	s.mu.Unlock()
 
-	// Discover server capabilities and tools
-	if err := s.discoverCapabilities(ctx); err != nil {
-		s.mu.Lock()
-		s.info.LastError = fmt.Sprintf("discover capabilities: %v", err)
-		s.mu.Unlock()
-	}
+	// Discover server capabilities from initialize response
+	s.discoverCapabilities(ctx)
 
+	// Discover tools
 	if err := s.discoverTools(ctx); err != nil {
 		s.mu.Lock()
 		s.info.LastError = fmt.Sprintf("discover tools: %v", err)
 		s.mu.Unlock()
 	}
+
+	// Discover resources (best-effort, not all servers support this)
+	s.discoverResources(ctx)
+
+	// Discover prompts (best-effort)
+	s.discoverPrompts(ctx)
 
 	s.emitEvent(ServerEvent{
 		Type:      EventConnected,
@@ -135,13 +138,15 @@ func (s *ManagedServer) Connect(ctx context.Context) error {
 }
 
 // discoverCapabilities queries server capabilities.
-func (s *ManagedServer) discoverCapabilities(ctx context.Context) error {
-	// Server info from initialize response is typically cached
-	// We query for any additional capabilities
+// In MCP, capabilities are returned in the initialize response, which is
+// already handled by the transport. This method queries additional info.
+func (s *ManagedServer) discoverCapabilities(ctx context.Context) {
+	// The transport already performed initialize and may cache the result.
+	// Query for server info if the server supports it.
 	result, err := s.transport.Send(ctx, "server/info", nil)
 	if err != nil {
-		// Some servers may not support this
-		return nil
+		// Not all servers support this; rely on what transport captured.
+		return
 	}
 
 	var info struct {
@@ -152,12 +157,17 @@ func (s *ManagedServer) discoverCapabilities(ctx context.Context) error {
 
 	if err := json.Unmarshal(result, &info); err == nil {
 		s.mu.Lock()
-		s.info.Version = info.Version
-		s.info.Capabilities = info.Capabilities
+		if info.Version != "" {
+			s.info.Version = info.Version
+		}
+		if s.info.Capabilities == nil {
+			s.info.Capabilities = make(map[string]bool)
+		}
+		for k, v := range info.Capabilities {
+			s.info.Capabilities[k] = v
+		}
 		s.mu.Unlock()
 	}
-
-	return nil
 }
 
 // discoverTools queries available tools from the server.
@@ -169,9 +179,10 @@ func (s *ManagedServer) discoverTools(ctx context.Context) error {
 
 	var response struct {
 		Tools []struct {
-			Name        string          `json:"name"`
-			Description string          `json:"description"`
-			InputSchema json.RawMessage `json:"inputSchema"`
+			Name        string           `json:"name"`
+			Description string           `json:"description"`
+			InputSchema json.RawMessage  `json:"inputSchema"`
+			Annotations *ToolAnnotations `json:"annotations,omitempty"`
 		} `json:"tools"`
 	}
 
@@ -193,6 +204,7 @@ func (s *ManagedServer) discoverTools(ctx context.Context) error {
 			Server:        s.config.Name,
 			QualifiedName: qualifiedName,
 			Priority:      s.config.Priority,
+			Annotations:   t.Annotations,
 		})
 	}
 
@@ -208,6 +220,76 @@ func (s *ManagedServer) discoverTools(ctx context.Context) error {
 	})
 
 	return nil
+}
+
+// discoverResources queries available resources from the server (best-effort).
+func (s *ManagedServer) discoverResources(ctx context.Context) {
+	result, err := s.transport.Send(ctx, "resources/list", nil)
+	if err != nil {
+		return // Server may not support resources
+	}
+
+	var response struct {
+		Resources []struct {
+			URI         string `json:"uri"`
+			Name        string `json:"name"`
+			Description string `json:"description,omitempty"`
+			MimeType    string `json:"mimeType,omitempty"`
+		} `json:"resources"`
+	}
+
+	if err := json.Unmarshal(result, &response); err != nil {
+		return
+	}
+
+	resources := make([]ResourceInfo, 0, len(response.Resources))
+	for _, r := range response.Resources {
+		resources = append(resources, ResourceInfo{
+			URI:         r.URI,
+			Name:        r.Name,
+			Description: r.Description,
+			MimeType:    r.MimeType,
+			Server:      s.config.Name,
+		})
+	}
+
+	s.mu.Lock()
+	s.info.Resources = resources
+	s.mu.Unlock()
+}
+
+// discoverPrompts queries available prompts from the server (best-effort).
+func (s *ManagedServer) discoverPrompts(ctx context.Context) {
+	result, err := s.transport.Send(ctx, "prompts/list", nil)
+	if err != nil {
+		return // Server may not support prompts
+	}
+
+	var response struct {
+		Prompts []struct {
+			Name        string           `json:"name"`
+			Description string           `json:"description,omitempty"`
+			Arguments   []PromptArgument `json:"arguments,omitempty"`
+		} `json:"prompts"`
+	}
+
+	if err := json.Unmarshal(result, &response); err != nil {
+		return
+	}
+
+	prompts := make([]PromptInfo, 0, len(response.Prompts))
+	for _, p := range response.Prompts {
+		prompts = append(prompts, PromptInfo{
+			Name:        p.Name,
+			Description: p.Description,
+			Arguments:   p.Arguments,
+			Server:      s.config.Name,
+		})
+	}
+
+	s.mu.Lock()
+	s.info.Prompts = prompts
+	s.mu.Unlock()
 }
 
 // startHealthMonitor starts periodic health checks.
@@ -401,6 +483,14 @@ func (s *ManagedServer) Info() ServerInfo {
 	info := *s.info
 	info.Tools = make([]ToolInfo, len(s.info.Tools))
 	copy(info.Tools, s.info.Tools)
+	if len(s.info.Resources) > 0 {
+		info.Resources = make([]ResourceInfo, len(s.info.Resources))
+		copy(info.Resources, s.info.Resources)
+	}
+	if len(s.info.Prompts) > 0 {
+		info.Prompts = make([]PromptInfo, len(s.info.Prompts))
+		copy(info.Prompts, s.info.Prompts)
+	}
 
 	return info
 }
@@ -427,9 +517,14 @@ func (s *ManagedServer) Tools() []ToolInfo {
 	return tools
 }
 
-// RefreshTools re-discovers tools from the server.
+// RefreshTools re-discovers tools, resources, and prompts from the server.
 func (s *ManagedServer) RefreshTools(ctx context.Context) error {
-	return s.discoverTools(ctx)
+	if err := s.discoverTools(ctx); err != nil {
+		return err
+	}
+	s.discoverResources(ctx)
+	s.discoverPrompts(ctx)
+	return nil
 }
 
 // UpdateConfig updates the server configuration (for hot-reload).

@@ -23,32 +23,34 @@ import (
 	"github.com/smacker/go-tree-sitter/typescript/tsx"
 	"github.com/smacker/go-tree-sitter/typescript/typescript"
 	"github.com/smacker/go-tree-sitter/yaml"
+
+	"github.com/iSundram/Automergent/internal/diagnostics/types"
 )
 
 // Language represents a detected programming language identifier.
-type Language string
+type Language = types.Language
 
 // Supported language identifiers.
 const (
-	LangGo         Language = "go"
-	LangPython     Language = "python"
-	LangJavaScript Language = "javascript"
-	LangJSX        Language = "jsx"
-	LangTypeScript Language = "typescript"
-	LangTSX        Language = "tsx"
-	LangRust       Language = "rust"
-	LangJava       Language = "java"
-	LangC          Language = "c"
-	LangCPP        Language = "cpp"
-	LangCSharp     Language = "csharp"
-	LangRuby       Language = "ruby"
-	LangPHP        Language = "php"
-	LangSwift      Language = "swift"
-	LangKotlin     Language = "kotlin"
-	LangLua        Language = "lua"
-	LangJSON       Language = "json"
-	LangYAML       Language = "yaml"
-	LangTOML       Language = "toml"
+	LangGo         = types.LangGo
+	LangPython     = types.LangPython
+	LangJavaScript = types.LangJavaScript
+	LangJSX        = types.LangJSX
+	LangTypeScript = types.LangTypeScript
+	LangTSX        = types.LangTSX
+	LangRust       = types.LangRust
+	LangJava       = types.LangJava
+	LangC          = types.LangC
+	LangCPP        = types.LangCPP
+	LangCSharp     = types.LangCSharp
+	LangRuby       = types.LangRuby
+	LangPHP        = types.LangPHP
+	LangSwift      = types.LangSwift
+	LangKotlin     = types.LangKotlin
+	LangLua        = types.LangLua
+	LangJSON       = types.LangJSON
+	LangYAML       = types.LangYAML
+	LangTOML       = types.LangTOML
 )
 
 // ParseResult holds the parsed syntax tree together with its source content.

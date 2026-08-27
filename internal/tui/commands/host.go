@@ -118,7 +118,6 @@ type Host interface {
 	// Project UI
 	ToggleFileTree()
 	ToggleDiffPane()
-	ToggleLSPPanel()
 	ToggleReviewMode()
 	IsReviewMode() bool
 	SearchWorkspace(query string) string
@@ -135,7 +134,6 @@ type Host interface {
 	// UI state queries (palette decoration)
 	ShowingFileTree() bool
 	DiffPaneVisible() bool
-	LSPPanelVisible() bool
 
 	// Environment & diagnostics
 	WorkDir() string
@@ -190,4 +188,68 @@ type Host interface {
 
 	// Context for background work
 	Context() context.Context
+
+	// MCP (Model Context Protocol)
+	MCPStatus() []MCPServerStatus
+	MCPTools(server string) []MCPToolInfo
+	MCPResources() []MCPResourceInfo
+	MCPPrompts() []MCPPromptInfo
+	MCPReconnect(name string) error
+	MCPRefresh(name string) error
+	MCPEnable(name string) error
+	MCPDisable(name string) error
+	MCPCallTool(server, name string, args map[string]any) (string, error)
+	MCPEvents() []MCPEventInfo
+	MCPDeleteToolCache(pattern string)
+	MCPAddServer(name, transport, urlOrCmd string, args []string) error
+	MCPRemoveServer(name string) error
+}
+
+// MCPServerStatus is the status info for a connected MCP server.
+type MCPServerStatus struct {
+	Name       string
+	Transport  string
+	Status     string
+	Version    string
+	Tools      int
+	Resources  int
+	Prompts    int
+	Latency    string
+	LastError  string
+	Connected  bool
+}
+
+// MCPToolInfo describes an MCP tool for the command layer.
+type MCPToolInfo struct {
+	Name        string
+	Description string
+	Server      string
+	ReadOnly    bool
+	Destructive bool
+	Schema      string
+}
+
+// MCPResourceInfo describes an MCP resource.
+type MCPResourceInfo struct {
+	URI         string
+	Name        string
+	Description string
+	MimeType    string
+	Server      string
+}
+
+// MCPPromptInfo describes an MCP prompt.
+type MCPPromptInfo struct {
+	Name        string
+	Description string
+	Server      string
+}
+
+// MCPEventInfo is a recorded MCP event for /mcp events.
+type MCPEventInfo struct {
+	Type      string
+	Server    string
+	Message   string
+	Error     string
+	Timestamp string
 }

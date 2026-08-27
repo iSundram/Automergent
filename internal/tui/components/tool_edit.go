@@ -12,16 +12,17 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/iSundram/Automergent/internal/tui/render"
 )
 
 // renderEditCard renders one file-mutation call.
 //
 //	● Edit  tool_box.go  ·  1 line replaced                              8ms
-//	  ╭──────────────────────────────────╮
-//	  │ - limit := c.tailLimit()         │
-//	  │ + limit := c.tailLimit() + 2     │
-//	  ╰──────────────────────────────────╯
-//	  +1 −1
+//	  +1 −1 ──────────────────────────────────────
+//	   34 │ limit := c.tailLimit()
+//	   35 │ limit := c.tailLimit() + 2
+//	  ↑ first 3 hidden · ctrl+e expands
 func (c *Conversation) renderEditCard(m ConversationMsg, width int) string {
 	head := c.callLine(m, width, subjectFor(m), c.editChips(m), durationChip(m.Duration))
 
@@ -31,15 +32,64 @@ func (c *Conversation) renderEditCard(m ConversationMsg, width int) string {
 	if !c.showDetail() {
 		return head
 	}
-	if diff := editDiffText(m); diff != "" {
+	diff := editDiffText(m)
+	if diff == "" {
+		// Finished results carry prose summaries or validation banners, not
+		// diff text — rebuild the preview from the arguments instead so the
+		// log shows what changed, not just that something changed.
+		diff = syntheticEditDiff(m)
+	}
+	if diff != "" {
 		return join(head, c.diffBox(diff, width))
 	}
-	// No diff to show (a fresh write, or a summary-only result): fall back to a
-	// single result row so the card still says what happened.
+	// No preview possible (summary-only result): fall back to a single result
+	// row so the card still says what happened.
 	if s := oneLine(m.ToolSummary); s != "" {
 		return join(head, c.resultRow("", s, width))
 	}
 	return head
+}
+
+// syntheticEditDiff rebuilds a displayable diff from a mutation's arguments
+// when the recorded result carries none: create/write render their content as
+// an all-additions block, edit renders its old→new replacement through the
+// shared dmp engine, multi_edit joins one labeled hunk per sub-edit.
+func syntheticEditDiff(m ConversationMsg) string {
+	args := argsOf(m)
+
+	if content, ok := args["content"].(string); ok && strings.TrimSpace(content) != "" {
+		return render.AllAdds(content)
+	}
+
+	if edits, ok := args["edits"].([]any); ok && len(edits) > 0 {
+		var parts []string
+		shown := 0
+		for i, e := range edits {
+			em, ok := e.(map[string]any)
+			if !ok {
+				continue
+			}
+			oldStr, _ := em["old_str"].(string)
+			newStr, _ := em["new_str"].(string)
+			if oldStr == "" || oldStr == newStr {
+				continue
+			}
+			shown++
+			parts = append(parts,
+				render.HunkLabel("edit %d of %d", i+1, len(edits)),
+				render.SimpleDiff(oldStr, newStr))
+		}
+		if shown > 0 {
+			return strings.Join(parts, "\n")
+		}
+	}
+
+	oldStr, _ := args["old_str"].(string)
+	newStr, _ := args["new_str"].(string)
+	if oldStr != "" && newStr != "" && oldStr != newStr {
+		return render.SimpleDiff(oldStr, newStr)
+	}
+	return ""
 }
 
 // editChips describes the shape of the change from the arguments: how many

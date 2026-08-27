@@ -44,9 +44,25 @@ type AgentInstance struct {
 	CompletedAt time.Time
 	Turns       []AgentTurn
 
-	mu      sync.Mutex
-	done    chan struct{}
-	dismiss sync.Once // used to close done channel exactly once
+	// ParentID is the agent that spawned this one, empty for a top-level
+	// subagent. This is what lets the dock render a coordinator's children
+	// indented beneath it instead of as unrelated siblings.
+	ParentID string
+
+	// Live progress, maintained through the AgentManager.Note* methods in
+	// live.go. Without these a running agent has nothing to show for itself
+	// between spawn and result.
+	CurrentTool string
+	ToolCount   int
+	RecentTools []string
+	TokensIn    int
+	TokensOut   int
+
+	mu           sync.Mutex
+	lastLine     atomicString
+	lastActivity atomicTime
+	done         chan struct{}
+	dismiss      sync.Once // used to close done channel exactly once
 }
 
 // AgentTurn represents a single turn in a multi-turn agent conversation.
@@ -239,12 +255,25 @@ func (m *AgentManager) NextID(name string) string {
 	return fmt.Sprintf("%s-%d", name, m.counter)
 }
 
-// validate agent type
+// agentTypeValidator is a pluggable function for validating agent types.
+// Set by the parent agent package during initialization to enable registry lookups.
+var agentTypeValidator func(typeName string) bool
+
+// SetAgentTypeValidator sets the function used to validate agent types
+// against the agent registry. Called by the parent agent package at init.
+func SetAgentTypeValidator(fn func(typeName string) bool) {
+	agentTypeValidator = fn
+}
+
+// validate agent type - checks both built-in types and registry
 func isValidAgentType(t AgentType) bool {
 	switch t {
 	case AgentTypeExplore, AgentTypeTask, AgentTypeGeneralPurpose, AgentTypeCodeReview:
 		return true
 	default:
+		if agentTypeValidator != nil {
+			return agentTypeValidator(string(t))
+		}
 		return false
 	}
 }
@@ -254,16 +283,24 @@ type TaskTool struct{}
 
 func (t *TaskTool) Name() string { return "task" }
 func (t *TaskTool) Description() string {
-	return `Launch specialized sub-agents for complex tasks.
+	return `Launch a specialized sub-agent for a task.
 
 Agent types:
-- explore: Fast agent for codebase exploration, finding files, answering questions (Gemini model)
-- task: Execute commands with verbose output, returns summary on success (Gemini model)
-- general-purpose: Full capabilities in separate context, for complex multi-step tasks (Gemini model)
-- code-review: Review code changes, surfaces only important issues (All tools, Gemini model)
+- general-purpose: Full capabilities for coding, implementation, debugging (default)
+- explore: Fast read-only agent for finding files, understanding code, research
+- review: Code review, bug detection, security analysis
+- contexter: Context management, compaction, memory optimization
+- coordinator: Orchestrator that spawns and manages other agents
+- task: Execute commands with verbose output
 
-Use mode="background" for long tasks, you'll be notified on completion.
-Use mode="sync" for quick tasks where you need immediate results.`
+Modes:
+- sync: Wait for result (blocking). Use when you need the output immediately.
+- background: Run async, get notified on completion. Use for parallel work.
+
+For parallel work: Call this tool multiple times with mode="background" in a single response.
+The tool orchestrator will execute them concurrently. Use batch_task for launching multiple at once.
+
+Each sub-agent works independently with its own context. Focus prompts on the specific task only.`
 }
 func (t *TaskTool) RequiresConfirmation(mode string) bool { return false }
 
@@ -273,7 +310,7 @@ func (t *TaskTool) Schema() map[string]any {
 		"properties": map[string]any{
 			"agent_type": map[string]any{
 				"type":        "string",
-				"enum":        []string{"explore", "task", "general-purpose", "code-review"},
+				"enum":        []string{"general-purpose", "explore", "review", "contexter", "coordinator", "task", "code-review"},
 				"description": "Type of agent to spawn.",
 			},
 			"prompt": map[string]any{
@@ -341,6 +378,14 @@ func (t *TaskTool) Execute(ctx context.Context, args map[string]any) (tools.Resu
 
 	GetAgentManager().Create(agent)
 
+	// Record whose child this is before anything runs, so the dock can show the
+	// nesting from the first frame rather than only once the child reports.
+	GetAgentManager().NoteSpawn(agentID, AgentIDFrom(ctx))
+
+	// Every turn this instance runs is tagged with its own ID, which is how the
+	// executor knows which instance's progress it is reporting.
+	ctx = WithAgentID(ctx, agentID)
+
 	finish := func(result string, err error, status AgentStatus) {
 		if err != nil {
 			_ = GetAgentManager().UpdateStatus(agent.ID, AgentStatusFailed, err.Error(), err)
@@ -407,7 +452,32 @@ func executeAgent(ctx context.Context, agent *AgentInstance, model string) (stri
 		// Fallback: return a placeholder (in real implementation, this would call the AI)
 		return fmt.Sprintf("[Agent %s would execute: %s]", agent.Type, agent.Prompt), nil
 	}
-	return exec.Execute(ctx, agent.Type, agent.Prompt, model)
+
+	// Apply model override from registry if available
+	resolvedModel := model
+	if resolvedModel == "" {
+		if agentTypeValidator != nil {
+			// Check if the registry has a model override for this agent type
+			resolvedModel = lookupAgentModel(string(agent.Type))
+		}
+	}
+
+	return exec.Execute(ctx, agent.Type, agent.Prompt, resolvedModel)
+}
+
+// agentModelLookup is a pluggable function for looking up agent model overrides.
+var agentModelLookup func(typeName string) string
+
+// SetAgentModelLookup sets the function used to look up agent model overrides.
+func SetAgentModelLookup(fn func(typeName string) string) {
+	agentModelLookup = fn
+}
+
+func lookupAgentModel(typeName string) string {
+	if agentModelLookup != nil {
+		return agentModelLookup(typeName)
+	}
+	return ""
 }
 
 // ReadAgentTool retrieves results from a background agent.
@@ -569,9 +639,157 @@ func joinStrings(strs []string, sep string) string {
 	return result
 }
 
+// BatchTaskTool launches multiple agents in parallel with a single call.
+type BatchTaskTool struct {
+	tools.BaseTool
+}
+
+func (t *BatchTaskTool) Name() string { return "batch_task" }
+func (t *BatchTaskTool) Description() string {
+	return `Launch multiple sub-agents in parallel. Each agent runs independently on its own task.
+All agents work simultaneously. Use read_agent to collect results after all complete.
+This is more efficient than calling task multiple times for independent work.`
+}
+func (t *BatchTaskTool) RequiresConfirmation(string) bool { return false }
+
+func (t *BatchTaskTool) Schema() map[string]any {
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"tasks": map[string]any{
+				"type": "array",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"agent_type": map[string]any{
+							"type":        "string",
+							"enum":        []string{"general-purpose", "explore", "review", "contexter", "task"},
+							"description": "Type of agent.",
+						},
+						"prompt": map[string]any{
+							"type":        "string",
+							"description": "Self-contained task prompt.",
+						},
+						"name": map[string]any{
+							"type":        "string",
+							"description": "Short name for the agent.",
+						},
+						"description": map[string]any{
+							"type":        "string",
+							"description": "Short description for UI.",
+						},
+						"model": map[string]any{
+							"type":        "string",
+							"description": "Optional model override.",
+						},
+					},
+					"required": []string{"agent_type", "prompt"},
+				},
+				"description": "List of tasks to run in parallel.",
+			},
+		},
+		"required": []string{"tasks"},
+	}
+}
+
+func (t *BatchTaskTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
+	tasksRaw, ok := args["tasks"]
+	if !ok {
+		return tools.Result{IsError: true, Content: "tasks array is required"}, nil
+	}
+
+	tasks, ok := tasksRaw.([]any)
+	if !ok || len(tasks) == 0 {
+		return tools.Result{IsError: true, Content: "tasks must be a non-empty array"}, nil
+	}
+
+	if len(tasks) > 8 {
+		return tools.Result{IsError: true, Content: "maximum 8 parallel tasks"}, nil
+	}
+
+	manager := GetAgentManager()
+	var agentIDs []string
+	var errors []string
+
+	for i, taskRaw := range tasks {
+		taskMap, ok := taskRaw.(map[string]any)
+		if !ok {
+			errors = append(errors, fmt.Sprintf("task %d: invalid format", i))
+			continue
+		}
+
+		agentTypeStr, _ := taskMap["agent_type"].(string)
+		prompt, _ := taskMap["prompt"].(string)
+		name, _ := taskMap["name"].(string)
+		description, _ := taskMap["description"].(string)
+		model, _ := taskMap["model"].(string)
+
+		if agentTypeStr == "" || prompt == "" {
+			errors = append(errors, fmt.Sprintf("task %d: agent_type and prompt required", i))
+			continue
+		}
+
+		agentType := AgentType(agentTypeStr)
+		if !isValidAgentType(agentType) {
+			errors = append(errors, fmt.Sprintf("task %d: invalid agent_type: %s", i, agentTypeStr))
+			continue
+		}
+
+		if !concurrencySlotAvailable() {
+			errors = append(errors, fmt.Sprintf("task %d: max concurrent agents reached", i))
+			continue
+		}
+
+		agentID := manager.NextID(name)
+		inst := &AgentInstance{
+			ID:        agentID,
+			Name:      name,
+			Type:      agentType,
+			Prompt:    prompt,
+			Status:    AgentStatusRunning,
+			StartedAt: time.Now(),
+			done:      make(chan struct{}),
+		}
+		manager.Create(inst)
+		agentIDs = append(agentIDs, agentID)
+
+		// Launch in background
+		go func(a *AgentInstance, m string) {
+			result, err := executeAgent(ctx, a, m)
+			if err != nil {
+				_ = manager.UpdateStatus(a.ID, AgentStatusFailed, err.Error(), err)
+			} else {
+				_ = manager.UpdateStatus(a.ID, AgentStatusCompleted, result, nil)
+			}
+			a.dismiss.Do(func() { close(a.done) })
+		}(inst, model)
+
+		_ = description // used in response
+	}
+
+	result := fmt.Sprintf("Launched %d parallel agent(s): %s", len(agentIDs), joinStrings(agentIDs, ", "))
+	if len(errors) > 0 {
+		result += "\nErrors: " + joinStrings(errors, "; ")
+	}
+
+	return tools.Result{
+		Content: result,
+		Metadata: map[string]any{
+			"agent_ids": agentIDs,
+			"count":     len(agentIDs),
+			"mode":      "parallel_background",
+		},
+	}, nil
+}
+
 // EstimatedCost returns cost estimates for the task tool.
 func (t *TaskTool) EstimatedCost() tools.ToolCost {
 	return tools.ToolCost{TokensApprox: 2000, LatencyMs: 30000, RiskLevel: "medium"}
+}
+
+// EstimatedCost returns cost estimates for the batch task tool.
+func (t *BatchTaskTool) EstimatedCost() tools.ToolCost {
+	return tools.ToolCost{TokensApprox: 10000, LatencyMs: 60000, RiskLevel: "medium"}
 }
 
 // EstimatedCost returns cost estimates for the read agent tool.

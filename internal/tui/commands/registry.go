@@ -212,16 +212,6 @@ func Default() *Registry {
 	}, handleDiff)
 
 	r.MustRegister(Command{
-		Name:        "lsp",
-		Aliases:     []string{"diagnostics"},
-		Description: "Toggle project diagnostics",
-		Category:    "Project",
-		Icon:        "󰒓",
-		Immediate:   true,
-		Current:     func(h Host) bool { return h.LSPPanelVisible() },
-	}, handleLSP)
-
-	r.MustRegister(Command{
 		Name:             "search",
 		Description:      "Search workspace content",
 		Category:         "Project",
@@ -499,6 +489,16 @@ func Default() *Registry {
 		Icon:        "󰗼",
 		Immediate:   true,
 	}, handleQuit)
+
+	// --- MCP ---
+	r.MustRegister(Command{
+		Name:             "mcp",
+		Description:      "Manage MCP servers, tools, resources, and prompts",
+		Category:         "MCP",
+		Icon:             "󰌠",
+		ArgsHint:         "[tools|resources|prompts|enable|disable|reconnect|refresh|events|cache]",
+		SupportsHeadless: true,
+	}, handleMCP)
 
 	return r
 }

@@ -3,6 +3,7 @@ package components
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"unicode"
 
 	"charm.land/bubbles/v2/textarea"
@@ -326,6 +327,9 @@ func (i *Input) redo() {
 // effort pickers). This map is the single source of truth shared by
 // TriggerType, InsertValue/TriggerValue and the app's palette enter handling;
 // keys must be registered non-Immediate command names.
+// slashSubMu guards SlashSubPalettes against concurrent reads/writes.
+var slashSubMu sync.RWMutex
+
 var SlashSubPalettes = map[string]bool{
 	"model":       true,
 	"provider":    true,
@@ -338,7 +342,18 @@ var SlashSubPalettes = map[string]bool{
 // RegisterSubPalette registers name as a slash sub-palette command so that
 // plugins and external commands can self-register without editing input.go.
 func RegisterSubPalette(name string) {
+	slashSubMu.Lock()
 	SlashSubPalettes[name] = true
+	slashSubMu.Unlock()
+}
+
+// isSubPalette reports whether name is a registered sub-palette command.
+// It is safe to call from multiple goroutines.
+func isSubPalette(name string) bool {
+	slashSubMu.RLock()
+	ok := SlashSubPalettes[name]
+	slashSubMu.RUnlock()
+	return ok
 }
 
 // slashCommandToken extracts the command token from a "/..." input using
@@ -355,22 +370,37 @@ func slashCommandToken(val string) string {
 // wordUnderCursor returns the whitespace-delimited word that the textarea
 // cursor is currently inside (or just after), using the raw textarea value and
 // cursor column position.
-func wordUnderCursor(val string, col int) string {
-	if col < 0 || col > len(val) {
-		col = len(val)
+//
+// col is a rune-count column (as returned by textarea.Column()). We convert it
+// to a byte offset before slicing so multi-byte characters (CJK, emoji) don't
+// cause a mid-rune boundary panic or wrong word extraction.
+func wordUnderCursor(val string, runeCol int) string {
+	if runeCol < 0 {
+		runeCol = 0
+	}
+	// Convert rune column → byte offset.
+	byteCol := len(val) // default: end of string
+	n := 0
+	for i, r := range val {
+		if n >= runeCol {
+			byteCol = i
+			break
+		}
+		n++
+		_ = r
 	}
 	// Work on the single logical line up to the cursor.
-	start := strings.LastIndexAny(val[:col], " \t\n")
+	start := strings.LastIndexAny(val[:byteCol], " \t\n")
 	if start < 0 {
 		start = 0
 	} else {
 		start++ // skip the delimiter itself
 	}
-	end := strings.IndexAny(val[col:], " \t\n")
+	end := strings.IndexAny(val[byteCol:], " \t\n")
 	if end < 0 {
 		end = len(val)
 	} else {
-		end += col
+		end += byteCol
 	}
 	return val[start:end]
 }
@@ -384,7 +414,7 @@ func (i Input) TriggerType() string {
 	if strings.HasPrefix(val, "/") {
 		// Only exact command tokens open a sub-palette: /provider-api-key or
 		// namespaced customs like /model:dump stay plain commands.
-		if token := slashCommandToken(val); SlashSubPalettes[token] {
+		if token := slashCommandToken(val); isSubPalette(token) {
 			return token
 		}
 		return "command"
@@ -399,12 +429,8 @@ func (i Input) TriggerType() string {
 		if strings.HasPrefix(w, "@") {
 			return "file"
 		}
-		// Fallback: last-word heuristic for backward compat.
-		parts := strings.Fields(val)
-		if len(parts) > 0 && strings.HasPrefix(parts[len(parts)-1], "@") {
-			return "file"
-		}
-		if strings.HasSuffix(val, "@") {
+		// Only trigger when the user has just typed a bare @.
+		if strings.HasSuffix(strings.TrimRight(val, " \t"), "@") {
 			return "file"
 		}
 	}
@@ -418,17 +444,18 @@ func (i Input) TriggerValue() string {
 	switch trigger {
 	case "help":
 		return ""
-	case "command", "file":
-		if trigger == "file" {
-			idx := strings.LastIndex(val, "@")
-			if idx != -1 {
-				return val[idx+1:]
-			}
-			return ""
+	case "command":
+		// Return only the command token (e.g. "/context-fil" → "context-fil")
+		// so filtering works correctly even when extra text follows.
+		return slashCommandToken(val)
+	case "file":
+		idx := strings.LastIndex(val, "@")
+		if idx != -1 {
+			return val[idx+1:]
 		}
-		return strings.TrimPrefix(val, "/")
+		return ""
 	default:
-		if SlashSubPalettes[trigger] {
+		if isSubPalette(trigger) {
 			return strings.TrimSpace(strings.TrimPrefix(val, "/"+trigger))
 		}
 		return ""
@@ -452,7 +479,7 @@ func (i *Input) InsertValue(v string) {
 			i.ta.SetValue(val + "@" + v + " ")
 		}
 	default:
-		if SlashSubPalettes[trigger] {
+		if isSubPalette(trigger) {
 			i.ta.SetValue("/" + trigger + " " + v + " ")
 		}
 	}

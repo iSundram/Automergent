@@ -173,6 +173,30 @@ func handleDoctor(host Host, args []string) Result {
 	}
 	add(projectMemoryFile, memDetail, false, false)
 
+	// MCP servers health.
+	mcpStatuses := host.MCPStatus()
+	if len(mcpStatuses) > 0 {
+		for _, s := range mcpStatuses {
+			detail := s.Transport
+			if s.Version != "" {
+				detail += " v" + s.Version
+			}
+			detail += fmt.Sprintf(" tools=%d", s.Tools)
+			if !s.Connected {
+				detail += " OFFLINE"
+				if s.LastError != "" {
+					detail += " (" + s.LastError + ")"
+				}
+				add("MCP: "+s.Name, detail, true, false)
+			} else {
+				detail += " " + s.Latency
+				add("MCP: "+s.Name, detail, false, false)
+			}
+		}
+	} else {
+		add("MCP", "no servers configured", false, false)
+	}
+
 	var b strings.Builder
 	failures, warnings := 0, 0
 	b.WriteString("Automergent doctor:\n")

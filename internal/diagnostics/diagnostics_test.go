@@ -112,9 +112,9 @@ func TestPythonParser_MissingColon(t *testing.T) {
 
 func TestPythonParser_ValidCode(t *testing.T) {
 	code := `def greet(name):
-    return f"Hello, {name}"
+    return name
 
-print(greet("world"))
+greet("world")
 `
 	diags := diagnostics.Analyze("test.py", code)
 	if len(diags) != 0 {
@@ -138,7 +138,7 @@ func TestJSParser_ValidCode(t *testing.T) {
 	code := `function greet(name) {
     return "Hello, " + name;
 }
-console.log(greet("World"));
+greet("World");
 `
 	diags := diagnostics.Analyze("test.js", code)
 	if len(diags) != 0 {

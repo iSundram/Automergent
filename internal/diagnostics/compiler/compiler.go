@@ -12,21 +12,21 @@ import (
 )
 
 // Language represents a programming language.
-type Language string
+type Language = types.Language
 
 // Supported languages for compiler output parsing.
 const (
-	LangGo         Language = "go"
-	LangTypeScript Language = "typescript"
-	LangJavaScript Language = "javascript"
-	LangPython     Language = "python"
-	LangRust       Language = "rust"
-	LangJava       Language = "java"
-	LangCPP        Language = "cpp"
-	LangC          Language = "c"
-	LangCSharp     Language = "csharp"
-	LangRuby       Language = "ruby"
-	LangPHP        Language = "php"
+	LangGo         = types.LangGo
+	LangTypeScript = types.LangTypeScript
+	LangJavaScript = types.LangJavaScript
+	LangPython     = types.LangPython
+	LangRust       = types.LangRust
+	LangJava       = types.LangJava
+	LangCPP        = types.LangCPP
+	LangC          = types.LangC
+	LangCSharp     = types.LangCSharp
+	LangRuby       = types.LangRuby
+	LangPHP        = types.LangPHP
 	LangGeneric    Language = "generic"
 )
 
@@ -53,12 +53,15 @@ const (
 type CompilerDiagnostic struct {
 	types.Diagnostic
 	Category     ErrorCategory `json:"category"`
-	Compiler     string        `json:"compiler"`      // e.g., "go", "tsc", "rustc"
-	ErrorCode    string        `json:"error_code"`    // e.g., "E0382" for Rust
-	RelatedFiles []string      `json:"related_files"` // Files related to this error
-	Context      []string      `json:"context"`       // Additional context lines
-	Suggestions  []string      `json:"suggestions"`   // Compiler-provided suggestions
-	URL          string        `json:"url,omitempty"` // Documentation URL
+	Compiler     string        `json:"compiler"`       // e.g., "go", "tsc", "rustc"
+	ErrorCode    string        `json:"error_code"`     // e.g., "E0382" for Rust
+	RelatedFiles []string      `json:"related_files"`  // Files related to this error
+	Context      []string      `json:"context"`        // Additional context lines
+	Suggestions  []string      `json:"suggestions"`    // Compiler-provided suggestions
+	URL          string        `json:"url,omitempty"`  // Documentation URL
+	EndLine      int           `json:"end_line,omitempty"`      // End line for range
+	EndColumn    int           `json:"end_column,omitempty"`    // End column for range
+	Tags         []string      `json:"tags,omitempty"`          // Additional tags
 }
 
 // Parser interface for language-specific parsers.
@@ -176,6 +179,10 @@ func (p *GoParser) Parse(output string) []CompilerDiagnostic {
 			diag.Message = matches[4]
 			diag.Severity = "error"
 			diag.Category = categorizeGoError(matches[4])
+			diag.Tags = []string{"go", "compile"}
+			diag.Suggestions = []string{"Fix the reported error and rebuild", "Run 'go vet' for additional checks"}
+			diag.EndLine = diag.Line
+			diag.EndColumn = diag.Column + 1
 			diags = append(diags, diag)
 		} else if matches := vetPattern.FindStringSubmatch(line); matches != nil {
 			diag.FilePath = matches[1]
@@ -183,6 +190,10 @@ func (p *GoParser) Parse(output string) []CompilerDiagnostic {
 			diag.Message = matches[3]
 			diag.Severity = "warning"
 			diag.Category = CategoryStyle
+			diag.Tags = []string{"go", "vet", "style"}
+			diag.Suggestions = []string{"Address the vet warning", "Run 'go vet ./...' for full analysis"}
+			diag.EndLine = diag.Line
+			diag.EndColumn = diag.Column + 1
 			diags = append(diags, diag)
 		}
 
@@ -190,16 +201,22 @@ func (p *GoParser) Parse(output string) []CompilerDiagnostic {
 		if importPattern.MatchString(line) {
 			if len(diags) > 0 {
 				diags[len(diags)-1].Category = CategoryImport
+				diags[len(diags)-1].Tags = append(diags[len(diags)-1].Tags, "import")
+				diags[len(diags)-1].Suggestions = []string{"Run 'go mod tidy' to download missing dependencies", "Check import path spelling", "Verify module is available in registry"}
 			}
 		}
 		if undefinedPattern.MatchString(line) {
 			if len(diags) > 0 {
 				diags[len(diags)-1].Category = CategoryType
+				diags[len(diags)-1].Tags = append(diags[len(diags)-1].Tags, "undefined")
+				diags[len(diags)-1].Suggestions = []string{"Check variable/function name spelling", "Ensure identifier is declared in scope", "Check for missing imports"}
 			}
 		}
 		if typePattern.MatchString(line) {
 			if len(diags) > 0 {
 				diags[len(diags)-1].Category = CategoryType
+				diags[len(diags)-1].Tags = append(diags[len(diags)-1].Tags, "type-mismatch")
+				diags[len(diags)-1].Suggestions = []string{"Fix type conversion", "Check function signature matches", "Verify generic type parameters"}
 			}
 		}
 	}
@@ -262,6 +279,10 @@ func (p *TypeScriptParser) Parse(output string) []CompilerDiagnostic {
 			diag.Message = matches[6]
 			diag.Category = categorizeTSError(matches[5], matches[6])
 			diag.URL = "https://www.typescriptlang.org/docs/handbook/2/errors.html#" + strings.ToLower(matches[5])
+			diag.Tags = []string{"typescript", "compile"}
+			diag.Suggestions = []string{"Fix the TypeScript error", "Run 'tsc --noEmit' for full check"}
+			diag.EndLine = diag.Line
+			diag.EndColumn = diag.Column + 1
 			diags = append(diags, diag)
 		} else if matches := tscAltPattern.FindStringSubmatch(line); matches != nil {
 			diag.FilePath = matches[1]
@@ -271,6 +292,10 @@ func (p *TypeScriptParser) Parse(output string) []CompilerDiagnostic {
 			diag.ErrorCode = matches[5]
 			diag.Message = matches[6]
 			diag.Category = categorizeTSError(matches[5], matches[6])
+			diag.Tags = []string{"typescript", "compile"}
+			diag.Suggestions = []string{"Fix the TypeScript error", "Run 'tsc --noEmit' for full check"}
+			diag.EndLine = diag.Line
+			diag.EndColumn = diag.Column + 1
 			diags = append(diags, diag)
 		} else if matches := eslintPattern.FindStringSubmatch(line); matches != nil {
 			diag.FilePath = matches[1]
@@ -281,6 +306,10 @@ func (p *TypeScriptParser) Parse(output string) []CompilerDiagnostic {
 			diag.Compiler = "eslint"
 			diag.Source = "eslint"
 			diag.Category = CategoryStyle
+			diag.Tags = []string{"typescript", "lint", "style"}
+			diag.Suggestions = []string{"Run 'eslint --fix' to auto-fix", "Check eslint rule configuration"}
+			diag.EndLine = diag.Line
+			diag.EndColumn = diag.Column + 1
 			diags = append(diags, diag)
 		}
 	}
@@ -355,6 +384,10 @@ func (p *PythonParser) Parse(output string) []CompilerDiagnostic {
 			diag.Compiler = "mypy"
 			diag.Source = "mypy"
 			diag.Category = categorizePythonError(matches[4])
+			diag.Tags = []string{"python", "type-check"}
+			diag.Suggestions = []string{"Run 'mypy --strict' for full analysis", "Add type annotations to fix errors"}
+			diag.EndLine = diag.Line
+			diag.EndColumn = 1
 			diags = append(diags, diag)
 		} else if matches := pylintPattern.FindStringSubmatch(line); matches != nil {
 			diag.FilePath = matches[1]
@@ -366,6 +399,10 @@ func (p *PythonParser) Parse(output string) []CompilerDiagnostic {
 			diag.Source = "pylint"
 			diag.Severity = categorizePylintCode(matches[4])
 			diag.Category = CategoryStyle
+			diag.Tags = []string{"python", "lint", "style"}
+			diag.Suggestions = []string{"Run 'pylint --fix' for auto-fixes", "Check pylint configuration"}
+			diag.EndLine = diag.Line
+			diag.EndColumn = diag.Column + 1
 			diags = append(diags, diag)
 		} else if matches := flake8Pattern.FindStringSubmatch(line); matches != nil {
 			diag.FilePath = matches[1]
@@ -377,6 +414,10 @@ func (p *PythonParser) Parse(output string) []CompilerDiagnostic {
 			diag.Source = "flake8"
 			diag.Severity = "warning"
 			diag.Category = CategoryStyle
+			diag.Tags = []string{"python", "lint", "style"}
+			diag.Suggestions = []string{"Run 'flake8 --select' to filter", "Configure flake8 rules"}
+			diag.EndLine = diag.Line
+			diag.EndColumn = diag.Column + 1
 			diags = append(diags, diag)
 		} else if matches := filePattern.FindStringSubmatch(line); matches != nil {
 			currentFile = matches[1]
@@ -387,6 +428,10 @@ func (p *PythonParser) Parse(output string) []CompilerDiagnostic {
 			diag.Message = "SyntaxError: " + matches[1]
 			diag.Severity = "error"
 			diag.Category = CategorySyntax
+			diag.Tags = []string{"python", "syntax"}
+			diag.Suggestions = []string{"Check for missing colons, brackets, or indentation", "Run 'python -m py_compile' to validate"}
+			diag.EndLine = diag.Line
+			diag.EndColumn = 1
 			diags = append(diags, diag)
 		}
 	}
@@ -466,10 +511,14 @@ func (p *RustParser) Parse(output string) []CompilerDiagnostic {
 			}
 			currentDiag.Message = matches[3]
 			currentDiag.Category = categorizeRustError(currentDiag.ErrorCode, currentDiag.Message)
+			currentDiag.Tags = []string{"rust", "compile"}
+			currentDiag.Suggestions = []string{"Run 'cargo check' for full analysis", "Check Rust compiler error documentation"}
 		} else if matches := locationPattern.FindStringSubmatch(line); matches != nil && currentDiag != nil {
 			currentDiag.FilePath = matches[1]
 			currentDiag.Line, _ = strconv.Atoi(matches[2])
 			currentDiag.Column, _ = strconv.Atoi(matches[3])
+			currentDiag.EndLine = currentDiag.Line
+			currentDiag.EndColumn = currentDiag.Column + 1
 		} else if matches := helpPattern.FindStringSubmatch(line); matches != nil && currentDiag != nil {
 			currentDiag.Suggestions = append(currentDiag.Suggestions, matches[1])
 		} else if matches := notePattern.FindStringSubmatch(line); matches != nil && currentDiag != nil {
@@ -545,6 +594,10 @@ func (p *JavaParser) Parse(output string) []CompilerDiagnostic {
 			diag.Severity = matches[3]
 			diag.Message = matches[4]
 			diag.Category = categorizeJavaError(matches[4])
+			diag.Tags = []string{"java", "compile"}
+			diag.Suggestions = []string{"Fix the Java compiler error", "Run 'mvn compile' or 'gradle build' for full check"}
+			diag.EndLine = diag.Line
+			diag.EndColumn = 1
 			diags = append(diags, diag)
 		} else if matches := mavenPattern.FindStringSubmatch(line); matches != nil {
 			diag.FilePath = matches[2]
@@ -553,6 +606,10 @@ func (p *JavaParser) Parse(output string) []CompilerDiagnostic {
 			diag.Severity = strings.ToLower(matches[1])
 			diag.Message = matches[5]
 			diag.Category = categorizeJavaError(matches[5])
+			diag.Tags = []string{"java", "compile", "maven"}
+			diag.Suggestions = []string{"Fix the Java compiler error", "Run 'mvn compile' or 'gradle build' for full check"}
+			diag.EndLine = diag.Line
+			diag.EndColumn = diag.Column + 1
 			diags = append(diags, diag)
 		}
 	}
@@ -621,6 +678,8 @@ func (p *GenericParser) Parse(output string) []CompilerDiagnostic {
 			diag.Compiler = "generic"
 			diag.Source = "compiler"
 			diag.Category = CategoryUnknown
+			diag.Tags = []string{"generic"}
+			diag.Suggestions = []string{"Review the error message and fix the issue"}
 
 			// Parse matches based on pattern
 			switch len(matches) {
@@ -634,6 +693,8 @@ func (p *GenericParser) Parse(output string) []CompilerDiagnostic {
 					diag.Severity = "error"
 				}
 				diag.Message = matches[5]
+				diag.EndLine = diag.Line
+				diag.EndColumn = diag.Column + 1
 			case 5: // file:line: severity: message
 				diag.FilePath = matches[1]
 				diag.Line, _ = strconv.Atoi(matches[2])
@@ -643,6 +704,8 @@ func (p *GenericParser) Parse(output string) []CompilerDiagnostic {
 					diag.Severity = "error"
 				}
 				diag.Message = matches[4]
+				diag.EndLine = diag.Line
+				diag.EndColumn = 1
 			}
 
 			diag.Category = categorizeGenericError(diag.Message)

@@ -63,11 +63,11 @@ func (a *App) modelsAvailable() []ai.Model {
 			continue
 		}
 		m := ai.Model{
-			ID:          id,
-			Name:        mc.DisplayName,
+			ID:           id,
+			Name:         mc.DisplayName,
 			ContextLimit: mc.ContextLimit,
-			InputPrice:  mc.InputPrice,
-			OutputPrice: mc.OutputPrice,
+			InputPrice:   mc.InputPrice,
+			OutputPrice:  mc.OutputPrice,
 		}
 		if m.Name == "" {
 			m.Name = id

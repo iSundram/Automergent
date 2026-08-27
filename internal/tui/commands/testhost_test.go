@@ -57,7 +57,6 @@ type mockHost struct {
 
 	toggleFileTreeCalls   int
 	toggleDiffPaneCalls   int
-	toggleLSPPanelCalls   int
 	toggleReviewModeCalls int
 	searchWorkspaceCalls  []string
 
@@ -74,7 +73,6 @@ type mockHost struct {
 	reviewMode      bool
 	showingFileTree bool
 	diffPaneVisible bool
-	lspPanelVisible bool
 
 	// Environment & diagnostics state
 	workDir           string
@@ -358,12 +356,6 @@ func (m *mockHost) ToggleDiffPane() {
 	m.toggleDiffPaneCalls++
 }
 
-func (m *mockHost) ToggleLSPPanel() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.toggleLSPPanelCalls++
-}
-
 func (m *mockHost) ToggleReviewMode() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -418,12 +410,6 @@ func (m *mockHost) DiffPaneVisible() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.diffPaneVisible
-}
-
-func (m *mockHost) LSPPanelVisible() bool {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.lspPanelVisible
 }
 
 func (m *mockHost) WorkDir() string {

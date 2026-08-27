@@ -289,7 +289,7 @@ func (t *ControlTool) interrupt(id string) tools.Result {
 
 // runSubagentTurn appends a follow-up turn to an existing instance.
 func runSubagentTurn(ctx context.Context, inst *AgentInstance, prompt, model, mode string) tools.Result {
-	ctx, cancel := context.WithCancel(ctx)
+	ctx, cancel := context.WithCancel(WithAgentID(ctx, inst.ID))
 	cancelRegistry.Store(inst.ID, cancel)
 	defer cancelRegistry.Delete(inst.ID)
 
@@ -309,7 +309,13 @@ func runSubagentTurn(ctx context.Context, inst *AgentInstance, prompt, model, mo
 
 // dispatchSubagent launches a new instance honoring sync/background semantics.
 func dispatchSubagent(ctx context.Context, inst *AgentInstance, model, mode string) (tools.Result, error) {
-	ctx, cancel := context.WithCancel(ctx)
+	// A subagent spawned from inside another subagent's tool loop is that
+	// agent's child: recording it here is what lets the dock indent a
+	// coordinator's fan-out under the coordinator instead of listing every
+	// agent in the run as an unrelated sibling.
+	GetAgentManager().NoteSpawn(inst.ID, AgentIDFrom(ctx))
+
+	ctx, cancel := context.WithCancel(WithAgentID(ctx, inst.ID))
 	cancelRegistry.Store(inst.ID, cancel)
 
 	finish := func(result string, err error) {
@@ -367,8 +373,13 @@ func executeAgentWithRolePreamble(ctx context.Context, t AgentType, prompt, mode
 	if preamble != "" {
 		prompt = preamble + "\n\n## Task\n" + prompt
 	}
-	if def, ok := LookupCustomAgent(string(t)); ok && model == "" && def.Model != "" {
-		model = def.Model
+	// Priority: explicit model > custom agent model > registry model > empty
+	if model == "" {
+		if def, ok := LookupCustomAgent(string(t)); ok && def.Model != "" {
+			model = def.Model
+		} else if model == "" {
+			model = lookupAgentModel(string(t))
+		}
 	}
 	if exec == nil {
 		return fmt.Sprintf("[Agent %s would execute: %s]", t, prompt), nil
@@ -399,12 +410,25 @@ func firstNonEmpty(vals ...string) string {
 
 // AgentSnapshot is a safe point-in-time view of an instance for UIs.
 type AgentSnapshot struct {
-	ID      string
-	Name    string
-	Type    string
-	Status  string
-	Turns   int
-	Elapsed string
+	ID        string
+	Name      string
+	Type      string
+	Status    string
+	Turns     int
+	Elapsed   string
+	StartedAt time.Time
+
+	// ParentID is empty for a top-level agent; the dock indents children.
+	ParentID string
+	// CurrentTool is what the agent is doing right now, "" between tools.
+	CurrentTool string
+	// ToolCount is how many tools it has run so far.
+	ToolCount int
+	// LastLine is the newest line of its own output.
+	LastLine string
+	// Idle is how long since it last did anything observable. Zero when it has
+	// not started working yet or has finished.
+	Idle time.Duration
 }
 
 // LastOutput returns the most recent turn output, falling back to Result.
@@ -419,14 +443,22 @@ func (a *AgentInstance) LastOutput() string {
 
 // Snapshot returns a locked copy of the instance state.
 func (a *AgentInstance) Snapshot() AgentSnapshot {
+	lastLine := a.LastLine()
+	lastActivity := a.LastActivity()
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := AgentSnapshot{
-		ID:     a.ID,
-		Name:   a.Name,
-		Type:   string(a.Type),
-		Status: string(a.Status),
-		Turns:  len(a.Turns),
+		ID:          a.ID,
+		Name:        a.Name,
+		Type:        string(a.Type),
+		Status:      string(a.Status),
+		Turns:       len(a.Turns),
+		StartedAt:   a.StartedAt,
+		ParentID:    a.ParentID,
+		CurrentTool: a.CurrentTool,
+		ToolCount:   a.ToolCount,
+		LastLine:    lastLine,
 	}
 	if !a.StartedAt.IsZero() {
 		end := a.CompletedAt
@@ -434,6 +466,9 @@ func (a *AgentInstance) Snapshot() AgentSnapshot {
 			end = time.Now()
 		}
 		out.Elapsed = end.Sub(a.StartedAt).Round(time.Second).String()
+	}
+	if a.Status == AgentStatusRunning && !lastActivity.IsZero() {
+		out.Idle = time.Since(lastActivity)
 	}
 	return out
 }
@@ -476,5 +511,6 @@ func ControlAction(action, agentID, prompt, mode string) string {
 func RegisterControlTool(reg *tools.Registry) {
 	if reg != nil {
 		reg.Register(&ControlTool{})
+		reg.Register(&BatchTaskTool{})
 	}
 }

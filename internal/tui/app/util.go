@@ -5,114 +5,39 @@ package app
 
 import (
 	"fmt"
-	"github.com/sergi/go-diff/diffmatchpatch"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/iSundram/Automergent/internal/tui/render"
 )
 
 func computeSimpleDiff(filename, old, new string) string {
-	dmp := diffmatchpatch.New()
+	// The engine lives in render so the conversation's inline edit cards
+	// synthesize their previews from the exact same code — one diff language
+	// everywhere. This wrapper only adds the fullscreen viewer's chrome.
+	body := render.SimpleDiff(old, new)
+	if body == "" {
+		return ""
+	}
 
-	// Use line-mode diff for better performance on large files
-	a, b, lineArray := dmp.DiffLinesToChars(old, new)
-	diffs := dmp.DiffMain(a, b, false)
-	diffs = dmp.DiffCharsToLines(diffs, lineArray)
-	diffs = dmp.DiffCleanupSemantic(diffs)
+	oldLines := strings.Count(old, "\n")
+	if !strings.HasSuffix(old, "\n") && old != "" {
+		oldLines++
+	}
+	newLines := strings.Count(new, "\n")
+	if !strings.HasSuffix(new, "\n") && new != "" {
+		newLines++
+	}
 
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("--- %s (current)\n", filename))
 	sb.WriteString(fmt.Sprintf("+++ %s (proposed)\n", filename))
-
-	// Count lines for hunk header
-	oldLineCount := 0
-	newLineCount := 0
-	for _, d := range diffs {
-		lines := strings.Split(strings.TrimSuffix(d.Text, "\n"), "\n")
-		switch d.Type {
-		case diffmatchpatch.DiffEqual:
-			oldLineCount += len(lines)
-			newLineCount += len(lines)
-		case diffmatchpatch.DiffDelete:
-			oldLineCount += len(lines)
-		case diffmatchpatch.DiffInsert:
-			newLineCount += len(lines)
-		}
-	}
-
-	sb.WriteString(fmt.Sprintf("@@ -1,%d +1,%d @@\n", oldLineCount, newLineCount))
-
-	// Generate unified diff output with word-level highlighting hints
-	for i, d := range diffs {
-		text := strings.TrimSuffix(d.Text, "\n")
-		lines := strings.Split(text, "\n")
-
-		switch d.Type {
-		case diffmatchpatch.DiffEqual:
-			for _, line := range lines {
-				sb.WriteString(" " + line + "\n")
-			}
-		case diffmatchpatch.DiffDelete:
-			// Check if next diff is an insert (replacement scenario)
-			if i+1 < len(diffs) && diffs[i+1].Type == diffmatchpatch.DiffInsert {
-				// Word-level diff for replacements
-				insertText := strings.TrimSuffix(diffs[i+1].Text, "\n")
-				insertLines := strings.Split(insertText, "\n")
-
-				// If same number of lines, do inline word diff
-				if len(lines) == len(insertLines) {
-					for j, oldLine := range lines {
-						newLine := insertLines[j]
-						wordDiff := computeWordDiff(dmp, oldLine, newLine)
-						sb.WriteString(wordDiff)
-					}
-					// Mark that we handled the insert
-					diffs[i+1] = diffmatchpatch.Diff{Type: diffmatchpatch.DiffEqual, Text: ""}
-					continue
-				}
-			}
-			for _, line := range lines {
-				sb.WriteString("-" + line + "\n")
-			}
-		case diffmatchpatch.DiffInsert:
-			if d.Text == "" {
-				continue // Already handled in word-diff
-			}
-			for _, line := range lines {
-				sb.WriteString("+" + line + "\n")
-			}
-		}
-	}
+	sb.WriteString(fmt.Sprintf("@@ -1,%d +1,%d @@\n", oldLines, newLines))
+	sb.WriteString(body)
+	sb.WriteString("\n")
 	return sb.String()
-}
-
-// computeWordDiff generates a word-level diff for a single line replacement
-func computeWordDiff(dmp *diffmatchpatch.DiffMatchPatch, oldLine, newLine string) string {
-	wordDiffs := dmp.DiffMain(oldLine, newLine, false)
-	wordDiffs = dmp.DiffCleanupSemantic(wordDiffs)
-
-	var oldSb, newSb strings.Builder
-	hasChanges := false
-
-	for _, wd := range wordDiffs {
-		switch wd.Type {
-		case diffmatchpatch.DiffEqual:
-			oldSb.WriteString(wd.Text)
-			newSb.WriteString(wd.Text)
-		case diffmatchpatch.DiffDelete:
-			oldSb.WriteString("«" + wd.Text + "»")
-			hasChanges = true
-		case diffmatchpatch.DiffInsert:
-			newSb.WriteString("‹" + wd.Text + "›")
-			hasChanges = true
-		}
-	}
-
-	if hasChanges {
-		return "-" + oldSb.String() + "\n+" + newSb.String() + "\n"
-	}
-	return " " + oldLine + "\n"
 }
 
 func formatErrorMessage(errStr string) string {

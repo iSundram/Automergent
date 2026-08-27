@@ -118,6 +118,7 @@ func (a *App) handleRetryEvent(info ai.RetryInfo) {
 	a.retryCode = firstNonEmpty(info.Status, info.Code)
 	a.retryDetail = detail
 	a.retryDelay = info.Delay
+	a.retryDelayAt = time.Now()
 
 	label := fmt.Sprintf("retrying (%d/%d)", info.Attempt, info.MaxAttempts)
 	a.statusBar.SetStatus(label)
@@ -133,6 +134,7 @@ func (a *App) clearRetryState() {
 	a.retryCode = ""
 	a.retryDetail = ""
 	a.retryDelay = 0
+	a.retryDelayAt = time.Time{}
 }
 
 // retryDetailFor derives a short human-readable qualifier from a retry report,

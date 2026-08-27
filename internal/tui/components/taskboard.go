@@ -13,12 +13,13 @@ import (
 
 // AgentRow is one roster entry for the board's agents section.
 type AgentRow struct {
-	ID      string
-	Name    string
-	Type    string
-	Status  string
-	Turns   int
-	Elapsed string
+	ID        string
+	Name      string
+	Type      string
+	Status    string
+	Turns     int
+	Elapsed   string
+	StartedAt time.Time
 }
 
 // TaskBoard is the right-side blackboard pane: live todo plan on top,
@@ -150,12 +151,16 @@ func (b *TaskBoard) View() string {
 			case "failed", "cancelled", "killed":
 				statusColor = b.styles.T.Red
 			}
+			elapsed := a.Elapsed
+			if a.Status == "running" && !a.StartedAt.IsZero() {
+				elapsed = time.Since(a.StartedAt).Round(time.Second).String()
+			}
 			line := fmt.Sprintf("%s%s [%s] %s %s",
 				cursor,
 				truncate(firstNonEmptyStr(a.Name, a.ID), inner/2),
 				a.Status,
 				a.Type,
-				statusStyleText(statusColor, a.Elapsed),
+				statusStyleText(statusColor, elapsed),
 			)
 			sb.WriteString(style.Render(line) + "\n")
 		}

@@ -61,6 +61,9 @@ type Agent struct {
 	// New prompt system for staged prompt delivery
 	promptSystem     *promptpkg.PromptSystem
 	promptSystemOnce sync.Once
+
+	// childCancels tracks cancellation functions for spawned child agents.
+	childCancels map[string]context.CancelFunc
 }
 
 // Execute implements the AgentExecutor interface for sub-agents.
@@ -87,10 +90,19 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 	childCtx, childCancel := context.WithCancel(ctx)
 	defer childCancel()
 
-	// Drain events to avoid blocking child agent. The drainer will exit when the child agent
-	// events channel is closed via childAgent.Close().
+	// The child's events used to be drained into nothing, which is why a running
+	// subagent had no observable state: everything it did was read off the
+	// channel and dropped. The drainer still exists to keep the child from
+	// blocking, but on the way past it records which tool the child is in and
+	// what it last said, so the dock has something true to show. The drainer
+	// exits when the child's channel closes via childAgent.Close().
+	trackedID := subagent.AgentIDFrom(ctx)
 	go func() {
-		for range childAgent.Events() {
+		for ev := range childAgent.Events() {
+			if trackedID == "" {
+				continue
+			}
+			reportSubagentProgress(trackedID, ev)
 		}
 	}()
 
@@ -103,6 +115,11 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 			if lastMsg.Role == ai.RoleAssistant {
 				finalResponse = lastMsg.TextContent()
 			}
+		}
+		if trackedID != "" {
+			subagent.GetAgentManager().NoteTokens(trackedID,
+				childSess.TotalInputTokens, childSess.TotalOutputTokens)
+			subagent.GetAgentManager().NoteTool(trackedID, "")
 		}
 		// Ensure we close the child's event channel so drainers exit.
 		_ = childAgent.Close()
@@ -121,6 +138,32 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 		case <-time.After(5 * time.Second):
 			// Give up waiting to avoid blocking indefinitely; return the context error
 			return "", ctx.Err()
+		}
+	}
+}
+
+// reportSubagentProgress translates one child event into the live fields the
+// dock reads. Only the four event kinds that say something about observable
+// progress are handled; the rest are the child's business.
+func reportSubagentProgress(agentID string, ev Event) {
+	mgr := subagent.GetAgentManager()
+	switch ev.Type {
+	case EventToolCall:
+		switch p := ev.Payload.(type) {
+		case ToolCallEvent:
+			mgr.NoteTool(agentID, p.Name)
+		case ai.ToolCall:
+			mgr.NoteTool(agentID, p.Name)
+		}
+	case EventToolDone:
+		mgr.NoteTool(agentID, "")
+	case EventToken:
+		if tok, ok := ev.Payload.(string); ok {
+			mgr.NoteOutput(agentID, tok)
+		}
+	case EventStatus:
+		if s, ok := ev.Payload.(string); ok {
+			mgr.NoteOutput(agentID, s)
 		}
 	}
 }

@@ -18,12 +18,6 @@ func handleDiff(host Host, args []string) Result {
 	return Done(nil)
 }
 
-func handleLSP(host Host, args []string) Result {
-	host.ToggleLSPPanel()
-	host.SetStatus("LSP panel toggled")
-	return Done(nil)
-}
-
 func handleSearch(host Host, args []string) Result {
 	query := strings.TrimSpace(strings.Join(args, " "))
 	if query == "" {

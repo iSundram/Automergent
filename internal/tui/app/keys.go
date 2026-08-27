@@ -8,6 +8,7 @@ package app
 // does what the hint says.
 
 import (
+	"fmt"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -92,10 +93,6 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		return tea.Quit
 	case "ctrl+d":
 		return a.dispatchByName("diff")
-	case "ctrl+l":
-		a.lspPanel.Toggle()
-		a.layout()
-		return nil
 	case "ctrl+s":
 		// Same flow as /sessions: list, show browser, swallow the opening key.
 		a.showSessions()
@@ -122,6 +119,23 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		return nil
 	case "ctrl+t":
 		return a.dispatchByName("tree")
+	case "ctrl+w":
+		// IDE-style modified-files view: open it when hidden, otherwise the
+		// fullscreen diff routes this key to cycle to the next tab.
+		if !a.diffPane.Visible() {
+			if n := a.diffPane.TabCount(); n == 0 {
+				a.statusBar.SetStatus("No modified files yet")
+				return nil
+			} else {
+				a.diffPane.Show()
+				a.layout()
+				a.statusBar.SetStatus(fmt.Sprintf("%d modified file(s)", n))
+				return nil
+			}
+		}
+		diff, cmd := a.diffPane.Update(m)
+		a.diffPane = diff
+		return cmd
 	case "end":
 		// Jump to the newest output. Only claimed when the view is actually
 		// behind — otherwise the key falls through to the textarea, where `end`

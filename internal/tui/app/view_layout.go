@@ -100,15 +100,7 @@ func (a *App) layout() {
 		a.fileTree.SetSize(treeW, mainH)
 		mainW = a.width - treeW - 1
 	}
-
-	if a.lspPanel.Visible() {
-		convW := mainW * 70 / 100
-		lspW := mainW - convW - 1
-		a.conversation.SetSize(convW, mainH)
-		a.lspPanel.SetSize(lspW, mainH)
-	} else {
-		a.conversation.SetSize(mainW, mainH)
-	}
+	a.conversation.SetSize(mainW, mainH)
 	a.sessionBrowser.SetSize(a.width, a.height*3/4)
 }
 
@@ -183,8 +175,8 @@ func (a *App) View() tea.View {
 
 	var mainRow string
 	convView := a.conversation.View()
-	// Only wrap in ActivePane border if we have multiple panes (FileTree or LSP)
-	hasOtherPanes := a.showFileTree || a.lspPanel.Visible() || a.taskBoard.Visible()
+	// Only wrap in ActivePane border if we have multiple panes (FileTree or TaskBoard)
+	hasOtherPanes := a.showFileTree || a.taskBoard.Visible()
 	if a.focus == "conversation" && hasOtherPanes {
 		convView = a.styles.ActivePane.Width(lipgloss.Width(convView)).Render(convView)
 	}
@@ -192,9 +184,6 @@ func (a *App) View() tea.View {
 		mainRow = lipgloss.JoinHorizontal(lipgloss.Top, a.fileTree.View(), " ", convView)
 	} else {
 		mainRow = convView
-	}
-	if a.lspPanel.Visible() {
-		mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", a.lspPanel.View())
 	}
 	if a.taskBoard.Visible() {
 		mainRow = lipgloss.JoinHorizontal(lipgloss.Top, mainRow, " ", a.taskBoard.View())

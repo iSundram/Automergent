@@ -26,6 +26,8 @@ import (
 	"github.com/iSundram/Automergent/internal/debug"
 	automergentErrors "github.com/iSundram/Automergent/internal/errors"
 	"github.com/iSundram/Automergent/internal/git"
+	"github.com/iSundram/Automergent/internal/mcp"
+	"github.com/iSundram/Automergent/internal/agent/mcpbridge"
 	planningPkg "github.com/iSundram/Automergent/internal/planning"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
@@ -368,6 +370,29 @@ func run(cmd *cobra.Command, args []string) error {
 	reg.Register(planningPkg.NewTool("."))
 	reg.Register(planningPkg.NewReplanTool("."))
 
+	// MCP tools
+	var mcpOrch *mcp.Orchestrator
+	var mcpBr *mcpbridge.Bridge
+	if len(cfg.MCP.Servers) > 0 {
+		mcpCfg := mcp.FromAppConfig(cfg.MCP)
+		mcpOrch = mcp.NewOrchestrator(mcpCfg)
+		mcpBr = mcpbridge.New(mcpOrch)
+		// Start orchestrator in background (non-blocking)
+		go func() {
+			if err := mcpOrch.Start(context.Background()); err != nil {
+				if cfg.Verbose || cfg.Debug.Enabled {
+					fmt.Fprintf(os.Stderr, "[MCP] orchestrator start: %v\n", err)
+				}
+			}
+			// Register MCP tools into the registry
+			mcpBr.Sync(reg)
+		}()
+		// Watch config for hot-reload (best-effort)
+		if cfg.ConfigFile != "" {
+			go mcpOrch.WatchConfig(cfg.ConfigFile)
+		}
+	}
+
 	// Interaction tools
 	// NotifyTool will be registered after agent creation so it can emit events to the UI.
 
@@ -379,6 +404,17 @@ func run(cmd *cobra.Command, args []string) error {
 
 	// Build agent
 	ag := agent.New(cfg, provider, sess, reg)
+
+	// Wire MCP bridge to agent for event emission
+	if mcpBr != nil {
+		mcpBr.SetAgent(ag)
+		// Re-sync tools now that agent exists (for events)
+		go func() {
+			time.Sleep(2 * time.Second) // Give orchestrator time to connect
+			mcpBr.SyncWithEvents(reg)
+		}()
+	}
+
 	// Graph-backed context operations are registered after the agent exists so
 	// they share the same persistent task/bucket store as orchestration.
 	contextTools := ag.RegisterContextTools()
@@ -501,7 +537,7 @@ func run(cmd *cobra.Command, args []string) error {
 	}
 
 	showPicker := flags.Resume && flags.Session == ""
-	return tui.Run(cfg, ag, sess, storage, pm, prompt, showPicker, projectApprovalPath)
+	return tui.Run(cfg, ag, sess, storage, pm, prompt, showPicker, projectApprovalPath, mcpOrch)
 }
 
 func applyProjectDefaults(cfg *config.Config, cmd *cobra.Command) {

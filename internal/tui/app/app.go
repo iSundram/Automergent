@@ -11,6 +11,7 @@ import (
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
+	"github.com/iSundram/Automergent/internal/mcp"
 	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tui/commands"
 	"github.com/iSundram/Automergent/internal/tui/components"
@@ -26,8 +27,12 @@ import (
 type agentEventMsg struct{ ev agent.Event }
 type modelsFetchedMsg []ai.Model
 type clearCtrlCStatusMsg struct{}
+type clearEscArmMsg struct{}  // Expires the armed double-ESC clear window.
 type hideDiffPaneMsg struct{} // Message to safely hide diff pane from main loop
 type streamTickMsg struct{}   // Coalesced streaming render tick (~80ms)
+type liveTickMsg struct{}     // 1-second tick for live time displays (elapsed, etc.)
+type mcpEventMsg struct{ ev mcp.ServerEvent }
+type mcpConfigChangeMsg struct{ ev mcp.ConfigChangeEvent }
 type sessionsLoadedMsg struct {
 	sessions []*session.Session
 }
@@ -41,8 +46,18 @@ type App struct {
 	questionnaire     *components.Questionnaire
 	taskBoard         *components.TaskBoard
 	dock              *components.BottomDock
-	zenMode           bool
-	sendToProgram     func(tea.Msg)
+	// inspector is the full-screen viewer for one background task. It replaces
+	// the old habit of formatting a snapshot into the diff pane, which borrowed
+	// the wrong chrome and could never update.
+	inspector *components.Inspector
+	// inspectorFilterMode routes printable keys into the inspector's filter
+	// pattern instead of its command grammar.
+	inspectorFilterMode bool
+	// queueStrip shows what is waiting to be sent. The queue itself lives in
+	// msgQueue; this is the only thing that ever made it visible.
+	queueStrip    *components.QueueStrip
+	zenMode       bool
+	sendToProgram func(tea.Msg)
 	pendingAsk        *pendingAsk
 	ag                *agent.Agent
 	sess              *session.Session
@@ -62,7 +77,6 @@ type App struct {
 	sessionBrowser    components.SessionBrowser
 	selector          components.SelectorOverlay
 	selectorAction    func(index int)
-	lspPanel          components.LSPPanel
 	stats             components.Stats
 	helpOverlay       components.HelpOverlay
 	fileTree          components.FileTree
@@ -119,6 +133,10 @@ type App struct {
 	// msgQueue holds messages typed while a run is in flight.
 	msgQueue []queuedMessage
 
+	// MCP orchestrator for external tool servers.
+	mcpOrch    *mcp.Orchestrator
+	mcpEvents  []MCPEventEntry
+
 	// activeTool is the tool currently executing, "" when none is.
 	activeTool string
 	// runToolCount counts tools completed in the current (or last) run, so an
@@ -133,12 +151,13 @@ type App struct {
 	// API error history and live retry state backing /error and the footer's
 	// retry indicator.
 	apiErrors    []apiErrorRecord
-	retrying     bool
-	retryAttempt int
-	retryMax     int
-	retryCode    string
-	retryDetail  string
-	retryDelay   time.Duration
+	retrying       bool
+	retryAttempt   int
+	retryMax       int
+	retryCode      string
+	retryDetail    string
+	retryDelay     time.Duration
+	retryDelayAt   time.Time // when retryDelay was set, for live countdown
 
 	// pendingDiffHide is set when confirmation completes and diff should be hidden
 	pendingDiffHide bool
@@ -153,7 +172,7 @@ type App struct {
 	tokRate           int       // smoothed tokens/sec shown while thinking
 }
 
-func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, persist *session.PersistenceManager, initialPrompt string, showSessionPicker bool) *App {
+func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, persist *session.PersistenceManager, initialPrompt string, showSessionPicker bool, mcpOrch *mcp.Orchestrator) *App {
 	theme := themes.Get(cfg.Theme)
 	styles := themes.NewStyles(theme)
 	render.SetTheme(theme)
@@ -169,6 +188,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		keys:               kb,
 		styles:             styles,
 		theme:              theme,
+		mcpOrch:            mcpOrch,
 		conversation:       components.NewConversation(styles),
 		diffPane:           components.NewDiff(styles),
 		input:              components.NewInput(styles),
@@ -184,7 +204,6 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		confirm:            components.NewConfirm(styles),
 		sessionBrowser:     components.NewSessionBrowser(styles),
 		selector:           components.NewSelectorOverlay(styles),
-		lspPanel:           components.NewLSPPanel(styles),
 		stats:              components.NewStats(styles),
 		helpOverlay:        components.NewHelpOverlay(styles),
 		fileTree:           components.NewFileTree(styles),
@@ -216,6 +235,24 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		}
 		app.conversation.AddMessage("system", msg, false)
 	}
+	// Wire MCP orchestrator event handlers for TUI notifications
+	if app.mcpOrch != nil {
+		app.mcpOrch.SetEventHandlers(
+			// Server event handler: emit agent events for toasts
+			func(ev mcp.ServerEvent) {
+				if app.sendToProgram != nil {
+					app.sendToProgram(mcpEventMsg{ev: ev})
+				}
+			},
+			// Config change handler: log config reloads
+			func(ev mcp.ConfigChangeEvent) {
+				if app.sendToProgram != nil {
+					app.sendToProgram(mcpConfigChangeMsg{ev: ev})
+				}
+			},
+		)
+	}
+
 	app.helpOverlay.SetSlashCommands(app.commands.HelpRows())
 	app.header.SetModel(cfg.Model)
 	app.header.SetProvider(cfg.Provider)
@@ -253,6 +290,8 @@ func (a *App) Init() tea.Cmd {
 		a.fileTree.Load("."),
 		// Detect the terminal's background color so the theme can adapt.
 		func() tea.Msg { return tea.RequestBackgroundColor() },
+		// Live tick for elapsed time displays (dock, taskboard, etc.)
+		scheduleLiveTick(),
 	}
 
 	if a.showSessionPicker && a.storage != nil {
@@ -276,7 +315,6 @@ func (a *App) Init() tea.Cmd {
 		cmds = append(cmds, a.startAgent(a.initialPrompt))
 	}
 
-
 	return tea.Batch(cmds...)
 }
 
@@ -291,6 +329,14 @@ const streamTickInterval = 33 * time.Millisecond
 func scheduleStreamTick() tea.Cmd {
 	return tea.Tick(streamTickInterval, func(time.Time) tea.Msg {
 		return streamTickMsg{}
+	})
+}
+
+const liveTickInterval = time.Second
+
+func scheduleLiveTick() tea.Cmd {
+	return tea.Tick(liveTickInterval, func(time.Time) tea.Msg {
+		return liveTickMsg{}
 	})
 }
 
@@ -426,6 +472,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.streamTickPending = true
 			cmds = append(cmds, scheduleStreamTick())
 		}
+	case liveTickMsg:
+		// Re-render only when there are live time displays (background tasks).
+		if a.dock != nil && a.dock.HasContent() {
+			a.refreshDock()
+			a.layout()
+		}
+		if a.taskBoard.Visible() {
+			a.refreshTaskBoard()
+			a.layout()
+		}
+		// Keep retry countdown and elapsed info line ticking live.
+		if a.retrying || a.thinking {
+			a.refreshChrome()
+		}
+		cmds = append(cmds, scheduleLiveTick())
 	case components.FileTreeLoadedMsg:
 		a.fileTree.SetItems(m.Items)
 	case components.SessionSelectedMsg:
@@ -493,12 +554,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.statusBar.SetStatus("Ready")
 		}
 		a.refreshChrome()
+	case clearEscArmMsg:
+		// Same expiry discipline for the double-ESC clear: once the window
+		// lapses the "press esc again" hint must stop advertising an action
+		// that would no longer happen.
+		if a.escArmed {
+			a.disarmEscape()
+			a.refreshChrome()
+		}
 	case hideDiffPaneMsg:
 		// Safely hide diff pane from main event loop (not from goroutine)
 		if a.diffPane.Visible() {
 			a.diffPane.Toggle()
 			a.layout()
 		}
+	case mcpEventMsg:
+		a.handleMCPEvent(m.ev)
+	case mcpConfigChangeMsg:
+		a.handleMCPConfigChange(m.ev)
 	case tea.BackgroundColorMsg:
 		a.handleBackgroundColor(m.Color)
 	}

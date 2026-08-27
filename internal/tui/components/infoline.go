@@ -57,11 +57,19 @@ func (i InfoLine) View() string {
 		return ""
 	}
 
-	const prefix = "└─ "
+	prefix := "└─ "
 	// 2 for the leading indent that aligns under the spinner glyph.
 	avail := i.width - len(prefix) - 2
 	if avail < 8 {
-		return ""
+		// Too narrow for the glyph plus a readable sentence: drop the prefix
+		// rather than the whole instruction. An empty line would hide the
+		// state's keyboard affordances exactly when space is tightest; only
+		// give up when not even a few characters fit.
+		prefix = ""
+		avail = i.width - 2
+		if avail < 4 {
+			return ""
+		}
 	}
 	if ansi.StringWidth(text) > avail {
 		text = ansi.Truncate(text, avail, "…")

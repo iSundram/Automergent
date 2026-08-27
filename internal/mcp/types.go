@@ -60,9 +60,26 @@ type ServerInfo struct {
 	Version      string          `json:"version,omitempty"`
 	Capabilities map[string]bool `json:"capabilities,omitempty"`
 	Tools        []ToolInfo      `json:"tools"`
+	Resources    []ResourceInfo  `json:"resources,omitempty"`
+	Prompts      []PromptInfo    `json:"prompts,omitempty"`
 	Latency      time.Duration   `json:"latency"`
 	RequestCount int64           `json:"request_count"`
 	ErrorCount   int64           `json:"error_count"`
+}
+
+const (
+	ProtocolVersion20241105 = "2024-11-05"
+	ProtocolVersion20250326 = "2025-03-26"
+	ProtocolVersion20250618 = "2025-06-18"
+)
+
+// ToolAnnotations describes server-provided hints about a tool's behavior.
+type ToolAnnotations struct {
+	Title            string `json:"title,omitempty"`
+	ReadOnlyHint     bool   `json:"readOnlyHint,omitempty"`
+	DestructiveHint  bool   `json:"destructiveHint,omitempty"`
+	IdempotentHint   bool   `json:"idempotentHint,omitempty"`
+	OpenWorldHint    bool   `json:"openWorldHint,omitempty"`
 }
 
 // ToolInfo describes a tool provided by an MCP server.
@@ -73,6 +90,7 @@ type ToolInfo struct {
 	Server        string          `json:"server"`        // Source server name
 	QualifiedName string          `json:"qualifiedName"` // namespace/name
 	Priority      int             `json:"priority"`
+	Annotations   *ToolAnnotations `json:"annotations,omitempty"`
 }
 
 // ResourceInfo describes a resource provided by an MCP server.
@@ -97,6 +115,18 @@ type PromptArgument struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	Required    bool   `json:"required,omitempty"`
+}
+
+// PromptResult is the result of getting a prompt from a server.
+type PromptResult struct {
+	Description string          `json:"description,omitempty"`
+	Messages    []PromptMessage `json:"messages"`
+}
+
+// PromptMessage is a single message in a prompt result.
+type PromptMessage struct {
+	Role    string        `json:"role"`
+	Content ContentBlock `json:"content"`
 }
 
 // ToolCall represents a request to execute a tool.

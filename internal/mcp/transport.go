@@ -15,13 +15,17 @@ import (
 	"time"
 )
 
-// httpTransport implements Transport over HTTP.
+// httpTransport implements Transport over HTTP (Streamable HTTP).
 type httpTransport struct {
 	client    *http.Client
 	baseURL   string
 	authToken string
 	connected atomic.Bool
 	mu        sync.Mutex
+
+	// Cached capabilities from initialize
+	capabilities map[string]any
+	serverInfo   map[string]any
 }
 
 // NewHTTPTransport creates a new HTTP transport.
@@ -39,24 +43,57 @@ func (t *httpTransport) Connect(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// Test connection with initialize
-	_, err := t.Send(ctx, "ping", nil)
+	// Initialize handshake
+	initResult, err := t.Send(ctx, "initialize", map[string]any{
+		"protocolVersion": ProtocolVersion20241105,
+		"capabilities":    map[string]any{},
+		"clientInfo": map[string]any{
+			"name":    "automergent",
+			"version": "1.0.0",
+		},
+	})
 	if err != nil {
-		// Ping may not be supported, try initialize
-		_, err = t.Send(ctx, "initialize", map[string]any{
-			"protocolVersion": "2024-11-05",
-			"capabilities":    map[string]any{},
-			"clientInfo": map[string]any{
-				"name":    "automergent",
-				"version": "1.0.0",
-			},
-		})
-		if err != nil {
-			return fmt.Errorf("http transport connect: %w", err)
+		return fmt.Errorf("http transport connect: %w", err)
+	}
+
+	// Parse initialize response to capture server capabilities
+	if initResult != nil {
+		var parsed struct {
+			ProtocolVersion string         `json:"protocolVersion"`
+			Capabilities    map[string]any `json:"capabilities"`
+			ServerInfo      map[string]any `json:"serverInfo"`
+		}
+		if err := json.Unmarshal(initResult, &parsed); err == nil {
+			t.capabilities = parsed.Capabilities
+			t.serverInfo = parsed.ServerInfo
 		}
 	}
+
+	// Send initialized notification
+	t.sendNotification("notifications/initialized", nil)
+
 	t.connected.Store(true)
 	return nil
+}
+
+func (t *httpTransport) sendNotification(method string, params any) {
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  method,
+	}
+	if params != nil {
+		msg["params"] = params
+	}
+	body, _ := json.Marshal(msg)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, t.baseURL, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	if t.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+t.authToken)
+	}
+	resp, err := t.client.Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
 }
 
 func (t *httpTransport) Close() error {
@@ -142,6 +179,11 @@ type stdioTransport struct {
 	responses map[int64]chan json.RawMessage
 	respMu    sync.Mutex
 	done      chan struct{}
+
+	// Notification handler for server→client notifications
+	onNotification func(method string, params json.RawMessage)
+	// Request handler for server→client requests (returns result or error)
+	onRequest func(method string, params json.RawMessage) (json.RawMessage, error)
 }
 
 // NewStdioTransport creates a new stdio transport.
@@ -153,6 +195,16 @@ func NewStdioTransport(command string, args []string, env map[string]string) Tra
 		responses: make(map[int64]chan json.RawMessage),
 		done:      make(chan struct{}),
 	}
+}
+
+// SetNotificationHandler sets the handler for server→client notifications.
+func (t *stdioTransport) SetNotificationHandler(handler func(method string, params json.RawMessage)) {
+	t.onNotification = handler
+}
+
+// SetRequestHandler sets the handler for server→client requests.
+func (t *stdioTransport) SetRequestHandler(handler func(method string, params json.RawMessage) (json.RawMessage, error)) {
+	t.onRequest = handler
 }
 
 func (t *stdioTransport) Connect(ctx context.Context) error {
@@ -254,7 +306,9 @@ func (t *stdioTransport) readResponses() {
 		}
 
 		var msg struct {
-			ID     int64           `json:"id"`
+			ID     *int64          `json:"id"`
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
 			Result json.RawMessage `json:"result"`
 			Error  *struct {
 				Code    int    `json:"code"`
@@ -266,22 +320,79 @@ func (t *stdioTransport) readResponses() {
 			continue // Skip malformed messages
 		}
 
-		t.respMu.Lock()
-		if ch, ok := t.responses[msg.ID]; ok {
-			// Prefer non-blocking send to avoid goroutine stalls if caller timed out and removed the channel
-			select {
-			case ch <- func() json.RawMessage {
-				if msg.Error != nil {
-					return nil
-				}
-				return msg.Result
-			}():
-			default:
+		// Server→client notification (no id, has method)
+		if msg.ID == nil && msg.Method != "" {
+			if t.onNotification != nil {
+				go t.onNotification(msg.Method, msg.Params)
 			}
-			delete(t.responses, msg.ID)
+			continue
 		}
-		t.respMu.Unlock()
+
+		// Server→client request (has id, has method, no result yet)
+		if msg.ID != nil && msg.Method != "" {
+			go t.handleServerRequest(*msg.ID, msg.Method, msg.Params)
+			continue
+		}
+
+		// Response to our request (has id, has result or error)
+		if msg.ID != nil {
+			t.respMu.Lock()
+			if ch, ok := t.responses[*msg.ID]; ok {
+				select {
+				case ch <- func() json.RawMessage {
+					if msg.Error != nil {
+						return nil
+					}
+					return msg.Result
+				}():
+				default:
+				}
+				delete(t.responses, *msg.ID)
+			}
+			t.respMu.Unlock()
+		}
 	}
+}
+
+func (t *stdioTransport) handleServerRequest(id int64, method string, params json.RawMessage) {
+	var result json.RawMessage
+	var rpcErr *struct {
+		Code    int    `json:"code"`
+		Message string `json:"message"`
+	}
+
+	if t.onRequest != nil {
+		res, err := t.onRequest(method, params)
+		if err != nil {
+			rpcErr = &struct {
+				Code    int    `json:"code"`
+				Message string `json:"message"`
+			}{Code: -32601, Message: err.Error()}
+		} else {
+			result = res
+		}
+	} else {
+		// Default: MethodNotFound
+		rpcErr = &struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		}{Code: -32601, Message: "Method not found"}
+	}
+
+	resp := map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+	}
+	if rpcErr != nil {
+		resp["error"] = rpcErr
+	} else {
+		resp["result"] = result
+	}
+
+	data, _ := json.Marshal(resp)
+	t.mu.Lock()
+	t.stdin.Write(append(data, '\n'))
+	t.mu.Unlock()
 }
 
 func (t *stdioTransport) Close() error {
@@ -358,11 +469,12 @@ func (t *stdioTransport) IsConnected() bool {
 
 // sseTransport implements Transport using Server-Sent Events.
 type sseTransport struct {
-	baseURL   string
-	authToken string
-	client    *http.Client
-	connected atomic.Bool
-	mu        sync.Mutex
+	baseURL      string
+	authToken    string
+	client       *http.Client
+	connected    atomic.Bool
+	mu           sync.Mutex
+	capabilities map[string]any
 }
 
 // NewSSETransport creates a new SSE transport.
@@ -376,14 +488,34 @@ func NewSSETransport(baseURL, authToken string, timeout time.Duration) Transport
 	}
 }
 
+func (t *sseTransport) sendNotification(method string, params any) {
+	msg := map[string]any{
+		"jsonrpc": "2.0",
+		"method":  method,
+	}
+	if params != nil {
+		msg["params"] = params
+	}
+	body, _ := json.Marshal(msg)
+	req, _ := http.NewRequestWithContext(context.Background(), http.MethodPost, t.baseURL, bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	if t.authToken != "" {
+		req.Header.Set("Authorization", "Bearer "+t.authToken)
+	}
+	resp, err := t.client.Do(req)
+	if err == nil {
+		resp.Body.Close()
+	}
+}
+
 func (t *sseTransport) Connect(ctx context.Context) error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// SSE typically uses HTTP POST for requests and SSE for responses
-	// For simplicity, we use HTTP transport semantics with SSE endpoint
-	_, err := t.Send(ctx, "initialize", map[string]any{
-		"protocolVersion": "2024-11-05",
+	// Initialize handshake
+	initResult, err := t.Send(ctx, "initialize", map[string]any{
+		"protocolVersion": ProtocolVersion20241105,
 		"capabilities":    map[string]any{},
 		"clientInfo": map[string]any{
 			"name":    "automergent",
@@ -393,6 +525,20 @@ func (t *sseTransport) Connect(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("sse connect: %w", err)
 	}
+
+	// Parse capabilities from response
+	if initResult != nil {
+		var parsed struct {
+			ProtocolVersion string         `json:"protocolVersion"`
+			Capabilities    map[string]any `json:"capabilities"`
+		}
+		if err := json.Unmarshal(initResult, &parsed); err == nil {
+			t.capabilities = parsed.Capabilities
+		}
+	}
+
+	// Send initialized notification
+	t.sendNotification("notifications/initialized", nil)
 
 	t.connected.Store(true)
 	return nil

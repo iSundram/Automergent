@@ -131,6 +131,16 @@ func ClassifyDiagnostic(diag types.Diagnostic) Classification {
 		Confidence: 0.35,
 	}
 
+	// Use tags for more precise classification
+	hasTag := func(tag string) bool {
+		for _, t := range diag.Tags {
+			if strings.EqualFold(t, tag) {
+				return true
+			}
+		}
+		return false
+	}
+
 	switch {
 	case strings.Contains(code, "missing-package"):
 		class.Cause = CauseSyntax
@@ -142,7 +152,7 @@ func ClassifyDiagnostic(diag types.Diagnostic) Classification {
 		class.UserMessage = "Likely root cause: missing package declaration."
 		class.Confidence = 0.95
 	case strings.Contains(code, "json-syntax-error"), strings.Contains(code, "syntax-error"),
-		strings.Contains(code, "missing-token"), strings.Contains(source, "tree-sitter-"), strings.Contains(msg, "syntax"):
+		strings.Contains(code, "missing-token"), strings.Contains(source, "tree-sitter-"), strings.Contains(msg, "syntax"), hasTag("syntax"):
 		class.Cause = CauseSyntax
 		class.RootCauseHint = "The parser found malformed source near the reported location."
 		class.FixSuggestions = []string{
@@ -160,7 +170,7 @@ func ClassifyDiagnostic(diag types.Diagnostic) Classification {
 		}
 		class.UserMessage = "Likely root cause: async/await misuse."
 		class.Confidence = 0.92
-	case strings.Contains(msg, "cannot find package") || strings.Contains(msg, "module not found") || strings.Contains(msg, "no module named") || strings.Contains(msg, "could not find crate"):
+	case strings.Contains(msg, "cannot find package") || strings.Contains(msg, "module not found") || strings.Contains(msg, "no module named") || strings.Contains(msg, "could not find crate") || hasTag("import"):
 		class.Cause = CauseImport
 		class.RootCauseHint = "The dependency or import path cannot be resolved."
 		class.FixSuggestions = []string{
@@ -202,6 +212,11 @@ func ClassifyDiagnostic(diag types.Diagnostic) Classification {
 		class.Retry.InitialDelay = 300 * time.Millisecond
 		class.Retry.MaxDelay = 2 * time.Second
 		class.Retry.Jitter = 0.25
+	}
+
+	// Prefer diagnostic's own suggestions if available
+	if len(diag.Suggestions) > 0 {
+		class.FixSuggestions = append(diag.Suggestions, class.FixSuggestions...)
 	}
 
 	if len(class.FixSuggestions) == 0 {

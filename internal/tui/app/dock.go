@@ -1,11 +1,19 @@
 package app
 
-// Bottom dock: background shells + subagents tray under the input.
-// ↓ from the input moves focus here; ↑ returns. Enter inspects the entry
-// (shell output tail / agent transcript) in an overlay pane.
+// Dock data feed: turning the two background managers into dock rows.
+//
+// The dock renders; this file decides what it renders. Three things changed here
+// beyond the styling. The dead init() hook that registered an empty shell
+// callback is gone — real notification wiring lives in notifications.go, where
+// there is a program to send to. Sampling no longer copies whole output buffers
+// under the session lock once a second; it reads the cached tail the pump
+// maintains. And an agent's children are nested under it rather than listed as
+// unrelated siblings, which is the whole difference between a coordinator that
+// looks like six random agents and one that looks like a plan.
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +23,7 @@ import (
 	toolsshell "github.com/iSundram/Automergent/internal/tools/shell"
 
 	"github.com/iSundram/Automergent/internal/tui/components"
+	"github.com/iSundram/Automergent/internal/tui/render"
 )
 
 // refreshDock pulls live background shells and agents into the dock.
@@ -22,57 +31,178 @@ func (a *App) refreshDock() {
 	if a.dock == nil {
 		return
 	}
-	var entries []components.DockEntry
-
-	for _, rec := range toolsshell.GetManager().ListRecords(true) {
-		label := rec.Command
-		if i := strings.IndexAny(label, "\n"); i >= 0 {
-			label = label[:i]
-		}
-		detail := time.Since(rec.StartedAt).Round(time.Second).String()
-		if rec.Status != "running" && !rec.CompletedAt.IsZero() {
-			detail = fmt.Sprintf("exit %d", rec.ExitCode)
-		}
-		entries = append(entries, components.DockEntry{
-			Kind:    components.DockShell,
-			ID:      rec.ID,
-			Label:   label,
-			Status:  string(rec.Status),
-			Detail:  detail,
-			Created: rec.StartedAt,
-		})
-	}
-
-	for _, inst := range toolsagent.GetAgentManager().List(true) {
-		snap := inst.Snapshot()
-		entries = append(entries, components.DockEntry{
-			Kind:    components.DockAgent,
-			ID:      snap.ID,
-			Label:   firstNonEmptyDock(snap.Name, snap.ID),
-			Status:  snap.Status,
-			Detail:  fmt.Sprintf("%s · %s", snap.Type, snap.Elapsed),
-			Created: inst.StartedAt,
-		})
-	}
-
+	entries := make([]components.DockEntry, 0, 8)
+	entries = append(entries, a.shellEntries()...)
+	entries = append(entries, a.agentEntries()...)
 	a.dock.SetEntries(entries)
 }
+
+// shellEntries snapshots every background shell, running or finished.
+func (a *App) shellEntries() []components.DockEntry {
+	records := toolsshell.GetManager().ListRecords(true)
+	out := make([]components.DockEntry, 0, len(records))
+	for _, rec := range records {
+		status := render.CanonicalStatus(string(rec.Status))
+
+		// Activity is the newest thing the process said. For a finished command
+		// there is nothing live left to report, so the cell carries the outcome
+		// instead — an exit code is more useful than a stale log line.
+		activity := ""
+		hasStderr := false
+		if session, ok := toolsshell.GetManager().Get(rec.ID); ok {
+			activity = session.LastLine()
+			hasStderr = session.SawStderr()
+		}
+		if status.Terminal() {
+			if rec.ExitCode == 0 && status == render.StatusDone {
+				activity = "exit 0"
+			} else if status == render.StatusStopped {
+				activity = "stopped"
+			} else {
+				activity = fmt.Sprintf("exit %d", rec.ExitCode)
+			}
+		}
+
+		out = append(out, components.DockEntry{
+			Kind:      components.DockShell,
+			ID:        rec.ID,
+			Label:     render.FirstLine(rec.Command),
+			Status:    status,
+			Activity:  activity,
+			HasStderr: hasStderr,
+			Started:   rec.StartedAt,
+			Finished:  rec.CompletedAt,
+		})
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Started.Before(out[j].Started) })
+	return out
+}
+
+// agentEntries snapshots every subagent, nesting children under their parent.
+//
+// The manager stores a flat map, so the ordering has to be rebuilt here: roots
+// in spawn order, each root followed immediately by its own children. Depth is
+// capped because a coordinator that spawns a coordinator is legal, and a dock
+// row indented eight times is not readable.
+func (a *App) agentEntries() []components.DockEntry {
+	instances := toolsagent.GetAgentManager().List(true)
+	snaps := make([]toolsagent.AgentSnapshot, 0, len(instances))
+	byParent := map[string][]int{}
+	known := map[string]bool{}
+
+	for _, inst := range instances {
+		snaps = append(snaps, inst.Snapshot())
+	}
+	sort.SliceStable(snaps, func(i, j int) bool { return snaps[i].StartedAt.Before(snaps[j].StartedAt) })
+	for _, s := range snaps {
+		known[s.ID] = true
+	}
+	for i, s := range snaps {
+		// A parent that is no longer in the list (cleaned up, or never tracked)
+		// would orphan its children off the display entirely, so they are
+		// promoted to roots rather than dropped.
+		parent := s.ParentID
+		if parent != "" && !known[parent] {
+			parent = ""
+		}
+		byParent[parent] = append(byParent[parent], i)
+	}
+
+	const maxDepth = 3
+	out := make([]components.DockEntry, 0, len(snaps))
+	var walk func(parent string, depth int)
+	walk = func(parent string, depth int) {
+		kids := byParent[parent]
+		for n, idx := range kids {
+			s := snaps[idx]
+			out = append(out, a.agentEntry(s, depth, n == len(kids)-1, len(byParent[s.ID])))
+			if depth < maxDepth {
+				walk(s.ID, depth+1)
+			}
+		}
+	}
+	walk("", 0)
+	return out
+}
+
+// agentEntry builds one agent row.
+func (a *App) agentEntry(s toolsagent.AgentSnapshot, depth int, last bool, children int) components.DockEntry {
+	status := render.CanonicalStatus(s.Status)
+
+	// The activity cell answers "what is it doing right now", in descending
+	// order of usefulness: the tool it is in, the number of children it is
+	// waiting on, the last thing it said, or its outcome.
+	activity := s.CurrentTool
+	switch {
+	case status.Terminal():
+		activity = status.Label()
+	case activity != "":
+		// The tool name is the best possible answer; keep it.
+	case children > 0:
+		activity = fmt.Sprintf("%d children", children)
+	case s.LastLine != "":
+		activity = render.FirstLine(s.LastLine)
+	}
+
+	// An agent that is running but has said nothing for a while is the state
+	// that most often means stuck, and a bare "running" hides it.
+	if status == render.StatusRunning && s.Idle > idleAgentThreshold {
+		activity = fmt.Sprintf("quiet %s", render.Elapsed(int(s.Idle.Seconds())))
+	}
+
+	return components.DockEntry{
+		Kind:      components.DockAgent,
+		ID:        s.ID,
+		Label:     firstNonEmptyDock(s.Name, s.ID),
+		AgentKind: render.CanonicalKind(s.Type),
+		Status:    status,
+		Activity:  activity,
+		Depth:     depth,
+		Last:      last,
+		Children:  children,
+		ToolCount: s.ToolCount,
+		Started:   s.StartedAt,
+	}
+}
+
+// idleAgentThreshold is how long a running agent may say nothing before the dock
+// says so. Thirty seconds is long enough that a slow model response does not
+// trip it and short enough that a wedged agent is noticed.
+const idleAgentThreshold = 30 * time.Second
 
 func firstNonEmptyDock(vals ...string) string {
 	for _, v := range vals {
 		if strings.TrimSpace(v) != "" {
-			return v
+			return strings.TrimSpace(v)
 		}
 	}
 	return ""
 }
 
+// runningBackgroundCount reports how many background tasks are in flight, which
+// is what the one-row rail summarises.
+func (a *App) backgroundCounts() (running, failed, total int) {
+	if a.dock == nil {
+		return 0, 0, 0
+	}
+	for _, e := range a.dock.Entries() {
+		total++
+		switch e.Status {
+		case render.StatusRunning, render.StatusIdle, render.StatusQueued:
+			running++
+		case render.StatusFailed:
+			failed++
+		}
+	}
+	return running, failed, total
+}
+
 // dockFocusActive reports whether the dock owns the keyboard.
 func (a *App) dockFocusActive() bool { return a.dock != nil && a.dock.Focused() }
 
-// focusDock moves keyboard ownership from the input into the dock.
+// focusDock moves keyboard ownership from the input into the dock tray.
 func (a *App) focusDock() bool {
-	if a.dock == nil || !a.dock.HasContent() || a.inputFocused() == false {
+	if a.dock == nil || !a.inputFocused() {
 		return false
 	}
 	a.refreshDock()
@@ -82,86 +212,139 @@ func (a *App) focusDock() bool {
 	a.input.SetPromptVisible(false)
 	a.input.Blur()
 	a.dock.SetFocused(true)
-	a.statusBar.SetStatus("Background tasks — ↑/esc back, enter inspect")
+	a.layout()
 	return true
 }
 
 // unfocusDock returns keyboard ownership to the input.
 func (a *App) unfocusDock() {
+	if a.dock == nil {
+		return
+	}
 	a.dock.SetFocused(false)
 	a.input.SetPromptVisible(true)
 	a.statusBar.SetStatus("Ready")
+	a.layout()
 }
 
-// handleDockKeys consumes keys while the dock is focused.
-// Reports whether the key was handled.
-func (a *App) handleDockKeys(m tea.KeyMsg) bool {
-	switch m.String() {
-	case "up", "esc":
-		a.unfocusDock()
-		return true
-	case "down", "j":
-		a.dock.MoveCursor(1)
-		return true
-	case "k":
-		a.dock.MoveCursor(-1)
-		return true
-	case "enter":
-		if entry, ok := a.dock.Selected(); ok {
-			a.inspectDockEntry(entry)
-		}
-		return true
-	}
-	return false
-}
-
-// inspectDockEntry opens the entry's details in the diff overlay:
-// shell → output tail; agent → transcript summary.
-func (a *App) inspectDockEntry(entry components.DockEntry) {
+// stopDockEntry cancels the selected background task, shell or agent.
+//
+// Killing a shell used to Delete() the session immediately after marking it
+// cancelled, which threw away the output the user had just been reading and
+// removed the row before it could confirm anything happened. The record now
+// survives as a stopped row with its output intact, which is also what makes it
+// inspectable afterwards.
+func (a *App) stopDockEntry(entry components.DockEntry) tea.Cmd {
 	switch entry.Kind {
 	case components.DockShell:
-		tail := "(no output yet)"
-		if session, ok := toolsshell.GetManager().Get(entry.ID); ok {
-			out := session.Stdout.String()
-			errOut := session.Stderr.String()
-			combined := out
-			if errOut != "" {
-				combined += "\n[stderr]\n" + errOut
-			}
-			if lines := countLines(combined); lines > 200 {
-				combined = lastLines(combined, 200)
-			}
-			if strings.TrimSpace(combined) != "" {
-				tail = combined
-			}
-		}
-		a.diffPane.SetContent(fmt.Sprintf("# shell %s\n$ %s\n\n%s", entry.ID, entry.Label, tail))
-	case components.DockAgent:
-		inst, ok := toolsagent.GetAgentManager().Get(entry.ID)
+		session, ok := toolsshell.GetManager().Get(entry.ID)
 		if !ok {
-			a.conversation.AddMessage("system", "agent no longer available: "+entry.ID, true)
-			return
+			return a.notice("warn", "Already gone", entry.ID)
 		}
-		snap := inst.Snapshot()
-		var b strings.Builder
-		fmt.Fprintf(&b, "# agent %s [%s]\ntype: %s · turns: %d · elapsed: %s\n",
-			snap.Name, snap.Status, snap.Type, snap.Turns, snap.Elapsed)
-		b.WriteString("\n" + inst.LastOutput())
-		a.diffPane.SetContent(b.String())
+		if session.IsCompleted() {
+			return a.notice("info", "Already finished", entry.Label)
+		}
+		session.Cancel()
+		_ = session.Kill()
+		_ = toolsshell.GetManager().UpdateStatus(entry.ID, toolsshell.SessionStatusCancelled, -1, nil)
+		a.refreshDock()
+		return a.notice("warn", "Stopped", entry.Label)
+
+	case components.DockAgent:
+		if entry.Status.Terminal() {
+			return a.notice("info", "Already finished", entry.Label)
+		}
+		out := toolsagent.ControlAction("interrupt", entry.ID, "", "sync")
+		a.refreshDock()
+		return a.notice("warn", "Stopped", firstNonEmptyDock(out, entry.Label))
 	}
-	if !a.diffPane.Visible() {
-		a.diffPane.Toggle()
-	}
-	a.layout()
-	a.reviewingProposal = "" // plain inspection, not proposal review
+	return nil
 }
 
-func countLines(s string) int { return strings.Count(s, "\n") + 1 }
-
-func lastLines(s string, n int) string {
-	lines := strings.Split(s, "\n")
-	if len(lines) <= n {
-		return s
+// stopAllRunning cancels every in-flight background task.
+func (a *App) stopAllRunning() tea.Cmd {
+	if a.dock == nil {
+		return nil
 	}
-	return strings.Join(lines[len(lines)-n:], "\n")
+	stopped := 0
+	for _, e := range a.dock.Entries() {
+		if e.Status.Terminal() {
+			continue
+		}
+		switch e.Kind {
+		case components.DockShell:
+			if session, ok := toolsshell.GetManager().Get(e.ID); ok && !session.IsCompleted() {
+				session.Cancel()
+				_ = session.Kill()
+				_ = toolsshell.GetManager().UpdateStatus(e.ID, toolsshell.SessionStatusCancelled, -1, nil)
+				stopped++
+			}
+		case components.DockAgent:
+			toolsagent.ControlAction("interrupt", e.ID, "", "sync")
+			stopped++
+		}
+	}
+	a.refreshDock()
+	if stopped == 0 {
+		return a.notice("info", "Nothing running", "")
+	}
+	return a.notice("warn", "Stopped all", fmt.Sprintf("%d background %s", stopped, plural(stopped, "task")))
+}
+
+// notice pushes a transient toast, falling back to the status bar when the toast
+// stack is unavailable. Dock actions are UI acknowledgements, so they belong
+// here and not in the transcript.
+func (a *App) notice(level, title, detail string) tea.Cmd {
+	if a.toasts == nil {
+		if detail != "" {
+			a.statusBar.SetStatus(title + ": " + detail)
+		} else {
+			a.statusBar.SetStatus(title)
+		}
+		return nil
+	}
+	return a.toasts.Push(level, title, detail)
+}
+
+// plural renders a bare noun or its plural.
+func plural(n int, noun string) string {
+	if n == 1 {
+		return noun
+	}
+	return noun + "s"
+}
+
+// handleDockKeys consumes keys while the dock tray is focused.
+// Reports whether the key was handled, and any command it produced.
+func (a *App) handleDockKeys(m tea.KeyMsg) (tea.Cmd, bool) {
+	switch m.String() {
+	case "esc", "q":
+		a.unfocusDock()
+		return nil, true
+	case "up", "k":
+		a.dock.MoveCursor(-1)
+		return nil, true
+	case "down", "j":
+		a.dock.MoveCursor(1)
+		return nil, true
+	case "home", "g":
+		a.dock.CursorTo(0)
+		return nil, true
+	case "end", "G":
+		a.dock.CursorTo(a.dock.Len() - 1)
+		return nil, true
+	case "enter":
+		if entry, ok := a.dock.Selected(); ok {
+			a.openInspector(entry)
+		}
+		return nil, true
+	case "s":
+		if entry, ok := a.dock.Selected(); ok {
+			return a.stopDockEntry(entry), true
+		}
+		return nil, true
+	case "S":
+		return a.stopAllRunning(), true
+	}
+	return nil, false
 }

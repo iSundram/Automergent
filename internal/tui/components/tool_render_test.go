@@ -192,9 +192,10 @@ func TestTerminalSlabShowsLastLines(t *testing.T) {
 	if !strings.Contains(plain, "more lines") {
 		t.Errorf("scroll hint missing:\n%s", plain)
 	}
-	// The command appears once on the call line and once as the slab prompt.
-	if got := strings.Count(plain, "./slow-test"); got != 2 {
-		t.Errorf("command should appear on the call line and the $ row, got %d:\n%s", got, plain)
+	// The command appears exactly once — on the slab's $ row. The call line
+	// carries only the tool name, hairline, exit chip and duration.
+	if got := strings.Count(plain, "./slow-test"); got != 1 {
+		t.Errorf("command should appear once, on the $ row, got %d:\n%s", got, plain)
 	}
 }
 

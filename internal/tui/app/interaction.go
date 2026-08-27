@@ -9,7 +9,6 @@ import (
 	toolsagent "github.com/iSundram/Automergent/internal/tools/agent"
 	"github.com/iSundram/Automergent/internal/tools/interaction"
 	"github.com/iSundram/Automergent/internal/tui/components"
-	"time"
 )
 
 type pendingAsk struct {
@@ -48,20 +47,19 @@ type askSessionMsg struct{ pa *pendingAsk }
 // registerSessionCommands adds the session-lifecycle commands (/rewind,
 // /zen) without touching the core registry file.
 
-var _ = time.Second
-
 // refreshTaskBoard pulls the live subagent roster from the manager.
 func (a *App) refreshTaskBoard() {
 	rows := make([]components.AgentRow, 0)
 	for _, inst := range toolsagent.GetAgentManager().List(true) {
 		snap := inst.Snapshot()
 		rows = append(rows, components.AgentRow{
-			ID:      snap.ID,
-			Name:    snap.Name,
-			Type:    snap.Type,
-			Status:  snap.Status,
-			Turns:   snap.Turns,
-			Elapsed: snap.Elapsed,
+			ID:        snap.ID,
+			Name:      snap.Name,
+			Type:      snap.Type,
+			Status:    snap.Status,
+			Turns:     snap.Turns,
+			Elapsed:   snap.Elapsed,
+			StartedAt: snap.StartedAt,
 		})
 	}
 	a.taskBoard.SetAgents(rows)
