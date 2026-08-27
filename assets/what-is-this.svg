@@ -1,39 +1,35 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 270" width="100%" style="display:block">
-  <rect width="960" height="270" fill="#2b2b2b"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 220" width="100%" style="display:block">
+  <rect width="960" height="220" fill="#2b2b2b"/>
 
-  <!-- assistant label -->
-  <text x="24" y="36" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="14" font-weight="700">✦</text>
+  <!-- section label -->
+  <text x="24" y="26" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">✦  about automergent</text>
 
-  <!-- title -->
-  <text x="50" y="36" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#ffffff" font-size="15" font-weight="700">What is Automergent?</text>
+  <!-- assistant response line -->
+  <text x="24" y="52" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="13" font-weight="700">✦</text>
+  <text x="40" y="52" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#ffffff" font-size="12" font-weight="600">An AI coding agent that lives in your terminal.</text>
+  <text x="40" y="70" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#b3b3b3" font-size="11.5">Reads, writes, searches, and edits your codebase through a rich Charm-powered TUI with approval at every step.</text>
 
-  <!-- body lines -->
-  <text x="50" y="62" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="13">An AI-powered coding agent that lives in your terminal.</text>
-  <text x="50" y="80" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="13">It reads, writes, searches, and edits your codebase through a</text>
-  <text x="50" y="98" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="13">rich TUI — built on the Charm stack (bubbletea, lipgloss, glamour).</text>
-  <text x="50" y="116" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="13">It thinks, plans, and executes — with your approval at every step.</text>
+  <!-- tool card 1: Grep -->
+  <rect x="24" y="88" width="912" height="46" rx="4" fill="#3c3c3c" opacity="0.4"/>
+  <rect x="24" y="88" width="3" height="46" rx="1.5" fill="#cba6f7"/>
+  <text x="38" y="106" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">●</text>
+  <text x="52" y="106" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#cba6f7" font-size="11" font-weight="700">Grep</text>
+  <text x="96" y="106" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#ffffff" font-size="11">  "func Authenticate"</text>
+  <text x="290" y="106" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">· 12 matches in 4 files</text>
+  <text x="920" y="106" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11" text-anchor="end">0.31s</text>
+  <text x="52" y="122" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="10.5">⎿ cmd/automergent/main.go:24  ·  internal/tui/app/app.go:8  ·  +2 more</text>
 
-  <!-- ── tool card: grep (search) ── -->
-  <rect x="24" y="134" width="912" height="24" rx="4" fill="#3c3c3c" opacity="0.4"/>
-  <text x="36" y="150" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="12">●</text>
-  <text x="54" y="150" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89dceb" font-size="12" font-weight="700">Grep</text>
-  <text x="98" y="150" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="12">  "func main"</text>
-  <text x="228" y="150" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="12">· 12 matches in 4 files</text>
-  <text x="896" y="150" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="12" text-anchor="end">0.3s</text>
-  <!-- result rows -->
-  <text x="62" y="170" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">⎿  cmd/automergent/main.go:24</text>
-  <text x="62" y="186" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">⎿  internal/tui/app/app.go:8</text>
-
-  <!-- ── tool card: read_file ── -->
-  <rect x="24" y="200" width="912" height="24" rx="4" fill="#3c3c3c" opacity="0.4"/>
-  <text x="36" y="216" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="12">●</text>
-  <text x="54" y="216" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89dceb" font-size="12" font-weight="700">ReadFile</text>
-  <text x="134" y="216" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="12">  "internal/tools/registry.go"</text>
-  <text x="380" y="216" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="12">· 214 lines</text>
-  <text x="896" y="216" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="12" text-anchor="end">0.1s</text>
+  <!-- tool card 2: ReadFile -->
+  <rect x="24" y="142" width="912" height="46" rx="4" fill="#3c3c3c" opacity="0.4"/>
+  <rect x="24" y="142" width="3" height="46" rx="1.5" fill="#89dceb"/>
+  <text x="38" y="160" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">●</text>
+  <text x="52" y="160" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89dceb" font-size="11" font-weight="700">ReadFile</text>
+  <text x="122" y="160" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#ffffff" font-size="11">  "internal/tools/registry.go"</text>
+  <text x="380" y="160" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">· 214 lines</text>
+  <text x="920" y="160" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11" text-anchor="end">42ms</text>
+  <text x="52" y="176" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="10.5">⎿ 48 tools registered  ·  filesystem · shell · web · lsp · security</text>
 
   <!-- separator -->
-  <line x1="0" y1="240" x2="960" y2="240" stroke="#4a4a4a" stroke-width="1"/>
-
-  <!-- spacing -->
+  <line x1="0" y1="206" x2="960" y2="206" stroke="#4a4a4a" stroke-width="1"/>
+  <text x="24" y="214" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#555555" font-size="9.5">└─ 48 tools registered  ·  streaming AST edits  ·  approval-gated PTY</text>
 </svg>

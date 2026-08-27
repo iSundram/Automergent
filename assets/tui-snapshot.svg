@@ -1,68 +1,72 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 370" width="100%" style="display:block">
-  <rect width="960" height="370" fill="#2b2b2b"/>
-
-  <!-- header bar -->
-  <rect x="0" y="0" width="960" height="38" fill="#2b2b2b"/>
-  <text x="24" y="24" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="13" font-weight="700">✦ AUTOMERGENT</text>
-  <rect x="184" y="10" width="92" height="20" rx="4" fill="#a6e3a1"/>
-  <text x="200" y="24" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#2b2b2b" font-size="11" font-weight="700">EXECUTE</text>
-  <text x="480" y="24" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#b3b3b3" font-size="11" text-anchor="middle">gemini-2.5-pro</text>
-  <text x="896" y="24" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#b3b3b3" font-size="11" text-anchor="end">$0.0042 │ 12.3k/200k</text>
-  <line x1="0" y1="37" x2="960" y2="37" stroke="#4a4a4a" stroke-width="1"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 520" width="100%" style="display:block">
+  <rect width="960" height="520" fill="#2b2b2b"/>
 
   <!-- user message (right-aligned) -->
-  <text x="760" y="66" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11"> You </text>
-  <rect x="626" y="74" width="310" height="26" rx="4" fill="#3c3c3c"/>
-  <text x="638" y="91" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="12">refactor the auth middleware</text>
+  <text x="926" y="24" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11" text-anchor="end"> You </text>
+  <rect x="520" y="32" width="416" height="28" rx="4" fill="#3c3c3c"/>
+  <text x="534" y="50" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#ffffff" font-size="11.5">run go test, diagnose failure, and fix the auth handler</text>
 
-  <!-- assistant label -->
-  <text x="36" y="124" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="13" font-weight="700">✦</text>
+  <!-- assistant turn 1 -->
+  <text x="24" y="80" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="13" font-weight="700">✦</text>
+  <text x="40" y="80" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="12">Running the test suite to inspect the failure.</text>
 
-  <!-- assistant body -->
-  <text x="52" y="124" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="12">I'll read the current auth middleware, then refactor it.</text>
+  <!-- tool card 1: Failing go test -->
+  <rect x="24" y="96" width="912" height="74" rx="4" fill="#3c3c3c" opacity="0.35"/>
+  <text x="36" y="112" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#f38ba8" font-size="11">●</text>
+  <text x="50" y="112" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#f9e2af" font-size="11" font-weight="700">Bash</text>
+  <line x1="90" y1="108" x2="800" y2="108" stroke="#4a4a4a" stroke-dasharray="4,4" stroke-width="1"/>
+  <text x="920" y="112" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#f38ba8" font-size="11" font-weight="700" text-anchor="end">✗ exit 1  <tspan fill="#6c7086" font-weight="400">0.84s</tspan></text>
+  
+  <text x="50" y="128" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="11" font-weight="700">$</text>
+  <text x="64" y="128" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#ffffff" font-size="11">go test ./internal/middleware/...</text>
+  <text x="50" y="144" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#f38ba8" font-size="10.5">--- FAIL: TestValidateToken_Expired (0.01s)</text>
+  <text x="74" y="158" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="10.5">auth_test.go:52: expected error "token expired", got nil</text>
+  <text x="50" y="182" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#f38ba8" font-size="10.5">⎿  ✗ exit 1: test assertion failed</text>
 
-  <!-- tool card 1: read_file -->
-  <rect x="36" y="140" width="888" height="24" rx="4" fill="#3c3c3c" opacity="0.4"/>
-  <text x="48" y="156" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">●</text>
-  <text x="64" y="156" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89dceb" font-size="11" font-weight="700">ReadFile</text>
-  <text x="138" y="156" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="11">  "internal/middleware/auth.go"</text>
-  <text x="372" y="156" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">· 86 lines</text>
-  <text x="884" y="156" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11" text-anchor="end">0.08s</text>
-  <text x="72" y="172" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="10">⎿  file read successfully</text>
+  <!-- Failing Banner in TUI Style -->
+  <rect x="24" y="196" width="912" height="26" rx="3" fill="#f38ba8" opacity="0.15" stroke="#f38ba8" stroke-width="1"/>
+  <text x="36" y="213" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#f38ba8" font-size="11" font-weight="700">✦ ERROR</text>
+  <text x="110" y="213" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#ffffff" font-size="11">test failed in internal/middleware/auth_test.go:52</text>
 
-  <!-- tool card 2: edit_file -->
-  <rect x="36" y="182" width="888" height="24" rx="4" fill="#3c3c3c" opacity="0.4"/>
-  <text x="48" y="198" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">●</text>
-  <text x="64" y="198" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89dceb" font-size="11" font-weight="700">EditFile</text>
-  <text x="136" y="198" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="11">  "internal/middleware/auth.go"</text>
-  <text x="370" y="198" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">· 3 changes</text>
-  <text x="884" y="198" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11" text-anchor="end">0.12s</text>
-  <text x="72" y="214" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="10">⎿  ✓ 3 hunks applied</text>
+  <!-- tool card 2: EditFile -->
+  <rect x="24" y="232" width="912" height="42" rx="4" fill="#3c3c3c" opacity="0.35"/>
+  <text x="36" y="248" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">●</text>
+  <text x="50" y="248" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#f9e2af" font-size="11" font-weight="700">EditFile</text>
+  <text x="120" y="248" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#ffffff" font-size="11">  "internal/middleware/auth.go"</text>
+  <text x="370" y="248" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">· 1 hunk</text>
+  <text x="920" y="248" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11" text-anchor="end">0.12s</text>
+  <text x="50" y="264" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="10.5">⎿  ✓ hunk 1: added claims.ExpiresAt validation check</text>
 
-  <!-- tool card 3: shell -->
-  <rect x="36" y="224" width="888" height="24" rx="4" fill="#3c3c3c" opacity="0.4"/>
-  <text x="48" y="240" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">●</text>
-  <text x="64" y="240" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89dceb" font-size="11" font-weight="700">Shell</text>
-  <text x="112" y="240" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="11">  "go build ./..."</text>
-  <text x="262" y="240" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">· exit 0</text>
-  <text x="884" y="240" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11" text-anchor="end">2.4s</text>
-  <text x="72" y="256" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="10">⎿  ✓ build succeeded</text>
+  <!-- tool card 3: Passing go test -->
+  <rect x="24" y="284" width="912" height="74" rx="4" fill="#3c3c3c" opacity="0.35"/>
+  <text x="36" y="300" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">●</text>
+  <text x="50" y="300" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#f9e2af" font-size="11" font-weight="700">Bash</text>
+  <line x1="90" y1="296" x2="800" y2="296" stroke="#4a4a4a" stroke-dasharray="4,4" stroke-width="1"/>
+  <text x="920" y="300" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11" font-weight="700" text-anchor="end">✓ exit 0  <tspan fill="#6c7086" font-weight="400">0.42s</tspan></text>
+  
+  <text x="50" y="316" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="11" font-weight="700">$</text>
+  <text x="64" y="316" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#ffffff" font-size="11">go test -v ./internal/middleware/...</text>
+  <text x="50" y="332" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="10.5">=== RUN   TestValidateToken_Expired</text>
+  <text x="50" y="346" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="10.5">--- PASS: TestValidateToken_Expired (0.00s)</text>
+  <text x="50" y="370" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="10.5">⎿  ✓ PASS: all 14 tests passing  ·  ok  github.com/iSundram/Automergent/internal/middleware  0.024s</text>
 
   <!-- assistant reply -->
-  <text x="36" y="282" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="13" font-weight="700">✦</text>
-  <text x="52" y="282" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="12">Done. Refactored auth middleware — extracted token validation</text>
-  <text x="52" y="298" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="12">into a separate function, added context-based user lookup.</text>
+  <text x="24" y="396" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="13" font-weight="700">✦</text>
+  <text x="40" y="396" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#d4d4d4" font-size="12">Fixed the expiration check in auth.go. Re-ran test suite — all 14 tests now pass cleanly.</text>
 
   <!-- input line -->
-  <line x1="0" y1="316" x2="960" y2="316" stroke="#4a4a4a" stroke-width="1"/>
-  <text x="24" y="334" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="12">└─ shift+tab browse · ctrl+p palette</text>
+  <line x1="0" y1="428" x2="960" y2="428" stroke="#4a4a4a" stroke-width="1"/>
+  <rect x="24" y="440" width="912" height="34" rx="4" fill="#3c3c3c" opacity="0.4" stroke="#4a4a4a" stroke-width="1"/>
+  <text x="38" y="461" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="12" font-weight="700">❯</text>
+  <text x="56" y="461" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#ffffff" font-size="11.5">add table-driven tests for revoked tokens</text>
+  <text x="920" y="461" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11" text-anchor="end">↵ send · shift+tab browse · ctrl+p palette</text>
 
   <!-- status bar -->
-  <rect x="0" y="340" width="960" height="30" fill="#2b2b2b"/>
-  <line x1="0" y1="340" x2="960" y2="340" stroke="#4a4a4a" stroke-width="1"/>
-  <rect x="20" y="346" width="98" height="18" rx="3" fill="#89b4fa"/>
-  <text x="30" y="359" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#2b2b2b" font-size="10" font-weight="700">ACCEPT EDITS</text>
-  <text x="134" y="359" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#b3b3b3" font-size="10">Ready</text>
-  <text x="750" y="359" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#b3b3b3" font-size="10">ctx 12% ##──────</text>
-  <text x="900" y="359" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="10"> main</text>
+  <rect x="0" y="486" width="960" height="34" fill="#2b2b2b"/>
+  <line x1="0" y1="486" x2="960" y2="486" stroke="#4a4a4a" stroke-width="1"/>
+  <rect x="20" y="493" width="98" height="20" rx="3" fill="#89b4fa"/>
+  <text x="30" y="507" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#2b2b2b" font-size="10" font-weight="700">ACCEPT EDITS</text>
+  <text x="134" y="507" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#b3b3b3" font-size="10.5">Ready</text>
+  <text x="730" y="507" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#b3b3b3" font-size="10.5">ctx 18% <tspan fill="#89b4fa">##──────</tspan></text>
+  <text x="936" y="507" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="10.5" text-anchor="end">󰊢 main+1</text>
 </svg>

@@ -1,34 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 130" width="100%" style="display:block">
-  <rect width="960" height="130" fill="#2b2b2b"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 146" width="100%" style="display:block">
+  <rect width="960" height="146" fill="#2b2b2b"/>
 
   <!-- tips row 1 -->
-  <text x="24" y="28" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="12" font-weight="700">✦</text>
-  <text x="44" y="28" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#ffffff" font-size="12" font-weight="700">Tips</text>
+  <text x="24" y="24" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="12" font-weight="700">✦</text>
+  <text x="44" y="24" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#ffffff" font-size="12" font-weight="700">Tips &amp; Shortcuts</text>
 
-  <text x="24" y="50" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">├─</text>
-  <text x="50" y="50" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">/help</text>
-  <text x="100" y="50" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  show all commands</text>
+  <text x="24" y="46" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">├─</text>
+  <text x="50" y="46" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">/help</text>
+  <text x="100" y="46" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  show all commands</text>
 
-  <text x="280" y="50" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">├─</text>
-  <text x="306" y="50" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">/theme</text>
-  <text x="364" y="50" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  switch color palette</text>
+  <text x="280" y="46" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">├─</text>
+  <text x="306" y="46" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">/theme</text>
+  <text x="364" y="46" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  switch color palette</text>
 
-  <text x="560" y="50" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">├─</text>
-  <text x="586" y="50" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">/model</text>
-  <text x="644" y="50" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  change AI provider</text>
+  <text x="560" y="46" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">├─</text>
+  <text x="586" y="46" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">/model</text>
+  <text x="644" y="46" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  change AI provider</text>
 
   <!-- tips row 2 -->
-  <text x="24" y="68" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">├─</text>
-  <text x="50" y="68" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">ctrl+p</text>
-  <text x="108" y="68" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  command palette</text>
+  <text x="24" y="66" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">├─</text>
+  <text x="50" y="66" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">ctrl+p</text>
+  <text x="108" y="66" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  command palette</text>
 
-  <text x="280" y="68" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">├─</text>
-  <text x="306" y="68" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">ctrl+e</text>
-  <text x="364" y="68" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  expand tool details</text>
+  <text x="280" y="66" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">├─</text>
+  <text x="306" y="66" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">ctrl+e</text>
+  <text x="364" y="66" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  expand tool details</text>
 
-  <text x="560" y="68" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">├─</text>
-  <text x="586" y="68" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">shift+tab</text>
-  <text x="664" y="68" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  browse conversation</text>
+  <text x="560" y="66" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">├─</text>
+  <text x="586" y="66" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#a6e3a1" font-size="11">shift+tab</text>
+  <text x="664" y="66" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  browse conversation</text>
 
   <!-- tips row 3 -->
   <text x="24" y="86" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">└─</text>
@@ -36,13 +36,13 @@
   <text x="82" y="86" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="11">  cancel / close overlay</text>
 
   <!-- separator -->
-  <line x1="0" y1="100" x2="960" y2="100" stroke="#4a4a4a" stroke-width="1"/>
+  <line x1="0" y1="106" x2="960" y2="106" stroke="#4a4a4a" stroke-width="1"/>
 
   <!-- footer status bar -->
-  <rect x="0" y="100" width="960" height="30" fill="#2b2b2b"/>
-  <rect x="20" y="106" width="68" height="18" rx="3" fill="#89b4fa"/>
-  <text x="30" y="119" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#2b2b2b" font-size="10" font-weight="700">MANUAL</text>
-  <text x="104" y="119" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="10">Ready</text>
-  <text x="720" y="119" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="10">ctx 0% ----------</text>
-  <text x="870" y="119" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="10"> main</text>
+  <rect x="0" y="106" width="960" height="40" fill="#2b2b2b"/>
+  <rect x="20" y="116" width="98" height="20" rx="3" fill="#89b4fa"/>
+  <text x="30" y="130" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#2b2b2b" font-size="10" font-weight="700">ACCEPT EDITS</text>
+  <text x="134" y="130" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="10.5">Ready</text>
+  <text x="730" y="130" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#6c7086" font-size="10.5">ctx 0% ----------</text>
+  <text x="936" y="130" font-family="'SF Mono','Cascadia Code','Fira Code','JetBrains Mono','Consolas',monospace" fill="#89b4fa" font-size="10.5" text-anchor="end">󰊢 main</text>
 </svg>
