@@ -4,15 +4,14 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 )
 
-// Markdown custom commands make every *.md file under a project's
-// .automergent/commands or the user's ~/.automergent/commands directory a
-// first-class slash command. Subdirectories become namespaces joined with ':'
-// (e.g. .automergent/commands/git/staged.md -> /git:staged).
+// Custom commands: every *.md file under .automergent/commands or
+// ~/.automergent/commands becomes a first-class slash command.
 //
 // Frontmatter (optional, between --- fences) supports:
 //
@@ -21,10 +20,15 @@ import (
 //	argument-hint: [focus]
 //	when-to-use: guidance for future model-side invocation
 //	sensitive: true
+//	type: prompt | handler | fullpage   (default: prompt)
+//	agent: general-purpose              (agent to route to)
+//	effort: high                        (thinking effort)
+//	full-page-title: Review Results     (title for fullpage type)
 //
-// The body is a prompt template: $ARGUMENTS expands to the full argument
-// string, $1..$9 to individual arguments. Dispatching sends the expanded
-// prompt to the agent through the normal permission flow.
+// The body is a prompt template with processors:
+//   $ARGUMENTS / $1..$9  — argument substitution
+//   !{shell command}     — shell output injection
+//   @{path/to/file}      — file content injection
 
 const (
 	customCategory = "Custom"
@@ -34,8 +38,8 @@ const (
 )
 
 // ParseMarkdownCommand derives a command definition and prompt body from a
-// markdown file. relPath is the path relative to the commands root (used for
-// naming/namespacing); content is the raw file bytes.
+// markdown file. relPath is the path relative to the commands root; content
+// is the raw file bytes.
 func ParseMarkdownCommand(relPath string, content []byte) (Command, string, error) {
 	base := filepath.Base(relPath)
 	if base == "README.md" || strings.HasPrefix(base, ".") {
@@ -65,6 +69,14 @@ func ParseMarkdownCommand(relPath string, content []byte) (Command, string, erro
 		return Command{}, "", fmt.Errorf("%s: missing description", relPath)
 	}
 
+	cmdType := CmdPrompt
+	switch strings.ToLower(strings.TrimSpace(meta["type"])) {
+	case "handler":
+		cmdType = CmdHandler
+	case "fullpage":
+		cmdType = CmdFullPage
+	}
+
 	cmd := Command{
 		Name:             name,
 		Description:      truncate(description, 120),
@@ -72,6 +84,8 @@ func ParseMarkdownCommand(relPath string, content []byte) (Command, string, erro
 		Icon:             customIcon,
 		ArgsHint:         strings.TrimSpace(meta["argument-hint"]),
 		WhenToUse:        strings.TrimSpace(meta["when-to-use"]),
+		Type:             cmdType,
+		FullPageTitle:    strings.TrimSpace(meta["full-page-title"]),
 		Immediate:        true,
 		SupportsHeadless: true,
 		Sensitive:        strings.EqualFold(strings.TrimSpace(meta["sensitive"]), "true"),
@@ -146,7 +160,7 @@ func truncate(s string, n int) string {
 }
 
 // ExpandPromptTemplate substitutes $ARGUMENTS (all args joined) and $1..$9
-// (individual arguments; missing ones expand to empty).
+// (individual arguments), then processes !{shell} and @{file} injections.
 func ExpandPromptTemplate(body string, args []string) string {
 	joined := strings.Join(args, " ")
 	out := strings.ReplaceAll(body, "$ARGUMENTS", joined)
@@ -157,18 +171,65 @@ func ExpandPromptTemplate(body string, args []string) string {
 		}
 		out = strings.ReplaceAll(out, "$"+strconv.Itoa(i), value)
 	}
+	out = processShellInjections(out)
+	out = processFileInjections(out)
 	return strings.TrimSpace(out)
 }
 
+// processShellInjections replaces !{command} with the command's stdout.
+func processShellInjections(s string) string {
+	for {
+		start := strings.Index(s, "!{")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(s[start:], "}")
+		if end < 0 {
+			break
+		}
+		end += start
+		cmdStr := s[start+2 : end]
+		cmdStr = strings.TrimSpace(cmdStr)
+		output := ""
+		if cmd := exec.Command("sh", "-c", cmdStr); cmd != nil {
+			if out, err := cmd.Output(); err == nil {
+				output = strings.TrimSpace(string(out))
+			}
+		}
+		s = s[:start] + output + s[end+1:]
+	}
+	return s
+}
+
+// processFileInjections replaces @{path} with the file's content.
+func processFileInjections(s string) string {
+	for {
+		start := strings.Index(s, "@{")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(s[start:], "}")
+		if end < 0 {
+			break
+		}
+		end += start
+		path := strings.TrimSpace(s[start+2 : end])
+		content := ""
+		if data, err := os.ReadFile(path); err == nil {
+			content = string(data)
+		}
+		s = s[:start] + content + s[end+1:]
+	}
+	return s
+}
+
 // LoadMarkdownCommands registers every valid markdown command found under dir.
-// It reports the number of registered commands plus per-file problems; one bad
-// or conflicting file never blocks the rest.
 func LoadMarkdownCommands(reg *Registry, dir string) (int, []string) {
 	if dir == "" {
 		return 0, nil
 	}
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
-		return 0, nil // absent directory is not an error
+		return 0, nil
 	}
 
 	count := 0
@@ -216,17 +277,24 @@ func LoadMarkdownCommands(reg *Registry, dir string) (int, []string) {
 	return count, warnings
 }
 
-// registerCustomMarkdownCommand wires a parsed command into the registry;
-// dispatching it sends the expanded prompt to the agent.
+// registerCustomMarkdownCommand wires a parsed command into the registry.
 func registerCustomMarkdownCommand(reg *Registry, cmd Command, body string) error {
 	return reg.RegisterCustom(cmd, func(host Host, args []string) Result {
-		return Done(host.StartAgent(ExpandPromptTemplate(body, args)))
+		prompt := ExpandPromptTemplate(body, args)
+		switch cmd.Type {
+		case CmdFullPage:
+			title := cmd.FullPageTitle
+			if title == "" {
+				title = cmd.Name
+			}
+			return TextResult(fmt.Sprintf("# %s\n\n%s", title, prompt))
+		default:
+			return Done(host.StartAgent(prompt))
+		}
 	})
 }
 
-// LoadProjectAndUserCommands loads custom commands from both standard roots:
-// <workdir>/.automergent/commands (walking up parents) and
-// ~/.automergent/commands. Builtins always win over clashing custom names.
+// LoadProjectAndUserCommands loads custom commands from both standard roots.
 func LoadProjectAndUserCommands(reg *Registry, workDir string) (int, []string) {
 	total := 0
 	var warnings []string
@@ -244,8 +312,6 @@ func LoadProjectAndUserCommands(reg *Registry, workDir string) (int, []string) {
 	return total, warnings
 }
 
-// findProjectCommandsDir mirrors the project-config lookup: walk up from
-// workDir until a .automergent/commands directory appears.
 func findProjectCommandsDir(workDir string) string {
 	dir := workDir
 	for {

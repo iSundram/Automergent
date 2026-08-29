@@ -337,6 +337,14 @@ var SlashSubPalettes = map[string]bool{
 	"theme":       true,
 	"keybindings": true,
 	"effort":      true,
+	"run":         true,
+	"commit":      true,
+	"review":      true,
+	"mcp":         true,
+	"commands":    true,
+	"directory":   true,
+	"plan":        true,
+	"goal":        true,
 }
 
 // RegisterSubPalette registers name as a slash sub-palette command so that
@@ -406,16 +414,22 @@ func wordUnderCursor(val string, runeCol int) string {
 }
 
 // TriggerType returns the current palette trigger if any.
+// Sub-palettes only open after a trailing space: "/mode" stays as "command"
+// (showing the /mode entry), "/mode " opens the mode picker. This lets the
+// user see the single /mode command first and preserves free-form input.
 func (i Input) TriggerType() string {
 	val := i.ta.Value()
 	if val == "?" {
 		return "help"
 	}
 	if strings.HasPrefix(val, "/") {
-		// Only exact command tokens open a sub-palette: /provider-api-key or
-		// namespaced customs like /model:dump stay plain commands.
 		if token := slashCommandToken(val); isSubPalette(token) {
-			return token
+			rest := strings.TrimPrefix(val, "/"+token)
+			if rest != "" && (rest[0] == ' ' || rest[0] == '\t' || rest[0] == '\n') {
+				return token
+			}
+			// Exact "/mode" stays as command so the palette shows the single entry.
+			// Only "/mode " or "/mode arg" opens the sub-palette.
 		}
 		return "command"
 	}
@@ -617,7 +631,7 @@ func (i *Input) View() string {
 	}
 	promptStr := ""
 	if i.showPrompt {
-		promptStr = promptStyle.Render("❯ ")
+		promptStr = promptStyle.Render("▸ ")
 	}
 
 	// ❯ prefixes the FIRST line — it is an input marker, not a cursor

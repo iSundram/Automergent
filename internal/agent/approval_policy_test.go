@@ -115,8 +115,13 @@ func TestNoModeSilentlyAutoApproves(t *testing.T) {
 	legacy := approvalTestTool{name: "write_file"}
 	for _, mode := range append(AllModes(), "edit") {
 		decision := ApprovalFor(mode, call("write_file", nil), legacy)
-		if mode == "auto" {
-			continue // auto is explicitly allowed to write unasked
+		switch mode {
+		case "auto", "accept-edits":
+			// Both modes explicitly auto-approve edits as policy — auto for
+			// everything routine, accept-edits for the edit category that
+			// "write_file" infers into. Neither reaches the decision through
+			// the legacy tool-decides path this test guards.
+			continue
 		}
 		if decision == ApprovalAuto {
 			t.Errorf("mode %q auto-approves a write on a legacy tool", mode)

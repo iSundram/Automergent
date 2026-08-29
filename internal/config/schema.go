@@ -87,13 +87,12 @@ func DefaultSchema() *Schema {
 
 	return &Schema{
 		Fields: map[string]FieldSchema{
-			"provider": {
-				Type:        TypeString,
-				Required:    true,
-				Default:     "google",
-				Enum:        ProviderNames(),
-				Description: "AI provider to use",
-			},
+"provider": {
+			Type:        TypeString,
+			Required:      true,
+			Default:       "google",
+			Description:   "AI provider to use",
+		},
 			"model": {
 				Type:        TypeString,
 				Required:    true,

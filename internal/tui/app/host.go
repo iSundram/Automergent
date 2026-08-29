@@ -111,6 +111,10 @@ func (a *App) ModelsAvailable() []ai.Model {
 	return a.modelsAvailable()
 }
 
+func (a *App) AvailableModels() []ai.Model {
+	return a.modelsAvailable()
+}
+
 func (a *App) InputTokens() int {
 	return a.sess.TotalInputTokens
 }

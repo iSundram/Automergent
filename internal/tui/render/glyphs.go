@@ -69,12 +69,22 @@ func Charter() map[rune]bool {
 		// but which components also assemble by hand.
 		"┌┐┘├┤┬┴┼╭╮╰╯",
 		// Meters and separators already load-bearing in the status bar and
-		// diff gutter.
-		"▌▐░▒▓█▁▂▃▄▅▆▇",
+		// diff gutter. ▎ is the markdown quote bar: glamour's IndentWriter
+		// reserves one column per indent unit, so the bar must be exactly one
+		// cell (see render/theme.go).
+		"▌▐░▒▓█▀▁▂▃▄▅▆▇▎",
 		// Arrows used by scroll and diff affordances.
 		"←→↔↕⇥⇤",
-		// Typography that appears in prose the UI renders.
-		"—–‘’“”•",
+		// Typography that appears in prose the UI renders. The guillemets are
+		// the word-level diff markers: paired punctuation, single-width
+		// everywhere, and distinguishable without colour.
+		"—–‘’“”•«»‹›",
+		// The brand mark and the variation selector that pins it to text
+		// presentation. ✦ is East-Asian-Ambiguous; U+FE0E is what makes a
+		// terminal that would resolve it through an emoji face draw it
+		// single-width instead (see themes/brand.go, which explains why the
+		// selector is load-bearing and not decoration).
+		"✦︎",
 	} {
 		for _, r := range s {
 			allowed[r] = true

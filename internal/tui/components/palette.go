@@ -10,6 +10,15 @@ import (
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
+// CommandTier indicates visual importance in the palette.
+type CommandTier int
+
+const (
+	TierPrimary   CommandTier = iota // accent-styled, prominent
+	TierSecondary                    // normal styling (default)
+	TierTertiary                     // dimmed
+)
+
 // PaletteItem represents an entry in the command palette.
 type PaletteItem struct {
 	Label          string
@@ -18,6 +27,7 @@ type PaletteItem struct {
 	Icon           string
 	Category       string
 	Hint           string
+	Tier           CommandTier
 	Current        bool
 	Disabled       bool
 	DisabledReason string
@@ -143,6 +153,28 @@ func (p CommandPalette) Update(msg tea.Msg) (CommandPalette, tea.Cmd) {
 	return p, nil
 }
 
+// categoryMeta maps palette category names to their display title and icon symbol.
+var categoryMeta = map[string]struct{ title, symbol string }{
+	"Commands":          {"Commands", "/"},
+	"Models":            {"Models", "󰊕"},
+	"Providers":         {"Providers", "󰒋"},
+	"Files":             {"Files", "@"},
+	"Modes":             {"Modes", "󰒓"},
+	"Themes":            {"Themes", "󰏘"},
+	"Keybindings":       {"Keybindings", "󰌌"},
+	"Effort":            {"Effort", "󰓅"},
+	"Project Commands":  {"Run", "󰆍"},
+	"Commit Scope":      {"Commit", "󰊢"},
+	"Review Target":     {"Review", "󰤒"},
+	"mcp":               {"MCP", "󰌠"},
+	"MCP Servers":       {"MCP Servers", "󰌠"},
+	"commands":          {"Commands", "󰘳"},
+	"directory":         {"Directory", "󰉖"},
+	"plan":              {"Plan", "󰈙"},
+	"goal":              {"Goal", "󰘧"},
+	"Knowledge":         {"Knowledge", "󰚩"},
+}
+
 func (p CommandPalette) View() string {
 	if !p.visible || p.width <= 0 || p.height <= 0 {
 		return ""
@@ -151,15 +183,12 @@ func (p CommandPalette) View() string {
 	rule := lipgloss.NewStyle().Foreground(p.styles.T.BorderNormal).Render(strings.Repeat("─", w))
 	title, symbol := "Commands", "/"
 	if len(p.items) > 0 {
-		switch p.items[0].Category {
-		case "Models":
-			title, symbol = "Models", "󰊕"
-		case "Providers":
-			title, symbol = "Providers", "󰒋"
-		case "Files":
-			title, symbol = "Files", "@"
-		case "Modes":
-			title, symbol = "Modes", "󰒓"
+		cat := p.items[0].Category
+		if meta, ok := categoryMeta[cat]; ok {
+			title, symbol = meta.title, meta.symbol
+		} else if cat != "" {
+			// Use the category name directly with a generic icon.
+			title = cat
 		}
 	}
 	count := fmt.Sprintf("%d of %d", min(p.cursor+1, len(p.items)), len(p.items))
@@ -265,6 +294,15 @@ func (p CommandPalette) renderItem(item PaletteItem, selected bool, width int) s
 	if selected {
 		iconStyle = iconStyle.Foreground(p.styles.T.Accent)
 		labelStyle = labelStyle.Bold(true)
+	}
+	// Tier-based styling: primary commands get accent icon and bold label.
+	if !selected && item.Tier == TierPrimary {
+		iconStyle = lipgloss.NewStyle().Foreground(p.styles.T.Accent)
+		labelStyle = labelStyle.Bold(true)
+	}
+	if !selected && item.Tier == TierTertiary {
+		iconStyle = lipgloss.NewStyle().Foreground(p.styles.T.Muted).Faint(true)
+		labelStyle = lipgloss.NewStyle().Foreground(p.styles.T.Muted).Faint(true)
 	}
 	prefix := "  " + indicator + iconStyle.Render(icon) + "  "
 	label := p.renderMatch(item.Label, labelStyle)

@@ -79,6 +79,9 @@ type App struct {
 	selectorAction    func(index int)
 	stats             components.Stats
 	helpOverlay       components.HelpOverlay
+	fullPage          components.FullPage
+	providerStudio    *components.ProviderStudio
+	modelHub          *components.ModelHub
 	fileTree          components.FileTree
 	palette           components.CommandPalette
 	width             int
@@ -199,6 +202,8 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		toasts:             components.NewToasts(styles),
 		questionnaire:      components.NewQuestionnaire(styles),
 		dock:               components.NewBottomDock(styles),
+		inspector:          components.NewInspector(styles),
+		queueStrip:         components.NewQueueStrip(styles),
 		taskBoard:          components.NewTaskBoard(styles),
 		spin:               components.NewSpinner(styles),
 		confirm:            components.NewConfirm(styles),
@@ -206,6 +211,9 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		selector:           components.NewSelectorOverlay(styles),
 		stats:              components.NewStats(styles),
 		helpOverlay:        components.NewHelpOverlay(styles),
+		fullPage:           components.NewFullPage(styles),
+		providerStudio:     components.NewProviderStudio(styles),
+		modelHub:           components.NewModelHub(styles),
 		fileTree:           components.NewFileTree(styles),
 		palette:            components.NewCommandPalette(styles),
 		ctx:                ctx,
@@ -217,6 +225,8 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		availableProviders: config.ProviderNames(),
 		commands:           commands.Default(),
 	}
+	app.providerStudio.SetHost(app)
+	app.modelHub.SetHost(app)
 	sort.Strings(app.availableProviders)
 	if wd, err := os.Getwd(); err == nil {
 		app.workDir = wd
@@ -387,12 +397,51 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.taskBoard.SetSize(34, m.Height)
 		a.dock.SetWidth(m.Width)
+		if a.inspector != nil {
+			a.inspector.SetSize(m.Width, m.Height)
+		}
+		if a.queueStrip != nil {
+			a.queueStrip.SetWidth(m.Width)
+		}
 		return a, nil
 	case tea.KeyMsg:
+		// The inspector is a fullscreen modal: it outranks every other key
+		// consumer except a confirmation prompt (which can appear on top of it,
+		// e.g. a permission request arriving while the user reads output).
+		if a.inspector != nil && a.inspector.Visible() && !a.confirm.Visible() {
+			if cmd, handled := a.handleInspectorKeys(m); handled {
+				return a, cmd
+			}
+		}
+		// Full-page overlay captures keys while visible.
+		if a.fullPage.Visible() && !a.confirm.Visible() {
+			var cmd tea.Cmd
+			a.fullPage, cmd = a.fullPage.Update(m)
+			return a, cmd
+		}
+		// Provider Studio captures keys while visible.
+		if a.providerStudio.Visible() && !a.confirm.Visible() {
+			var cmd tea.Cmd
+			a.providerStudio, cmd = a.providerStudio.Update(m)
+			return a, cmd
+		}
+		// Model Hub captures keys while visible.
+		if a.modelHub.Visible() && !a.confirm.Visible() {
+			var cmd tea.Cmd
+			a.modelHub, cmd = a.modelHub.Update(m)
+			return a, cmd
+		}
+		// Queue-strip actions (drop, pull back, highlight move) work while the
+		// input is focused, so they are claimed before the textarea sees them.
+		if a.focus == "input" && !a.browsing {
+			if cmd, handled := a.handleQueueStripKeys(m); handled {
+				return a, cmd
+			}
+		}
 		// Bottom dock owns keys while focused.
 		if a.dockFocusActive() {
-			if a.handleDockKeys(m) {
-				return a, nil
+			if cmd, handled := a.handleDockKeys(m); handled {
+				return a, cmd
 			}
 			a.unfocusDock()
 			return a, nil
@@ -404,9 +453,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			}
 		}
-		// TaskBoard navigation/actions when visible and not typing.
+		// TaskBoard navigation while visible and focus is not on the prompt.
 		if a.taskBoard.Visible() && !a.confirm.Visible() && !a.browsing && a.focus != "input" {
-			if a.handleTaskBoardKeys(m) {
+			switch m.String() {
+			case "j", "down":
+				a.taskBoard.MoveFocus(1)
+				return a, nil
+			case "k", "up":
+				a.taskBoard.MoveFocus(-1)
 				return a, nil
 			}
 		}
@@ -453,6 +507,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}
+	case shellNotificationMsg:
+		cmd = a.handleShellNotification(m)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case agentNotificationMsg:
+		cmd = a.handleAgentNotification(m)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case spinner.TickMsg:
 		sp, cmd := a.spin.Update(msg)
 		a.spin = sp
@@ -474,12 +538,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case liveTickMsg:
 		// Re-render only when there are live time displays (background tasks).
-		if a.dock != nil && a.dock.HasContent() {
+		if a.dock != nil {
 			a.refreshDock()
-			a.layout()
+			if a.dock.HasContent() {
+				a.layout()
+			}
 		}
-		if a.taskBoard.Visible() {
-			a.refreshTaskBoard()
+		if a.inspector != nil && a.inspector.Visible() {
+			// The inspector samples its source on every render; the tick is what
+			// makes live output scroll while nothing else is happening.
 			a.layout()
 		}
 		// Keep retry countdown and elapsed info line ticking live.

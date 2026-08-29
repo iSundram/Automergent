@@ -125,7 +125,7 @@ func wrapPlain(s string, width int) string {
 // renderLiveThought shows in-flight thinking as lightweight wrapped text;
 // the markdown thought box is applied once the turn completes.
 func (c *Conversation) renderLiveThought(thought string, width int) string {
-	header := c.styles.Dim.Copy().Bold(true).Render("💭 Thinking")
+	header := c.styles.Dim.Copy().Bold(true).Render("● Thinking")
 	body := c.styles.Dim.Copy().Italic(true).Render(truncateTail(thought, width, 6))
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -173,7 +173,7 @@ func (c *Conversation) renderThoughtBox(thought string, width int) string {
 	}
 
 	// Render thinking header OUTSIDE the box (like the brand label)
-	header := c.styles.Dim.Copy().Bold(true).Render("💭 Thinking")
+	header := c.styles.Dim.Copy().Bold(true).Render("● Thinking")
 
 	// Markdown-render to the box's *inner* width. Rendering unwrapped and
 	// letting lipgloss re-wrap split glamour's ANSI spans mid-sequence, which

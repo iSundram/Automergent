@@ -14,12 +14,17 @@ func TestIsValidOnlyPlanAndEdit(t *testing.T) {
 	}
 }
 
-func TestAllModesContainsTwoModes(t *testing.T) {
+func TestAllModesContainsCanonicalModes(t *testing.T) {
 	modes := AllModes()
-	if len(modes) != 2 {
-		t.Fatalf("expected 2 modes, got %d", len(modes))
+	// The canonical cycle: legacy "edit" is normalised to "manual" before it
+	// ever reaches this list.
+	want := []string{"manual", "accept-edits", "auto", "plan"}
+	if len(modes) != len(want) {
+		t.Fatalf("expected %d modes, got %d: %#v", len(want), len(modes), modes)
 	}
-	if modes[0] != "edit" || modes[1] != "plan" {
-		t.Fatalf("unexpected modes: %#v", modes)
+	for i, m := range want {
+		if modes[i] != m {
+			t.Fatalf("unexpected modes: %#v", modes)
+		}
 	}
 }

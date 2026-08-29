@@ -194,8 +194,10 @@ func (d BottomDock) Height() int {
 		overflow = 1
 		rows = trayMaxRows
 	}
-	// header + rows + overflow notice + one preview row for the cursored entry
-	return 1 + rows + overflow + 1
+	// top border + header + rows + overflow notice + one preview row for the
+	// cursored entry. The border is part of the tray's chrome and therefore of
+	// its height: forgetting it is how layout drift begins.
+	return 1 + 1 + rows + overflow + 1
 }
 
 // RailText returns the one-row summary for the always-on rail, or "" when there

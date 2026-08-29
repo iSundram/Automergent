@@ -220,7 +220,7 @@ func (sb SessionBrowser) View() string {
 	}
 	w := max(12, sb.width)
 	rule := lipgloss.NewStyle().Foreground(sb.styles.T.BorderNormal).Render(strings.Repeat("─", w))
-	headerLeft := lipgloss.NewStyle().Foreground(sb.styles.T.Accent).Bold(true).Render("  󰆓  ") +
+	headerLeft := lipgloss.NewStyle().Foreground(sb.styles.T.Accent).Bold(true).Render("  ▸  ") +
 		lipgloss.NewStyle().Foreground(sb.styles.T.Text).Bold(true).Render("SESSION HISTORY")
 	count := fmt.Sprintf("%d of %d", min(sb.cursor+1, len(sb.items)), len(sb.items))
 	if len(sb.items) == 0 {
@@ -252,7 +252,7 @@ func (sb SessionBrowser) View() string {
 func (sb SessionBrowser) renderTitle(i int, selected bool, width int) string {
 	indicator := "  "
 	if selected {
-		indicator = lipgloss.NewStyle().Foreground(sb.styles.T.Accent).Render("▍ ")
+		indicator = lipgloss.NewStyle().Foreground(sb.styles.T.Accent).Render("▸ ")
 	}
 	titleColor := sb.styles.T.Text
 	if selected {
@@ -264,7 +264,7 @@ func (sb SessionBrowser) renderTitle(i int, selected bool, width int) string {
 	}
 	title := sb.items[i].Title()
 	if sb.items[i].sess != nil && sb.items[i].sess.ID == sb.currentID {
-		title += "  " + lipgloss.NewStyle().Foreground(sb.styles.T.Green).Bold(true).Render("󰄬 Current")
+		title += "  " + lipgloss.NewStyle().Foreground(sb.styles.T.Green).Bold(true).Render("✓ Current")
 	}
 	left := "  " + indicator + titleStyle.Render(title)
 	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(left)
@@ -289,7 +289,7 @@ func (sb SessionBrowser) addScrollbar(lines []string, viewportItems int) []strin
 	for i, line := range lines {
 		bar := "│"
 		if i >= thumbTop && i < thumbTop+thumbSize {
-			bar = "┃"
+			bar = "█"
 		}
 		lines[i] = lipgloss.NewStyle().Width(sb.width-2).MaxWidth(sb.width-2).Render(line) +
 			lipgloss.NewStyle().Foreground(sb.styles.T.BorderNormal).Render(bar) + " "

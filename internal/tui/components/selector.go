@@ -169,7 +169,7 @@ func (s SelectorOverlay) View() string {
 	}
 	w := max(12, s.width)
 	rule := lipgloss.NewStyle().Foreground(s.styles.T.BorderNormal).Render(strings.Repeat("─", w))
-	headerLeft := lipgloss.NewStyle().Foreground(s.styles.T.Accent).Bold(true).Render("  󰌗  ") +
+	headerLeft := lipgloss.NewStyle().Foreground(s.styles.T.Accent).Bold(true).Render("  ▸  ") +
 		lipgloss.NewStyle().Foreground(s.styles.T.Text).Bold(true).Render(strings.ToUpper(s.title))
 	count := fmt.Sprintf("%d of %d", min(s.cursor+1, len(s.items)), len(s.items))
 	if len(s.items) == 0 {
@@ -200,7 +200,7 @@ func (s SelectorOverlay) renderItem(i int, selected bool, width int) string {
 	item := s.items[i]
 	indicator := "  "
 	if selected {
-		indicator = lipgloss.NewStyle().Foreground(s.styles.T.Accent).Render("▍ ")
+		indicator = lipgloss.NewStyle().Foreground(s.styles.T.Accent).Render("▸ ")
 	}
 	marker := " "
 	switch {

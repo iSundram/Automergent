@@ -279,10 +279,12 @@ type LogConfig struct {
 type ProviderConfig struct {
 	APIKey       string `mapstructure:"apiKey" yaml:"apiKey,omitempty"`
 	BaseURL      string `mapstructure:"baseUrl" yaml:"baseUrl,omitempty"`
+	ModelApiUrl  string `mapstructure:"modelApiUrl" yaml:"modelApiUrl,omitempty"`
 	DefaultModel string `mapstructure:"defaultModel" yaml:"defaultModel,omitempty"`
 	OrgID        string `mapstructure:"orgId" yaml:"orgId,omitempty"`
 	Project      string `mapstructure:"project" yaml:"project,omitempty"`
 	Location     string `mapstructure:"location" yaml:"location,omitempty"`
+	ApiType      string `mapstructure:"apiType" yaml:"apiType,omitempty"`
 	// Backend selects between provider backends when the provider ships more
 	// than one (Google: "aistudio" or "vertex"). Empty = provider default.
 	Backend       string `mapstructure:"backend" yaml:"backend,omitempty"`

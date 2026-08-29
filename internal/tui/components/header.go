@@ -61,9 +61,9 @@ func (h *Header) getProviderIcon() string {
 	p := strings.ToLower(h.provider)
 	switch {
 	case strings.Contains(p, "google") || strings.Contains(p, "gemini"):
-		return "󰊭"
+		return "●"
 	default:
-		return "󰩩"
+		return "○"
 	}
 }
 

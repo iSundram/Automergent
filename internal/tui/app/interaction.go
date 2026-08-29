@@ -4,11 +4,9 @@ package app
 // Moved verbatim from internal/tui/app.go.
 
 import (
-	tea "charm.land/bubbletea/v2"
 	"fmt"
-	toolsagent "github.com/iSundram/Automergent/internal/tools/agent"
+
 	"github.com/iSundram/Automergent/internal/tools/interaction"
-	"github.com/iSundram/Automergent/internal/tui/components"
 )
 
 type pendingAsk struct {
@@ -46,47 +44,6 @@ type askSessionMsg struct{ pa *pendingAsk }
 
 // registerSessionCommands adds the session-lifecycle commands (/rewind,
 // /zen) without touching the core registry file.
-
-// refreshTaskBoard pulls the live subagent roster from the manager.
-func (a *App) refreshTaskBoard() {
-	rows := make([]components.AgentRow, 0)
-	for _, inst := range toolsagent.GetAgentManager().List(true) {
-		snap := inst.Snapshot()
-		rows = append(rows, components.AgentRow{
-			ID:        snap.ID,
-			Name:      snap.Name,
-			Type:      snap.Type,
-			Status:    snap.Status,
-			Turns:     snap.Turns,
-			Elapsed:   snap.Elapsed,
-			StartedAt: snap.StartedAt,
-		})
-	}
-	a.taskBoard.SetAgents(rows)
-}
-
-// handleTaskBoardKeys implements the m/f/i/k grammar while the board shows.
-// Reports whether the key was consumed.
-func (a *App) handleTaskBoardKeys(m tea.KeyMsg) bool {
-	if !a.taskBoard.Visible() || a.inputFocused() {
-		return false
-	}
-	switch m.String() {
-	case "j", "down":
-		return a.taskBoard.MoveFocus(1)
-	case "k", "up":
-		return a.taskBoard.MoveFocus(-1)
-	case "i": // interrupt focused agent
-		if ag, ok := a.taskBoard.FocusedAgent(); ok {
-			out := toolsagent.ControlAction("interrupt", ag.ID, "", "sync")
-			a.conversation.AddMessage("system", out, false)
-			a.refreshTaskBoard()
-			a.layout()
-			return true
-		}
-	}
-	return false
-}
 
 // inputFocused reports whether keyboard focus belongs to the prompt.
 func (a *App) inputFocused() bool { return a.focus == "input" }

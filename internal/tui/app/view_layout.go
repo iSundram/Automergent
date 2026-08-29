@@ -20,6 +20,9 @@ func (a *App) layout() {
 	a.palette.SetSize(a.width, a.height)
 	a.selector.SetSize(a.width, a.height)
 	a.confirm.SetSize(a.width, a.height)
+	a.fullPage.SetSize(a.width, a.height)
+	a.providerStudio.SetSize(a.width, a.height)
+	a.modelHub.SetSize(a.width, a.height)
 
 	// Logo mode replaces the header: the wordmark is shown left-aligned
 	// on a fresh conversation (or while a project trust warning is
@@ -54,6 +57,11 @@ func (a *App) layout() {
 	if a.thinking {
 		footerH++
 	}
+	// The dock rail is the one always-on row of background-work state; it costs
+	// exactly one row whenever there is anything to report and never more.
+	if a.dockRailView() != "" {
+		footerH++
+	}
 	// The `└─` info line sits above the prompt (under the spinner while running).
 	// It is always rendered, so it always costs a row.
 	if a.infoLineVisible() {
@@ -68,11 +76,25 @@ func (a *App) layout() {
 		footerH += a.sessionBrowser.Height()
 	}
 	// Bottom dock (background shells/agents) renders under the input.
+	// refreshDock runs before HasContent is consulted: the old order asked
+	// "is there anything to show" before asking "what is there to show", so the
+	// first paint after a task spawned drew no dock until the next refresh.
 	dockH := 0
-	if a.dock != nil && a.dock.HasContent() && !a.confirm.Visible() {
-		a.dock.SetWidth(a.width)
+	if a.dock != nil && !a.confirm.Visible() {
 		a.refreshDock()
-		dockH = lipgloss.Height(a.dock.View())
+		if a.dock.HasContent() {
+			a.dock.SetWidth(a.width)
+			dockH = a.dock.Height()
+		}
+	}
+	// The queue strip sits between the input and the dock. Its height is a
+	// function of the item count, so it cannot cause the reflow-under-content
+	// problem the dock was rebuilt to avoid.
+	if a.queueStrip != nil {
+		a.refreshQueueStrip()
+		if a.queueStrip.Len() > 0 && !a.browsing {
+			footerH += a.queueStrip.Height()
+		}
 	}
 
 	mainH := a.height - headerH - statusH - footerH - dockH
@@ -90,6 +112,10 @@ func (a *App) layout() {
 
 	// Diff is now fullscreen overlay - always set to full dimensions
 	a.diffPane.SetSize(a.width, a.height)
+	// So is the inspector, when a background task owns the screen.
+	if a.inspector != nil {
+		a.inspector.SetSize(a.width, a.height)
+	}
 
 	mainW := a.width
 	if a.showFileTree {
@@ -111,7 +137,7 @@ func (a *App) infoLineVisible() bool {
 	if a.zenMode || a.width <= 0 {
 		return false
 	}
-	if a.showHelp || a.selector.Visible() || a.diffPane.Visible() {
+	if a.showHelp || a.selector.Visible() || a.diffPane.Visible() || a.fullPage.Visible() {
 		return false
 	}
 	return a.infoLine.View() != ""
@@ -205,9 +231,20 @@ func (a *App) View() tea.View {
 	// The `└─` info line sits between the spinner it explains and the prompt it
 	// advises, so it reads as a continuation of the run status rather than as
 	// something typed. It is never rendered below the input.
+	if rail := a.dockRailView(); rail != "" {
+		footer = append(footer, rail)
+	}
 	if a.infoLineVisible() {
 		if line := a.infoLine.View(); line != "" {
 			footer = append(footer, line)
+		}
+	}
+	// The queue strip lists messages waiting for the run to end, directly above
+	// the prompt they will be typed into. Rendered before the input so the
+	// visual order matches the delivery order.
+	if a.queueStrip != nil && a.queueStrip.Len() > 0 && !a.browsing {
+		if strip := a.queueStrip.View(); strip != "" {
+			footer = append(footer, strip)
 		}
 	}
 	if a.confirm.Visible() {
@@ -228,7 +265,8 @@ func (a *App) View() tea.View {
 	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, footer...))
 
 	// Bottom dock: background shells + agents, under the input.
-	if a.dock != nil && a.dock.HasContent() && !a.confirm.Visible() && !a.questionnaire.Visible() {
+	questionnaireVisible := a.questionnaire != nil && a.questionnaire.Visible()
+	if a.dock != nil && a.dock.HasContent() && !a.confirm.Visible() && !questionnaireVisible {
 		if dockView := a.dock.View(); dockView != "" {
 			sections = append(sections, dockView)
 		}
@@ -238,9 +276,26 @@ func (a *App) View() tea.View {
 
 	fullView := lipgloss.JoinVertical(lipgloss.Left, sections...)
 
+	// Full-page overlay takes priority over everything.
+	if a.fullPage.Visible() {
+		fullView = a.fullPage.View()
+	}
+	// Provider Studio overlay.
+	if a.providerStudio.Visible() {
+		fullView = a.providerStudio.View()
+	}
+	// Model Hub overlay.
+	if a.modelHub.Visible() {
+		fullView = a.modelHub.View()
+	}
 	// Diff is now fullscreen overlay - render on top of everything
 	if a.diffPane.Visible() {
 		fullView = a.diffPane.View()
+	}
+	// The inspector outranks the diff: opening a task viewer from the dock while
+	// a diff is up means the task is what the user wants to look at now.
+	if a.inspector != nil && a.inspector.Visible() {
+		fullView = a.inspector.View()
 	}
 
 	return makeView(fullView)

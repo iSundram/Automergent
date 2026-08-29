@@ -48,22 +48,18 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 	if a.palette.Visible() {
 		switch key {
 		case "enter":
+			// Dispatch selected palette item first (Claude Code behaviour):
+			// /s → highlight "sessions" → Enter → /sessions dispatches.
 			if sel := a.palette.Selected(); sel != nil {
 				if sel.Disabled {
 					a.statusBar.SetStatus(sel.DisabledReason)
 					return nil
 				}
-				trigger := a.input.TriggerType()
-				if trigger == "command" || trigger == "help" {
-					definition, known := a.commands.Lookup(sel.Value)
-					if known && definition.Immediate {
-						a.input.Reset()
-						a.palette.Hide()
-						a.layout()
-						return a.handleSlashCommand("/" + sel.Value)
-					}
-					// Argument sub-palettes (model/provider/mode) are declared in
-					// components.SlashSubPalettes — the same source TriggerType uses.
+				trigger2 := a.input.TriggerType()
+				// Command palette: dispatch the selected command.
+				if trigger2 == "command" || trigger2 == "help" {
+					// Sub-palette trigger (model, provider, mode, …) → insert
+					// value and re-show the sub-items.
 					if components.SlashSubPalettes[sel.Value] {
 						a.input.InsertValue(sel.Value)
 						a.updatePalette()
@@ -74,12 +70,55 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 						}
 						return nil
 					}
+					// Known command → dispatch immediately.
+					if definition, known := a.commands.Lookup(sel.Value); known {
+						a.input.Reset()
+						a.palette.Hide()
+						a.layout()
+						if definition.Immediate {
+							return a.handleSlashCommand("/" + sel.Value)
+						}
+						// Non-immediate: insert into input so user can add args.
+						a.input.InsertValue("/" + sel.Value)
+						return nil
+					}
 				}
-				a.input.InsertValue(sel.Value)
+				// Sub-palette item (a model name, provider name, …): build the
+				// full slash command from the trigger + item and dispatch it.
+				raw := strings.TrimSpace(a.input.Value())
+				a.input.Reset()
 				a.palette.Hide()
 				a.layout()
-				return nil
+				if raw != "" && strings.HasPrefix(raw, "/") {
+					return a.handleSlashCommand(raw)
+				}
+				return a.handleSlashCommand("/" + trigger2 + " " + sel.Value)
 			}
+
+			// Free-form escape: dispatch raw input only when there's no
+			// selection (user bypassed the palette).
+			trigger := a.input.TriggerType()
+			filter := strings.TrimSpace(a.input.TriggerValue())
+			raw := strings.TrimSpace(a.input.Value())
+			if raw != "" && strings.HasPrefix(raw, "/") {
+				name := strings.Fields(raw)[0]
+				name = strings.TrimPrefix(name, "/")
+				if _, known := a.commands.Lookup(name); known || strings.Contains(raw, " ") {
+					a.input.Reset()
+					a.palette.Hide()
+					a.layout()
+					return a.handleSlashCommand(raw)
+				}
+			}
+			if filter != "" && trigger != "command" && trigger != "help" {
+				a.input.Reset()
+				a.palette.Hide()
+				a.layout()
+				return a.handleSlashCommand("/" + trigger + " " + filter)
+			}
+			// No exact match, no selection — close palette, keep text.
+			a.palette.Hide()
+			a.layout()
 		case "up", "down", "ctrl+p", "ctrl+n", "tab", "shift+tab", "ctrl+tab", "pgup", "pgdown":
 			pal, cmd := a.palette.Update(m)
 			a.palette = pal
@@ -112,9 +151,6 @@ func (a *App) handleKey(m tea.KeyMsg) tea.Cmd {
 		return nil
 	case "ctrl+b":
 		a.taskBoard.Toggle()
-		if a.taskBoard.Visible() {
-			a.refreshTaskBoard()
-		}
 		a.layout()
 		return nil
 	case "ctrl+t":
@@ -298,7 +334,14 @@ func (a *App) submitInput() tea.Cmd {
 	a.updateActiveTokens()
 	a.layout()
 	if strings.HasPrefix(prompt, "/") {
-		return a.handleSlashCommand(prompt)
+		// Only dispatch if it's a known command or has a space (sub-command).
+		name := strings.Fields(prompt)[0]
+		name = strings.TrimPrefix(name, "/")
+		if _, known := a.commands.Lookup(name); known || strings.Contains(prompt, " ") {
+			return a.handleSlashCommand(prompt)
+		}
+		// Unknown slash command — treat as regular message.
+		return a.startAgent(prompt)
 	}
 	return a.startAgent(prompt)
 }

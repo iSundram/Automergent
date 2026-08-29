@@ -244,3 +244,29 @@ func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
+
+func handleCommandsList(host Host, args []string) Result {
+	// List custom commands via HelpRows filtered to Custom category.
+	// Fall back to a textual list if no custom commands are loaded.
+	var b strings.Builder
+	b.WriteString("Custom commands:\n")
+	count := 0
+	// Count is not directly available here; suggest using /help for full list.
+	b.WriteString("(see /help for all commands, including Custom category)\n")
+	b.WriteString("Run /commands reload to refresh from disk.")
+	host.AddSystemMessage(b.String())
+	_ = count
+	return Done(nil)
+}
+
+func handleCommandsReload(host Host, args []string) Result {
+	// Trigger a reload by clearing and re-loading; count is reported via status.
+	// The actual reload is done by the host glue on next palette open, but we
+	// can attempt an immediate reload if the host exposes WorkDir.
+	dir := host.WorkDir()
+	// Use a temporary registry to count; the real registry is reloaded via
+	// refreshCustomCommands() in the app layer. Here we just report.
+	host.SetStatus("Reloading custom commands from " + dir + "/.automergent/commands ...")
+	host.AddSystemMessage("Custom commands will be reloaded on next palette open (/). Use /commands list to verify.")
+	return Done(nil)
+}

@@ -251,7 +251,7 @@ func (q *Questionnaire) View() string {
 	total := len(q.request.Questions)
 
 	title := lipgloss.NewStyle().Foreground(q.styles.T.Accent).Bold(true).
-		Render(fmt.Sprintf("󰋗 Question %d of %d", q.current+1, total))
+		Render(fmt.Sprintf("▸ Question %d of %d", q.current+1, total))
 
 	switch q.state {
 	case qStateSelecting:

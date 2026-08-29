@@ -11,6 +11,7 @@ package app
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -50,7 +51,7 @@ func (s shellSource) Facts() []string {
 				facts = append(facts, rec.ErrMessage)
 			}
 		} else if !rec.StartedAt.IsZero() {
-			facts = append(facts, render.Elapsed(int(timeSince(rec.StartedAt).Seconds())))
+			facts = append(facts, render.Elapsed(int(time.Since(rec.StartedAt).Seconds())))
 		}
 	}
 	return facts
@@ -137,12 +138,7 @@ func (s agentSource) Lines() []string {
 	snap := inst.Snapshot()
 
 	out := []string{"task:"}
-	inst.Lock()
-	prompt := inst.Prompt
-	turns := append([]toolsagent.AgentTurn(nil), inst.Turns...)
-	result := inst.Result
-	err := inst.Error
-	inst.Unlock()
+	prompt, turns, result, err := inst.Detail()
 
 	for _, l := range strings.Split(strings.TrimRight(prompt, "\n"), "\n") {
 		out = append(out, "  "+l)

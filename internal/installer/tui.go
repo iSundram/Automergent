@@ -319,7 +319,7 @@ func (m Model) renderActive(body *strings.Builder, width int) {
 		active := m.state == step.state
 		icon, color := "○", m.theme.Muted
 		if completed {
-			icon, color = "󰄬", m.theme.Green
+			icon, color = "✓", m.theme.Green
 		} else if active {
 			icon, color = m.spinner.View(), m.theme.Accent
 		}
@@ -338,7 +338,7 @@ func (m Model) renderActive(body *strings.Builder, width int) {
 }
 
 func (m Model) renderSuccess(body *strings.Builder, width int) {
-	body.WriteString(lipgloss.NewStyle().Foreground(m.theme.Green).Bold(true).Render("󰄬  Automergent is ready") + "\n\n")
+	body.WriteString(lipgloss.NewStyle().Foreground(m.theme.Green).Bold(true).Render("✓  Automergent is ready") + "\n\n")
 	body.WriteString(m.field("Binary", m.targetDetail()) + "\n")
 	body.WriteString(m.field("Version", m.version) + "\n")
 	body.WriteString(m.field("Platform", m.platformDetail()) + "\n")
@@ -349,7 +349,7 @@ func (m Model) renderSuccess(body *strings.Builder, width int) {
 }
 
 func (m Model) renderError(body *strings.Builder, width int) {
-	body.WriteString(lipgloss.NewStyle().Foreground(m.theme.Red).Bold(true).Render("󰅙  Installation failed") + "\n\n")
+	body.WriteString(lipgloss.NewStyle().Foreground(m.theme.Red).Bold(true).Render("✗  Installation failed") + "\n\n")
 	body.WriteString(m.field("Step", m.status) + "\n")
 	if m.info != nil {
 		body.WriteString(m.field("Target", m.info.DestDir) + "\n")

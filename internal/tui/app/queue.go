@@ -40,6 +40,7 @@ func (a *App) enqueueMessage(text string, boundary bool) bool {
 		isCmd:    strings.HasPrefix(text, "/"),
 	}
 	a.msgQueue = append(a.msgQueue, msg)
+	a.refreshQueueStrip()
 
 	// Slash commands are local dispatch, so they cannot be steered into the
 	// model's context — they always wait for the turn to end.
@@ -59,12 +60,13 @@ func (a *App) deliverBoundaryMessages() {
 	kept := a.msgQueue[:0]
 	for _, msg := range a.msgQueue {
 		if msg.boundary && !msg.isCmd && a.ag.Steer(msg.text) {
-			a.conversation.AddMessage("system", "↳ steering: "+msg.text, false)
+			a.conversation.AddMessage("system", "⎿ steering: "+msg.text, false)
 			continue
 		}
 		kept = append(kept, msg)
 	}
 	a.msgQueue = kept
+	a.refreshQueueStrip()
 }
 
 // markQueueBoundary promotes queued messages to boundary delivery — the ctrl+j
@@ -83,6 +85,7 @@ func (a *App) markQueueBoundary() bool {
 		a.msgQueue[i].boundary = true
 	}
 	a.deliverBoundaryMessages()
+	a.refreshQueueStrip()
 	return true
 }
 
@@ -91,6 +94,7 @@ func (a *App) markQueueBoundary() bool {
 func (a *App) clearQueue() int {
 	n := len(a.msgQueue)
 	a.msgQueue = nil
+	a.refreshQueueStrip()
 	if a.ag != nil {
 		a.ag.ClearSteerQueue()
 	}
@@ -106,6 +110,7 @@ func (a *App) drainQueue() tea.Cmd {
 	for len(a.msgQueue) > 0 {
 		msg := a.msgQueue[0]
 		a.msgQueue = a.msgQueue[1:]
+		a.refreshQueueStrip()
 
 		text := strings.TrimSpace(msg.text)
 		if text == "" {

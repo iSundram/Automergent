@@ -465,6 +465,16 @@ func stripLeader(s string) string {
 	return s
 }
 
+// firstNonEmptyStr returns the first value with non-blank content.
+func firstNonEmptyStr(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
+}
+
 // itoa is a tiny int formatter kept local so chip building reads cleanly.
 func itoa(n int) string {
 	if n == 0 {

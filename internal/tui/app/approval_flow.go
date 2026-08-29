@@ -119,7 +119,7 @@ func (m approvalModel) render() string {
 
 func (m approvalModel) renderRootRisk() string {
 	title := lipgloss.NewStyle().Foreground(lipgloss.Color("220")).Bold(true).
-		Render("⚠  You are running with root/admin privileges")
+		Render("▲  You are running with root/admin privileges")
 	body := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).
 		Render("Automergent will be able to read, edit, and execute files in this\n" +
 			"workspace with elevated privileges. This warning is shown once.")
@@ -148,7 +148,7 @@ func (m approvalModel) renderOptions(options []string) string {
 	lines := make([]string, 0, len(options))
 	for i, opt := range options {
 		if i == m.selected {
-			cursor := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true).Render("›")
+			cursor := lipgloss.NewStyle().Foreground(lipgloss.Color("39")).Bold(true).Render("▸")
 			text := lipgloss.NewStyle().Foreground(lipgloss.Color("252")).Bold(true).Render(opt)
 			lines = append(lines, "  "+cursor+" "+text)
 		} else {

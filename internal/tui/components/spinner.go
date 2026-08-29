@@ -25,7 +25,7 @@ type Spinner struct {
 func NewSpinner(styles *themes.Styles) Spinner {
 	sp := spinner.New()
 	if os.Getenv("AUTOMERGENT_REDUCED_MOTION") == "1" || os.Getenv("AUTOMERGENT_REDUCED_MOTION") == "true" {
-		sp.Spinner = spinner.Spinner{Frames: []string{"⋯"}, FPS: 0}
+		sp.Spinner = spinner.Spinner{Frames: []string{"…"}, FPS: 0}
 	}
 	sp.Spinner = spinner.Points
 	sp.Style = lipgloss.NewStyle().Foreground(styles.T.Accent)
@@ -72,7 +72,7 @@ func (s Spinner) View() string {
 		label = "thinking"
 	}
 	if s.reducedMotion {
-		return "⋯ " + s.styles.Dim.Render(label)
+		return "… " + s.styles.Dim.Render(label)
 	}
 	return s.sp.View() + " " + s.styles.Dim.Render(label+"…")
 }

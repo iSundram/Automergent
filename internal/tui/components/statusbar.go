@@ -14,7 +14,7 @@ import (
 //
 // The bar is composed of independent slots rather than one status string:
 //
-//	▐ ACCEPT EDITS ▌  ⚙ read_file…               ctx 12% ##──────   main
+//	▐ ACCEPT EDITS ▌  ▸ read_file…               ctx 12% ##──────   main
 //	└ mode            └ activity / outcome       └ HUD segments
 //
 // Keeping these separate is what lets the mode chip stay put while transient
@@ -33,7 +33,7 @@ type StatusBar struct {
 
 	// mode is the approval mode chip: manual | accept-edits | auto | plan.
 	mode string
-	// activity is transient: "thinking…", "⚙ read_file…", "retrying (3/10)".
+	// activity is transient: "thinking…", "▸ read_file…", "retrying (3/10)".
 	activity string
 	// outcome is sticky until the next run starts: "CANCELLED", "ERROR".
 	outcome string
@@ -169,7 +169,7 @@ func (s StatusBar) activityStyle() lipgloss.Style {
 		return base.Foreground(s.styles.T.Yellow).Bold(true)
 	case strings.Contains(activity, "retry"), strings.Contains(activity, "retrying"):
 		return base.Foreground(s.styles.T.Yellow).Bold(true)
-	case strings.Contains(activity, "thinking"), strings.Contains(activity, "💭"):
+	case strings.Contains(activity, "thinking"), strings.HasPrefix(activity, "● "):
 		return base.Foreground(s.styles.T.Accent)
 	case strings.Contains(activity, "ready"):
 		return base.Foreground(s.styles.T.Subtext)

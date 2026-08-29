@@ -61,6 +61,37 @@ func (a *App) handleEscape() tea.Cmd {
 		a.disarmEscape()
 		return a.forwardEscape()
 
+	// 4b. Fullscreen task inspector. Reachable only via handleInspectorKeys in
+	//     normal flow; listed here so ESC can never fall through to the queue or
+	//     the run while the inspector owns the screen.
+	case a.inspector != nil && a.inspector.Visible():
+		a.inspector.Hide()
+		a.inspectorFilterMode = false
+		a.disarmEscape()
+		a.layout()
+		return nil
+
+	// 4c. Full-page command overlay.
+	case a.fullPage.Visible():
+		a.fullPage.Hide()
+		a.disarmEscape()
+		a.layout()
+		return nil
+
+	// 4d. Provider Studio overlay.
+	case a.providerStudio.Visible():
+		a.providerStudio.Hide()
+		a.disarmEscape()
+		a.layout()
+		return nil
+
+	// 4e. Model Hub overlay.
+	case a.modelHub.Visible():
+		a.modelHub.Hide()
+		a.disarmEscape()
+		a.layout()
+		return nil
+
 	// 5. Diff overlay, including a proposal under review.
 	case a.diffPane.Visible():
 		if a.diffPane.Visible() {

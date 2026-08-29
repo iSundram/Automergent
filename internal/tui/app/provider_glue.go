@@ -175,9 +175,6 @@ func (a *App) switchProvider(provider, model string) error {
 	if provider == "" {
 		return fmt.Errorf("provider cannot be empty")
 	}
-	if !config.IsKnownProvider(provider) {
-		return fmt.Errorf("unknown provider %q", provider)
-	}
 	a.ensureProviderConfig(provider)
 	oldProvider, oldModel := a.cfg.Provider, a.cfg.Model
 	a.cfg.Provider = provider

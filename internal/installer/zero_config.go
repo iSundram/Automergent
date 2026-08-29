@@ -345,7 +345,7 @@ func PrintZeroConfigSummary(result *ZeroConfigResult) string {
 			if len(w) > 55 {
 				w = w[:52] + "..."
 			}
-			sb.WriteString(fmt.Sprintf("│    ⚠ %-53s │\n", w))
+			sb.WriteString(fmt.Sprintf("│    ▲ %-53s │\n", w))
 		}
 	}
 

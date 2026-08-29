@@ -441,6 +441,16 @@ func (a *AgentInstance) LastOutput() string {
 	return a.Result
 }
 
+// Detail returns a locked copy of the fields the inspector shows: the task
+// prompt, the full turn log, and the outcome. The UI must not take the
+// instance's lock itself, so the read is offered as a method next to the other
+// state accessors.
+func (a *AgentInstance) Detail() (prompt string, turns []AgentTurn, result string, err error) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.Prompt, append([]AgentTurn(nil), a.Turns...), a.Result, a.Error
+}
+
 // Snapshot returns a locked copy of the instance state.
 func (a *AgentInstance) Snapshot() AgentSnapshot {
 	lastLine := a.LastLine()

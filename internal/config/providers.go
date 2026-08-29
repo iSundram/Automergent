@@ -37,6 +37,14 @@ type ProviderSpec struct {
 	// SetupKeys lists the /provider set keys the provider supports beyond the
 	// universal apiKey/baseUrl/defaultModel.
 	SetupKeys []string
+	// ApiType identifies the API protocol: "openai", "anthropic", "gemini", "custom".
+	ApiType string
+	// ModelApiUrl is the endpoint path for fetching model lists (e.g. "/v1/models").
+	ModelApiUrl string
+	// SupportedEfforts lists the effort levels the provider supports.
+	SupportedEfforts []string
+	// SupportsEffort indicates whether the provider has configurable effort levels.
+	SupportsEffort bool
 }
 
 // providerSpecs is the built-in provider catalog.
@@ -45,7 +53,7 @@ var providerSpecs = map[string]ProviderSpec{
 		Name:           "google",
 		DisplayName:    "Google Gemini",
 		Description:    "Gemini models — AI Studio (API key) or Vertex AI (project + location)",
-		Icon:           "󰊭",
+		Icon:           "●",
 		DefaultModel:   "gemini-3.6-flash",
 		EnvKeys:        []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"},
 		Backends:       []string{"aistudio", "vertex"},
@@ -54,6 +62,82 @@ var providerSpecs = map[string]ProviderSpec{
 		CustomModels:   true,
 		LiveModelList:  true,
 		SetupKeys:      []string{"backend", "project", "location", "orgId"},
+		ApiType:        "gemini",
+		ModelApiUrl:    "",
+		SupportedEfforts: []string{"minimal", "low", "medium", "high"},
+		SupportsEffort: true,
+	},
+	"openai": {
+		Name:           "openai",
+		DisplayName:    "OpenAI",
+		Description:    "GPT models — OpenAI API or compatible endpoints",
+		Icon:           "󰍉",
+		DefaultModel:   "gpt-4o",
+		EnvKeys:        []string{"OPENAI_API_KEY"},
+		Backends:       []string{},
+		DefaultBackend: "",
+		CustomBaseURL:  true,
+		CustomModels:   true,
+		LiveModelList:  true,
+		SetupKeys:      []string{"organization", "project"},
+		ApiType:        "openai",
+		ModelApiUrl:    "/v1/models",
+		SupportedEfforts: []string{"minimal", "low", "medium", "high"},
+		SupportsEffort: true,
+	},
+	"anthropic": {
+		Name:           "anthropic",
+		DisplayName:    "Anthropic",
+		Description:    "Claude models — Anthropic API",
+		Icon:           "󰚥",
+		DefaultModel:   "claude-3-5-sonnet-20241022",
+		EnvKeys:        []string{"ANTHROPIC_API_KEY"},
+		Backends:       []string{},
+		DefaultBackend: "",
+		CustomBaseURL:  true,
+		CustomModels:   true,
+		LiveModelList:  true,
+		SetupKeys:      []string{},
+		ApiType:        "anthropic",
+		ModelApiUrl:    "/v1/models",
+		SupportedEfforts: []string{},
+		SupportsEffort: false,
+	},
+	"deepseek": {
+		Name:           "deepseek",
+		DisplayName:    "DeepSeek",
+		Description:    "DeepSeek models — DeepSeek API or compatible endpoints",
+		Icon:           "󱎑",
+		DefaultModel:   "deepseek-chat",
+		EnvKeys:        []string{"DEEPSEEK_API_KEY"},
+		Backends:       []string{},
+		DefaultBackend: "",
+		CustomBaseURL:  true,
+		CustomModels:   true,
+		LiveModelList:  true,
+		SetupKeys:      []string{},
+		ApiType:        "openai",
+		ModelApiUrl:    "/v1/models",
+		SupportedEfforts: []string{},
+		SupportsEffort: false,
+	},
+	"ollama": {
+		Name:           "ollama",
+		DisplayName:    "Ollama (Local)",
+		Description:    "Local models via Ollama server",
+		Icon:           "󱃖",
+		DefaultModel:   "llama3.2",
+		EnvKeys:        []string{},
+		Backends:       []string{},
+		DefaultBackend: "",
+		CustomBaseURL:  true,
+		CustomModels:   true,
+		LiveModelList:  true,
+		SetupKeys:      []string{"host"},
+		ApiType:        "openai",
+		ModelApiUrl:    "/api/tags",
+		SupportedEfforts: []string{},
+		SupportsEffort: false,
 	},
 }
 
@@ -102,7 +186,7 @@ func ProviderIcon(provider string) string {
 	if spec, ok := providerSpecs[provider]; ok && spec.Icon != "" {
 		return spec.Icon
 	}
-	return "🔌"
+	return "●"
 }
 
 // IsValidBackend reports whether backend is valid for the provider. An empty

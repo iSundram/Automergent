@@ -9,6 +9,35 @@ import (
 	"github.com/iSundram/Automergent/internal/tui/components"
 )
 
+// CommandTier indicates visual importance in the palette.
+type CommandTier int
+
+const (
+	TierPrimary   CommandTier = iota // accent-styled, prominent
+	TierSecondary                    // normal styling (default)
+	TierTertiary                     // dimmed
+)
+
+// CommandType determines how a command is executed and displayed.
+type CommandType int
+
+const (
+	// CmdHandler dispatches to a registered Handler function (default).
+	CmdHandler CommandType = iota
+	// CmdPrompt injects PromptTemplate into the agent conversation as context.
+	CmdPrompt
+	// CmdFullPage opens a full-page overlay for the command output.
+	CmdFullPage
+)
+
+// SubCommand represents a nested sub-command under a parent command.
+type SubCommand struct {
+	Name        string
+	Description string
+	ArgsHint    string
+	Handler     Handler
+}
+
 // Command represents a slash command definition. The registry is the single
 // source of truth: handlers, palette metadata and help documentation are all
 // derived from it and must not be duplicated elsewhere.
@@ -21,55 +50,72 @@ type Command struct {
 
 	// ArgsHint is the argument hint shown in the palette and help (e.g. "<name|reset>").
 	ArgsHint string
-	// WhenToUse describes when a model should invoke this command. It is
-	// model-facing metadata reserved for future skill exposure.
+	// WhenToUse describes when a model should invoke this command.
 	WhenToUse string
+	// Tier controls visual prominence in the palette.
+	Tier CommandTier
+	// Type determines execution mode: handler, prompt injection, or full-page overlay.
+	Type CommandType
 	// Immediate reports whether selecting the command in the palette runs it
 	// right away instead of completing its name into the input.
 	Immediate bool
+	// SubPalette names a sub-palette that opens after the command is selected.
+	SubPalette string
+	// SubCommands defines nested sub-commands (e.g. /mcp enable, /mcp disable).
+	SubCommands []SubCommand
+	// PromptTemplate is injected into the agent conversation when Type == CmdPrompt.
+	// Supports $ARGUMENTS and $1..$9 placeholder expansion.
+	PromptTemplate string
+	// FullPageTitle is the title shown in the full-page overlay when Type == CmdFullPage.
+	FullPageTitle string
+	// Completion returns tab-completion suggestions for the given partial argument.
+	Completion func(Host, string) []string
 	// Hidden excludes the command from the palette and help overlay.
 	Hidden bool
 	// Sensitive marks commands whose arguments must never be logged verbatim.
 	Sensitive bool
-	// SupportsHeadless marks commands that can run in -p / no-tui mode where
-	// overlays do not exist and only text output is visible.
+	// SupportsHeadless marks commands that can run in -p / no-tui mode.
 	SupportsHeadless bool
 
 	// Enabled gates execution against live host state. When nil the command is
 	// always enabled.
 	Enabled func(Host) bool
-	// DisabledReason explains why a disabled command cannot run. Only consulted
-	// when Enabled returns false; an empty result falls back to the command name.
+	// DisabledReason explains why a disabled command cannot run.
 	DisabledReason func(Host) string
 	// Current decorates stateful toggle commands with their on/off status.
 	Current func(Host) bool
 }
 
-// Handler is a command handler function. It receives the host (App) and parsed
-// arguments and returns a Result carrying optional text output and/or an async
-// continuation. All other reporting happens through Host methods.
+// ExpandPrompt replaces $ARGUMENTS and $1..$9 placeholders in the prompt template.
+func (c *Command) ExpandPrompt(args []string) string {
+	if c.PromptTemplate == "" {
+		return ""
+	}
+	text := c.PromptTemplate
+	joined := strings.Join(args, " ")
+	text = strings.ReplaceAll(text, "$ARGUMENTS", joined)
+	for i, arg := range args {
+		if i >= 9 {
+			break
+		}
+		placeholder := fmt.Sprintf("$%d", i+1)
+		text = strings.ReplaceAll(text, placeholder, arg)
+	}
+	return text
+}
+
+// Handler is a command handler function.
 type Handler func(Host, []string) Result
 
-// Result is the outcome of executing a command handler. Handlers normally
-// report through the Host; Result carries anything extra the dispatcher must
-// relay to the front end.
+// Result is the outcome of executing a command handler.
 type Result struct {
-	// Cmd is an optional asynchronous continuation (bubbletea command) that the
-	// caller must run.
-	Cmd tea.Cmd
-	// Text is optional textual output. In interactive mode it is rendered as a
-	// system message by the caller; in headless mode it is printed to stdout.
+	Cmd  tea.Cmd
 	Text string
 }
 
-// TextResult builds a pure-text result.
 func TextResult(text string) Result { return Result{Text: text} }
-
-// Done wraps an async continuation into a result.
-func Done(cmd tea.Cmd) Result { return Result{Cmd: cmd} }
-
-// IsZero reports whether the result carries nothing for the caller to do.
-func (r Result) IsZero() bool { return r.Cmd == nil && r.Text == "" }
+func Done(cmd tea.Cmd) Result       { return Result{Cmd: cmd} }
+func (r Result) IsZero() bool       { return r.Cmd == nil && r.Text == "" }
 
 // ErrUnknownCommand is returned when a command is not registered.
 type ErrUnknownCommand string
@@ -98,7 +144,6 @@ type Registry struct {
 	aliases  map[string]string
 }
 
-// NewRegistry creates a new command registry.
 func NewRegistry() *Registry {
 	return &Registry{
 		handlers: make(map[string]Handler),
@@ -106,9 +151,6 @@ func NewRegistry() *Registry {
 	}
 }
 
-// Register adds a command with its handler. Duplicate names or aliases and
-// nil handlers panic: registration errors are programmer errors and must fail
-// loudly at startup instead of surfacing as runtime dispatch failures.
 func (r *Registry) Register(cmd Command, handler Handler) {
 	for _, existing := range r.commands {
 		if existing.Name == cmd.Name {
@@ -128,14 +170,10 @@ func (r *Registry) Register(cmd Command, handler Handler) {
 	r.handlers[cmd.Name] = handler
 }
 
-// MustRegister registers and panics on duplicate. Kept for call-site clarity.
 func (r *Registry) MustRegister(cmd Command, handler Handler) {
 	r.Register(cmd, handler)
 }
 
-// RegisterCustom adds a user-provided command without panicking. Unlike
-// Register it refuses collisions with builtin names or aliases (builtins win)
-// and reports the conflict as an error instead.
 func (r *Registry) RegisterCustom(cmd Command, handler Handler) error {
 	taken := make(map[string]string)
 	for _, existing := range r.commands {
@@ -151,7 +189,11 @@ func (r *Registry) RegisterCustom(cmd Command, handler Handler) error {
 	clean := Command{
 		Name: cmd.Name, Description: cmd.Description, Category: cmd.Category,
 		Icon: cmd.Icon, ArgsHint: cmd.ArgsHint, WhenToUse: cmd.WhenToUse,
-		Immediate: cmd.Immediate, Hidden: cmd.Hidden, Sensitive: cmd.Sensitive,
+		Tier: cmd.Tier, Type: cmd.Type, Immediate: cmd.Immediate,
+		SubPalette: cmd.SubPalette, SubCommands: cmd.SubCommands,
+		PromptTemplate: cmd.PromptTemplate, FullPageTitle: cmd.FullPageTitle,
+		Completion: cmd.Completion,
+		Hidden: cmd.Hidden, Sensitive: cmd.Sensitive,
 		SupportsHeadless: cmd.SupportsHeadless,
 	}
 	seen := map[string]bool{cmd.Name: true}
@@ -172,7 +214,6 @@ func (r *Registry) RegisterCustom(cmd Command, handler Handler) error {
 	return nil
 }
 
-// Lookup finds a command by name or alias.
 func (r *Registry) Lookup(name string) (Command, bool) {
 	if canonical, ok := r.aliases[name]; ok {
 		name = canonical
@@ -185,19 +226,13 @@ func (r *Registry) Lookup(name string) (Command, bool) {
 	return Command{}, false
 }
 
-// List returns all registered commands, hidden ones included.
-func (r *Registry) List() []Command {
-	return r.commands
-}
+func (r *Registry) List() []Command { return r.commands }
 
-// HasHandler reports whether a command has a handler.
 func (r *Registry) HasHandler(name string) bool {
 	_, ok := r.handlers[name]
 	return ok
 }
 
-// RemoveCustom unregisters all user-provided (Custom category) commands so
-// they can be freshly reloaded from disk. Returns how many were removed.
 func (r *Registry) RemoveCustom() int {
 	kept := make([]Command, 0, len(r.commands))
 	removed := 0
@@ -219,9 +254,6 @@ func (r *Registry) RemoveCustom() int {
 	return removed
 }
 
-// HeadlessCommands lists commands marked safe to run without a TUI. The
-// headless entrypoint (planned slash support in `-p` mode) will consume this;
-// keeping the filter here means new commands opt in at definition time.
 func (r *Registry) HeadlessCommands() []Command {
 	out := make([]Command, 0, len(r.commands))
 	for _, cmd := range r.commands {
@@ -232,8 +264,44 @@ func (r *Registry) HeadlessCommands() []Command {
 	return out
 }
 
-// Dispatch looks up and executes a command handler. Names resolve through
-// aliases first. A registered but disabled command yields ErrCommandDisabled.
+// DispatchSubCommand resolves a sub-command by name and executes it.
+// The subcommand name is prepended to args so generic handlers (like handleMCP)
+// that switch on args[0] work unchanged whether dispatched via sub-command or
+// via the parent handler.
+func (r *Registry) DispatchSubCommand(host Host, parentName string, subName string, args []string) (Result, error) {
+	if canonical, ok := r.aliases[parentName]; ok {
+		parentName = canonical
+	}
+	cmd, ok := r.Lookup(parentName)
+	if !ok {
+		return Result{}, ErrUnknownCommand(parentName)
+	}
+	for _, sub := range cmd.SubCommands {
+		if sub.Name == subName {
+			fullArgs := append([]string{subName}, args...)
+			return sub.Handler(host, fullArgs), nil
+		}
+	}
+	return Result{}, ErrUnknownCommand(parentName + " " + subName)
+}
+
+// LookupSubCommand finds a sub-command within a parent command.
+func (r *Registry) LookupSubCommand(parentName, subName string) (SubCommand, bool) {
+	if canonical, ok := r.aliases[parentName]; ok {
+		parentName = canonical
+	}
+	cmd, ok := r.Lookup(parentName)
+	if !ok {
+		return SubCommand{}, false
+	}
+	for _, sub := range cmd.SubCommands {
+		if sub.Name == subName {
+			return sub, true
+		}
+	}
+	return SubCommand{}, false
+}
+
 func (r *Registry) Dispatch(host Host, name string, args []string) (Result, error) {
 	if canonical, ok := r.aliases[name]; ok {
 		name = canonical
@@ -259,9 +327,6 @@ func (r *Registry) Dispatch(host Host, name string, args []string) (Result, erro
 	return handler(host, args), nil
 }
 
-// PaletteItems returns visible commands as PaletteItems for the command
-// palette, evaluated against host so Enabled/DisabledReason/Current decorations
-// reflect live state. A nil host treats every command as enabled and inactive.
 func (r *Registry) PaletteItems(host Host) []components.PaletteItem {
 	items := make([]components.PaletteItem, 0, len(r.commands))
 	for _, cmd := range r.commands {
@@ -275,6 +340,7 @@ func (r *Registry) PaletteItems(host Host) []components.PaletteItem {
 			Icon:        cmd.Icon,
 			Category:    cmd.Category,
 			Hint:        cmd.ArgsHint,
+			Tier:        components.CommandTier(cmd.Tier),
 			SearchTerms: strings.Join(append(append([]string{}, cmd.Aliases...), cmd.Description, cmd.Category), " "),
 		}
 		if host != nil && cmd.Current != nil {
@@ -290,6 +356,27 @@ func (r *Registry) PaletteItems(host Host) []components.PaletteItem {
 			}
 		}
 		items = append(items, item)
+	}
+	return items
+}
+
+// SubCommandPaletteItems returns sub-commands as PaletteItems for the palette.
+func (r *Registry) SubCommandPaletteItems(host Host, parentName string) []components.PaletteItem {
+	cmd, ok := r.Lookup(parentName)
+	if !ok {
+		return nil
+	}
+	items := make([]components.PaletteItem, 0, len(cmd.SubCommands))
+	for _, sub := range cmd.SubCommands {
+		items = append(items, components.PaletteItem{
+			Label:       sub.Name,
+			Value:       sub.Name,
+			Description: sub.Description,
+			Icon:        cmd.Icon,
+			Category:    cmd.Name,
+			Hint:        sub.ArgsHint,
+			Tier:        components.CommandTier(cmd.Tier),
+		})
 	}
 	return items
 }

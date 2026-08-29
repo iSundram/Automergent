@@ -9,6 +9,8 @@ import (
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/ai"
 	googleProvider "github.com/iSundram/Automergent/internal/ai/google"
+	openaiProvider "github.com/iSundram/Automergent/internal/ai/openai"
+	anthropicProvider "github.com/iSundram/Automergent/internal/ai/anthropic"
 	"github.com/iSundram/Automergent/internal/cache"
 	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/debug"
@@ -235,6 +237,18 @@ func buildProviderForConfig(cfg *config.Config, name, model string) (ai.Provider
 	switch name {
 	case "google":
 		return googleProvider.New(aiCfg), nil
+	case "openai":
+		return openaiProvider.New(aiCfg), nil
+	case "anthropic":
+		return anthropicProvider.New(aiCfg), nil
+	case "deepseek":
+		aiCfg.BaseURL = "https://api.deepseek.com/v1"
+		return openaiProvider.New(aiCfg), nil
+	case "ollama":
+		if aiCfg.BaseURL == "" {
+			aiCfg.BaseURL = "http://localhost:11434/v1"
+		}
+		return openaiProvider.New(aiCfg), nil
 	default:
 		if p, ok := ai.Get(name); ok {
 			return p, nil

@@ -15,7 +15,7 @@ func (a *App) requireProjectApproval(projectPath string) {
 
 func permissionInfoForTool(tc ai.ToolCall, name string) components.PermissionInfo {
 	info := components.PermissionInfo{
-		Icon:   "󰌑",
+		Icon:   "●",
 		Tool:   name,
 		Action: "Requesting permission to use this tool",
 		Risk:   "May change workspace or execute external operations",
@@ -33,26 +33,26 @@ func permissionInfoForTool(tc ai.ToolCall, name string) components.PermissionInf
 
 	switch tc.Name {
 	case "read_file", "view":
-		info.Icon, info.Action, info.Risk = "󰈔", "Read file contents", "Reads workspace data"
+		info.Icon, info.Action, info.Risk = "▸", "Read file contents", "Reads workspace data"
 		add("Path", str("path"))
 	case "list_directory":
-		info.Icon, info.Action, info.Risk = "󰉋", "Inspect directory structure", "Reads workspace metadata"
+		info.Icon, info.Action, info.Risk = "▸", "Inspect directory structure", "Reads workspace metadata"
 		add("Path", str("path"))
 	case "run_shell_command", "run_command", "bash":
-		info.Icon, info.Action, info.Risk = "󰆍", "Execute shell command", "Runs a local process"
+		info.Icon, info.Action, info.Risk = "▲", "Execute shell command", "Runs a local process"
 		if agent.CommandIsDangerous(tc.Name, tc.Args) {
-			info.Risk = "⚠ dangerous pattern — always-allow will match ONLY this exact command"
+			info.Risk = "▲ dangerous pattern — always-allow will match ONLY this exact command"
 			info.Dangerous = true
 		}
 		add("Command", str("command"))
 		add("Directory", str("working_directory"))
 		add("Always grants", agent.ShellGrantPreview(tc.Name, tc.Args))
 	case "web_fetch", "web_search":
-		info.Icon, info.Action, info.Risk = "󰖟", "Access web resource", "Sends a network request"
+		info.Icon, info.Action, info.Risk = "→", "Access web resource", "Sends a network request"
 		add("URL", str("url"))
 		add("Query", str("query"))
 	case "git_commit":
-		info.Icon, info.Action, info.Risk = "󰊢", "Create git commit", "Changes repository history"
+		info.Icon, info.Action, info.Risk = "⎿", "Create git commit", "Changes repository history"
 		add("Message", str("message"))
 	default:
 		if ctx := extractToolContext(tc.Name, tc.Args); ctx != "" {

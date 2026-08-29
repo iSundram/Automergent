@@ -218,6 +218,7 @@ func (a *App) recordTerminalAPIError(err error) {
 		rec.MaxAttempts = 1
 	}
 	a.recordAPIError(rec)
+	a.checkFailureThreshold()
 }
 
 // detailForCode maps a classified error code to a short qualifier, for errors
@@ -328,4 +329,40 @@ func firstNonEmpty(vals ...string) string {
 		}
 	}
 	return ""
+}
+
+// failureThresholdForModel is the number of consecutive terminal failures
+// on the same model that triggers the Model Hub failure alert.
+const failureThresholdForModel = 5
+
+// checkFailureThreshold counts consecutive terminal failures for the current
+// model and triggers the Model Hub failure alert when the threshold is reached.
+func (a *App) checkFailureThreshold() {
+	if a.modelHub == nil || !a.modelHub.Visible() {
+		return
+	}
+	provider := a.cfg.Provider
+	model := a.cfg.Model
+	if provider == "" || model == "" {
+		return
+	}
+	// Walk backwards through the error log counting consecutive terminal
+	// failures for this provider/model pair.
+	consecutive := 0
+	var lastCode string
+	for i := len(a.apiErrors) - 1; i >= 0; i-- {
+		rec := a.apiErrors[i]
+		if rec.Provider != provider || rec.Model != model {
+			break
+		}
+		if rec.Retrying {
+			// A retrying record means the final outcome is still unknown;
+			// count it but keep looking.
+		}
+		consecutive++
+		lastCode = rec.displayCode()
+	}
+	if consecutive >= failureThresholdForModel {
+		a.modelHub.ShowFailureAlert(model, provider, consecutive, lastCode)
+	}
 }

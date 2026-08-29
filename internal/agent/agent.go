@@ -577,7 +577,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	if a.cfg.Mode == "edit" && a.cfg.Security.RequireGitForAutoModes {
 		cwd, _ := os.Getwd()
 		if !gitIsRepo(ctx, cwd) {
-			a.Emit(EventStatus, "⚠ Not a git repository — edit mode requires git for safe rollback")
+			a.Emit(EventStatus, "▲ Not a git repository — edit mode requires git for safe rollback")
 		}
 	}
 
@@ -903,9 +903,9 @@ func formatThinking(thought string) string {
 	runes := []rune(strings.TrimSpace(thought))
 	if len(runes) > maxRunes {
 		runes = runes[:maxRunes]
-		return "💭 " + string(runes) + "..."
+		return "● " + string(runes) + "..."
 	}
-	return "💭 " + string(runes)
+	return "● " + string(runes)
 }
 
 func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, error) {

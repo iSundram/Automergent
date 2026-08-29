@@ -458,7 +458,7 @@ func (d Diff) View() string {
 	}
 
 	// Header
-	icon := lipgloss.NewStyle().Foreground(d.styles.T.Accent).Render("󰈙 ")
+	icon := lipgloss.NewStyle().Foreground(d.styles.T.Accent).Render("▸ ")
 	filename := lipgloss.NewStyle().Bold(true).Foreground(d.styles.T.Text).Render(displayPath(c.Filename))
 	addLabel := lipgloss.NewStyle().Foreground(d.styles.T.Green).Bold(true).Render(fmt.Sprintf("+%d", c.AddCount))
 	delLabel := lipgloss.NewStyle().Foreground(d.styles.T.Red).Bold(true).Render(fmt.Sprintf("-%d", c.DelCount))

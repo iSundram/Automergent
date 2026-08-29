@@ -34,7 +34,12 @@ func (t policyTestTool) EstimatedCost() tools.ToolCost {
 
 func newPolicyTestAgent(reg *tools.Registry) *Agent {
 	return &Agent{
-		cfg:                 &config.Config{Mode: "edit"},
+		// Mode "auto" so executeTool reaches the actual tool without waiting on
+		// a confirmation channel nobody serves in these tests. "edit" used to
+		// mean "the tool decides", but it now canonicalises to "manual", under
+		// which the write tool blocks for up to ConfirmationTimeout — which is
+		// why this suite used to hang for ten minutes before failing.
+		cfg:                 &config.Config{Mode: "auto"},
 		tools:               reg,
 		events:              make(chan Event, 64),
 		sessionAllowedTools: map[string]bool{},

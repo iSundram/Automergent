@@ -370,10 +370,6 @@ func providerUse(host Host, args []string) Result {
 		return Done(nil)
 	}
 	provider := args[0]
-	if !config.IsKnownProvider(provider) {
-		host.CommandError(fmt.Sprintf("Unknown provider %q", provider))
-		return Done(nil)
-	}
 	model := ""
 	if len(args) > 1 {
 		model = args[1]
@@ -444,10 +440,6 @@ func providerSetup(host Host, args []string) Result {
 		return Done(nil)
 	}
 	provider := args[0]
-	if !config.IsKnownProvider(provider) {
-		host.CommandError(fmt.Sprintf("Unknown provider %q", provider))
-		return Done(nil)
-	}
 	flags, runTest, errText := parseSetupFlags(args[1:])
 	if errText != "" {
 		host.CommandError(errText)
@@ -543,10 +535,6 @@ func providerSet(host Host, args []string) Result {
 		return Done(nil)
 	}
 	provider := args[0]
-	if !config.IsKnownProvider(provider) {
-		host.CommandError(fmt.Sprintf("Unknown provider %q", provider))
-		return Done(nil)
-	}
 	key := strings.ToLower(args[0+1])
 	value := strings.Join(args[2:], " ")
 	if strings.TrimSpace(value) == "" {
@@ -661,10 +649,6 @@ func providerUnset(host Host, args []string) Result {
 		return Done(nil)
 	}
 	provider := args[0]
-	if !config.IsKnownProvider(provider) {
-		host.CommandError(fmt.Sprintf("Unknown provider %q", provider))
-		return Done(nil)
-	}
 	key := strings.ToLower(args[1])
 	host.EnsureProviderConfig(provider)
 	pc := host.ProviderConfig(provider)
@@ -735,12 +719,8 @@ func providerFallbackCmd(host Host, args []string) Result {
 			host.CommandUsage("/provider fallback add <provider> <model>")
 			return Done(nil)
 		}
-		provider, model := args[1], args[2]
-		if !config.IsKnownProvider(provider) {
-			host.CommandError(fmt.Sprintf("Unknown provider %q", provider))
-			return Done(nil)
-		}
-		fps := host.ProviderFallbacks()
+provider, model := args[1], args[2]
+	fps := host.ProviderFallbacks()
 		if len(fps) >= maxFallbacks {
 			host.CommandError(fmt.Sprintf("Fallback chain is full (max %d)", maxFallbacks))
 			return Done(nil)

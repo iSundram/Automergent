@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
-
-	"github.com/iSundram/Automergent/internal/config"
 )
 
 // --- Configuration Handlers ---
@@ -109,11 +107,6 @@ func handleProviderAPIKey(host Host, args []string) Result {
 	}
 
 	provider := args[0]
-	if !config.IsKnownProvider(provider) {
-		host.CommandError(fmt.Sprintf("Unknown provider %q", provider))
-		return Done(nil)
-	}
-
 	host.EnsureProviderConfig(provider)
 	pc := host.ProviderConfig(provider)
 	pc.APIKey = strings.TrimSpace(strings.Join(args[1:], " "))
@@ -138,11 +131,6 @@ func handleProviderBaseURL(host Host, args []string) Result {
 	}
 
 	provider := args[0]
-	if !config.IsKnownProvider(provider) {
-		host.CommandError(fmt.Sprintf("Unknown provider %q", provider))
-		return Done(nil)
-	}
-
 	raw := strings.TrimSpace(args[1])
 	parsed, err := url.ParseRequestURI(raw)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {

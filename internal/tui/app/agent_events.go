@@ -71,7 +71,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.conversation.AddToolLifecycleStart(te.ID, te.Name, argText, ctx)
 			a.stats.ToolCallCount++
 			a.activeTool = te.Name
-			a.statusBar.SetStatus(fmt.Sprintf("⚙ %s…", te.Name))
+			a.statusBar.SetStatus(fmt.Sprintf("▸ %s…", te.Name))
 		} else if tc, ok := ev.Payload.(ai.ToolCall); ok {
 			argText := ""
 			if len(tc.Args) > 0 {
@@ -83,7 +83,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.conversation.AddToolLifecycleStart(tc.ID, tc.Name, argText, ctx)
 			a.stats.ToolCallCount++
 			a.activeTool = tc.Name
-			a.statusBar.SetStatus(fmt.Sprintf("⚙ %s…", tc.Name))
+			a.statusBar.SetStatus(fmt.Sprintf("▸ %s…", tc.Name))
 		}
 		return a.waitForAgentEvent()
 	case agent.EventToolDone:

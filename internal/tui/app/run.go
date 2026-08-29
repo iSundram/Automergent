@@ -22,6 +22,10 @@ func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *se
 	app.requireProjectApproval(projectApprovalPath)
 	p := tea.NewProgram(app)
 	app.sendToProgram = p.Send
+	// Notification hooks fire on backend goroutines; p.Send is the only safe way
+	// in, and it only exists now. This is also why the old init()-time hook was
+	// dead: there was no program to send to at package-init time.
+	app.installNotifications()
 	app.installQuestionnaire()
 	_, err := p.Run()
 

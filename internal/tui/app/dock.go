@@ -18,6 +18,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	toolsagent "github.com/iSundram/Automergent/internal/tools/agent"
 	toolsshell "github.com/iSundram/Automergent/internal/tools/shell"
@@ -199,6 +200,34 @@ func (a *App) backgroundCounts() (running, failed, total int) {
 
 // dockFocusActive reports whether the dock owns the keyboard.
 func (a *App) dockFocusActive() bool { return a.dock != nil && a.dock.Focused() }
+
+// dockRailView renders the always-on one-row summary of background work.
+//
+// This is the dock's resting state: exactly one dim row between the spinner and
+// the prompt, no chrome, answering the only two questions an idle user has — is
+// anything running, and did anything break. It never changes height, so unlike
+// the old always-open dock it cannot reflow the conversation while work runs.
+func (a *App) dockRailView() string {
+	if a.dock == nil || a.zenMode || a.confirm.Visible() {
+		return ""
+	}
+	text := a.dock.RailText()
+	if text == "" {
+		return ""
+	}
+	_, failed, _ := a.dock.Counts()
+	mark := render.GlyphRun
+	color := a.styles.T.Subtext
+	if failed > 0 {
+		mark = render.GlyphWarn
+		color = a.styles.T.Red
+	}
+	line := lipgloss.NewStyle().Foreground(color).Render(mark) + " " + text
+	if !a.dock.Focused() {
+		line += render.GlyphSep + "↓ dock"
+	}
+	return "  " + a.styles.Dim.Render(line)
+}
 
 // focusDock moves keyboard ownership from the input into the dock tray.
 func (a *App) focusDock() bool {

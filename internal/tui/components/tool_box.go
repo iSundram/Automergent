@@ -189,7 +189,7 @@ func (c *Conversation) diffStatChip(added, removed int) string {
 		parts = append(parts, green.Render(fmt.Sprintf("+%d", added)))
 	}
 	if removed > 0 {
-		parts = append(parts, red.Render(fmt.Sprintf("−%d", removed)))
+		parts = append(parts, red.Render(fmt.Sprintf("-%d", removed)))
 	}
 	return strings.Join(parts, " ")
 }
