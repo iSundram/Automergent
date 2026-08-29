@@ -42,7 +42,7 @@ func newPolicyTestAgent(reg *tools.Registry) *Agent {
 		cfg:                 &config.Config{Mode: "auto"},
 		tools:               reg,
 		events:              make(chan Event, 64),
-		sessionAllowedTools: map[string]bool{},
+		sessionGrants: newGrants(nil),
 	}
 }
 

@@ -100,7 +100,7 @@ func TestExecuteToolAlwaysApprovalScopedByOperationAndRisk(t *testing.T) {
 		cfg:                 &config.Config{Mode: "plan"},
 		tools:               reg,
 		events:              make(chan Event, 8),
-		sessionAllowedTools: map[string]bool{},
+		sessionGrants: newGrants(nil),
 	}
 
 	var confirms atomic.Int32
@@ -159,7 +159,7 @@ func TestExecuteToolAcceptsLegacyApprovalScope(t *testing.T) {
 		cfg:                 &config.Config{Mode: "plan"},
 		tools:               reg,
 		events:              make(chan Event, 4),
-		sessionAllowedTools: map[string]bool{legacyToolApprovalScope(tc, tool): true},
+		sessionGrants: newGrantsWithScopes(legacyToolApprovalScope(tc, tool)),
 	}
 
 	var confirms atomic.Int32
@@ -195,7 +195,7 @@ func TestExecuteToolAlwaysPersistsApprovalToSession(t *testing.T) {
 		sess:                sess,
 		tools:               reg,
 		events:              make(chan Event, 8),
-		sessionAllowedTools: map[string]bool{},
+		sessionGrants: newGrants(nil),
 		approvalSource:      "test",
 	}
 
@@ -277,7 +277,7 @@ func TestSetSessionReseedsApprovals(t *testing.T) {
 		cfg:                 &config.Config{Mode: "plan"},
 		tools:               reg,
 		events:              make(chan Event, 8),
-		sessionAllowedTools: map[string]bool{},
+		sessionGrants: newGrants(nil),
 	}
 
 	resumed := session.New()
@@ -317,7 +317,7 @@ func TestProjectScopedApprovalDoesNotLeakAcrossProjects(t *testing.T) {
 		cfg:                 &config.Config{Mode: "plan"},
 		tools:               reg,
 		events:              make(chan Event, 8),
-		sessionAllowedTools: map[string]bool{},
+		sessionGrants: newGrants(nil),
 		approvalSource:      "test",
 		workDir:             "/projects/alpha",
 	}
@@ -354,7 +354,7 @@ func TestProjectScopedApprovalDoesNotLeakAcrossProjects(t *testing.T) {
 		cfg:                 &config.Config{Mode: "plan"},
 		tools:               reg,
 		events:              make(chan Event, 8),
-		sessionAllowedTools: map[string]bool{},
+		sessionGrants: newGrants(nil),
 		approvalSource:      "test",
 		workDir:             "/projects/beta",
 	}

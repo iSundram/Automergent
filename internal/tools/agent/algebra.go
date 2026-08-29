@@ -426,6 +426,9 @@ type AgentSnapshot struct {
 	ToolCount int
 	// LastLine is the newest line of its own output.
 	LastLine string
+	// Activity is the bounded log of steps taken, newest last — the
+	// subagent's own short conversation for the viewer.
+	Activity []string
 	// Idle is how long since it last did anything observable. Zero when it has
 	// not started working yet or has finished.
 	Idle time.Duration
@@ -469,6 +472,7 @@ func (a *AgentInstance) Snapshot() AgentSnapshot {
 		CurrentTool: a.CurrentTool,
 		ToolCount:   a.ToolCount,
 		LastLine:    lastLine,
+		Activity:    append([]string(nil), a.Activity...),
 	}
 	if !a.StartedAt.IsZero() {
 		end := a.CompletedAt

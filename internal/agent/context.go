@@ -106,7 +106,6 @@ func isExploreToolName(name string) bool {
 	return strings.HasPrefix(name, "grep") ||
 		strings.HasPrefix(name, "glob") ||
 		strings.HasPrefix(name, "read") ||
-		name == "view" ||
 		strings.Contains(name, "search")
 }
 

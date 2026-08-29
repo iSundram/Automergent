@@ -109,36 +109,31 @@ func (a *Agent) shellGrantMatches(approvalScope string) bool {
 	}
 	wantTokens := strings.Fields(wantCmd)
 
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	for scope := range a.sessionAllowedTools {
-		if !strings.Contains(scope, "cmd=") {
-			continue // non-shell or legacy grant
+	match := false
+	a.sessionGrants.Each(func(scope string) {
+		if match || !strings.Contains(scope, "cmd=") {
+			return // non-shell or legacy grant, or already matched
 		}
 		granted := approvalScopeFields(scope)
 		if granted["name"] != req["name"] || granted["action"] != req["action"] || granted["risk"] != req["risk"] {
-			continue
+			return
 		}
 		grantedCmd, generalizable := scopeCmd(granted)
 		if !generalizable || grantedCmd == "" {
-			continue
+			return
 		}
 		gt := strings.Fields(grantedCmd)
 		if len(gt) == 0 || len(gt) > len(wantTokens) {
-			continue
+			return
 		}
-		match := true
 		for i, tok := range gt {
 			if wantTokens[i] != tok {
-				match = false
-				break
+				return
 			}
 		}
-		if match {
-			return true
-		}
-	}
-	return false
+		match = true
+	})
+	return match
 }
 
 // buildApprovalScope assembles the scope string for a tool call. Shell tools

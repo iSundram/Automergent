@@ -137,7 +137,7 @@ func extractToolContext(name string, args map[string]any) string {
 		return ""
 	}
 	switch name {
-	case "read_file", "view":
+	case "read_file":
 		if path, ok := args["path"].(string); ok {
 			return "reading " + filepath.Base(path)
 		}
@@ -160,7 +160,7 @@ func extractToolContext(name string, args map[string]any) string {
 			}
 			return "exec: " + cmd
 		}
-	case "grep_search", "search":
+	case "grep_search":
 		if pattern, ok := args["pattern"].(string); ok {
 			return "search: " + pattern
 		}

@@ -239,11 +239,11 @@ func (t *skillTracker) snapshot() []string {
 // toolAccessedPath extracts the primary file path from tool args for skills tracking.
 func toolAccessedPath(name string, args map[string]any) string {
 	switch name {
-	case "read_file", "view", "edit_file", "write_file", "multi_edit":
+	case "read_file", "edit_file", "write_file", "multi_edit":
 		if p, ok := args["path"].(string); ok {
 			return p
 		}
-	case "glob", "grep", "search":
+	case "glob", "grep":
 		if p, ok := args["pattern"].(string); ok {
 			return p
 		}

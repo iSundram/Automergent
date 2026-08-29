@@ -111,24 +111,26 @@ func skillsPage(r *Registry, h Host) components.Page {
 func agentsCommand() Command {
 	return Command{
 		Name:          "agents",
-		Description:   "Browse available agents",
+		Description:   "Browse live subagents and agent types",
 		Category:      "Knowledge",
 		Icon:          "󰧑",
+		ArgsHint:      "[open <id>]",
 		Tier:          TierSecondary,
 		Type:          CmdFullPage,
 		FullPageTitle: "Agents",
+		Page:          agentsPage,
 		Immediate:     true,
 	}
 }
 
+// handleAgents covers the argument paths: "/agents open <id>" jumps straight
+// into an agent's live view; with no args the Page builder in
+// cmd_agents_view.go renders the roster and the handler is not reached.
 func handleAgents(host Host, args []string) Result {
-	var b strings.Builder
-	b.WriteString("Available agents:\n")
-	b.WriteString("  general-purpose — full-capability agent for complex tasks\n")
-	b.WriteString("  explore         — fast read-only codebase exploration\n")
-	b.WriteString("  review          — code review, bug detection, security\n")
-	b.WriteString("  contexter       — context compaction & memory\n")
-	b.WriteString("  coordinator     — orchestrates other agents\n")
-	host.AddSystemMessage(b.String())
+	if len(args) >= 2 && args[0] == "open" {
+		host.OpenAgentView(args[1])
+		return Done(nil)
+	}
+	host.AddSystemMessage("Usage: /agents [open <id>] — run /agents for the roster.")
 	return Done(nil)
 }

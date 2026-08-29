@@ -62,7 +62,6 @@ func (s *namedStub) RequiresConfirmation(mode string) bool { return false }
 func TestInferCategory(t *testing.T) {
 	cases := map[string]string{
 		"read_file":       "read",
-		"view":            "read",
 		"list_directory":  "read",
 		"grep":            "search",
 		"glob":            "search",

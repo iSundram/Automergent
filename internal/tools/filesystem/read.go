@@ -1,12 +1,14 @@
 package filesystem
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"strings"
+	"syscall"
 
 	"github.com/iSundram/Automergent/internal/diagnostics"
 	"github.com/iSundram/Automergent/internal/tools"
@@ -52,7 +54,9 @@ type ReadFileTool struct {
 }
 
 func (t *ReadFileTool) Name() string                               { return "read_file" }
-func (t *ReadFileTool) Description() string                        { return "Read the contents of a file from disk." }
+func (t *ReadFileTool) Description() string {
+	return "Read a file from disk, returning line-numbered content. Optionally bounded by start_line/end_line."
+}
 func (t *ReadFileTool) RequiresConfirmation(mode string) bool      { return false }
 func (t *ReadFileTool) IsConcurrencySafe(args map[string]any) bool { return true }
 func (t *ReadFileTool) IsReadOnly(args map[string]any) bool        { return true }
@@ -72,7 +76,7 @@ func (t *ReadFileTool) Meta() *tools.ToolMeta {
 			"gemini3": "Gemini 3 batches parallel calls well: issue several independent read_file calls in one turn instead of sequencing them.",
 		},
 		WhenToUse: "Any time you need file contents: before editing, to trace symbols across files, or to verify an edit landed. Batch multiple independent reads in one turn.",
-		WhenNotTo: "Do not use shell `cat`/`head`/`tail` for this. For binary files use `view`. Do not re-read a file listed under 'Contents already loaded'.",
+		WhenNotTo: "Do not use shell `cat`/`head`/`tail` for this. To list a directory use `list_directory`; to find files use `glob`/`grep`. Do not re-read a file listed under 'Contents already loaded'.",
 		Usage: "Returns numbered lines from `path`, optionally bounded by `start_line`/`end_line`.\n" +
 			"Prefer narrow ranges on huge files; results are ghosted when enormous.\n" +
 			"If the file exists but is empty you will receive 'File is empty'.",
@@ -111,7 +115,7 @@ func (t *ReadFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 
 	binary, err := isBinaryFile(path)
 	if err != nil {
-		// File might not exist — let os.ReadFile produce the error
+		// File might not exist — let the open below produce the error
 		if !os.IsNotExist(err) {
 			return tools.Result{IsError: true, Content: fmt.Sprintf("error checking file: %v", err)}, nil
 		}
@@ -123,18 +127,33 @@ func (t *ReadFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 		}, nil
 	}
 
-	data, err := os.ReadFile(path)
+	// Open without following symlinks to avoid TOCTOU through symlink swaps.
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
+		if err == syscall.ELOOP {
+			return tools.Result{IsError: true, Content: fmt.Sprintf("refusing to open symlink: %s", path)}, nil
+		}
+		return tools.Result{IsError: true, Content: fmt.Sprintf("error reading file: %v", err)}, nil
+	}
+	file := os.NewFile(uintptr(fd), path)
+	defer file.Close()
+
+	// Read all lines; diagnostics operate on the whole file even when a
+	// range is requested, so the header always reflects the file's health.
+	var all []string
+	scanner := bufio.NewScanner(file)
+	buf := make([]byte, 0, 64*1024)
+	scanner.Buffer(buf, 1024*1024) // 1MB max line length
+	for scanner.Scan() {
+		all = append(all, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("error reading file: %v", err)}, nil
 	}
 
-	content := string(data)
-
-	// NEW: Analyze diagnostics and prepend header if errors found
-	diags := diagnostics.Analyze(path, content)
-	if len(diags) > 0 {
-		recoveryMsg := diagnostics.RecoveryMessage(path, content)
-		var header strings.Builder
+	var header strings.Builder
+	if diags := diagnostics.Analyze(path, strings.Join(all, "\n")); len(diags) > 0 {
+		recoveryMsg := diagnostics.RecoveryMessage(path, strings.Join(all, "\n"))
 		header.WriteString("═══════════════════════════════════\n")
 		header.WriteString(fmt.Sprintf("[DIAGNOSTICS: %d error(s) found]\n", len(diags)))
 		for _, d := range diags {
@@ -145,43 +164,59 @@ func (t *ReadFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 			header.WriteString(recoveryMsg)
 		}
 		header.WriteString("═══════════════════════════════════\n")
-		content = header.String() + content
 	}
 
-	// Optional line range filtering (accepts JSON int or float)
-	var hasStart, hasEnd bool
-	var startLine, endLine int
-	if n, ok := tools.ArgInt(args, "start_line"); ok {
-		startLine = n
-		hasStart = true
+	// Optional line range filtering (accepts JSON int or float).
+	total := len(all)
+	start, end := 1, total
+	if n, ok := tools.ArgInt(args, "start_line"); ok && n >= 1 {
+		start = n
 	}
-	if n, ok := tools.ArgInt(args, "end_line"); ok {
-		endLine = n
-		hasEnd = true
+	if n, ok := tools.ArgInt(args, "end_line"); ok && n >= 1 && n < end {
+		end = n
 	}
-	if hasStart || hasEnd {
-		lines := strings.Split(content, "\n")
-		start := 1
-		end := len(lines)
-		if hasStart && startLine >= 1 {
-			start = startLine
-		}
-		if hasEnd && endLine >= 1 && endLine < end {
-			end = endLine
-		}
-		if start > end {
-			start = end
-		}
-		if start > len(lines) {
-			start = len(lines)
-		}
-		if end > len(lines) {
-			end = len(lines)
-		}
-		content = strings.Join(lines[start-1:end], "\n")
+	if start > total {
+		return tools.Result{
+			Content: header.String() + fmt.Sprintf("file has only %d lines, requested start line %d", total, start),
+			Summary: "read 0 lines",
+		}, nil
+	}
+	if end < start {
+		end = start
 	}
 
-	return tools.Result{Content: content}, nil
+	// Render numbered lines with a hard cap so huge files cannot flood the
+	// context window in a single call.
+	const maxLines = 10000
+	truncated := false
+	if end-start+1 > maxLines {
+		end = start + maxLines - 1
+		truncated = true
+	}
+
+	var lines []string
+	for i := start; i <= end; i++ {
+		lines = append(lines, fmt.Sprintf("%d. %s", i, all[i-1]))
+	}
+	result := header.String() + strings.Join(lines, "\n")
+	if truncated {
+		result += fmt.Sprintf("\n\n... (truncated at %d lines, use start_line to continue)", maxLines)
+	}
+	if len(lines) == 0 {
+		result = header.String() + "(empty file)"
+	}
+
+	return tools.Result{
+		Content: result,
+		Summary: fmt.Sprintf("read %d-%d of %d lines", start, start+len(lines)-1, total),
+		Metadata: map[string]any{
+			"total_lines": total,
+			"lines_shown": len(lines),
+			"start_line":  start,
+			"end_line":    end,
+			"truncated":   truncated,
+		},
+	}, nil
 }
 
 // ListDirectoryTool lists the files in a directory.

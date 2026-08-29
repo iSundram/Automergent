@@ -38,7 +38,9 @@ type Agent struct {
 	eventsClosed        bool
 	sessionPersist      func()
 	mu                  sync.RWMutex
-	sessionAllowedTools map[string]bool
+	// sessionGrants is shared with every subagent this agent spawns (see
+	// Execute), so "always allow" decisions cover the whole agent tree.
+	sessionGrants *grants
 	approvalSource      string
 	workDir             string
 	firstMessageHandled bool
@@ -92,6 +94,19 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 	// 3. Create a child agent.
 	childAgent := New(&childCfg, a.provider, childSess, a.tools)
 
+	// The child answers to the same always-allow set as its parent: grants
+	// made while answering the main agent's asks cover subagents, and an
+	// "always allow" granted on a subagent's ask persists to the real session
+	// instead of dying with the child's throwaway one.
+	childAgent.sessionGrants = a.sessionGrants
+
+	// Apply the agent-type definition: system prompt, phase config, and the
+	// per-type tool allowlist (explore is read-only; general-purpose's empty
+	// Tools means the full registry, bash included).
+	if def, ok := GlobalRegistry().Get(AgentType(agentType)); ok && def != nil {
+		childAgent.SetDefinition(def)
+	}
+
 	// 4. Run the child agent with proper cancellation handling.
 	var finalResponse string
 	var finalErr error
@@ -106,9 +121,25 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 	// blocking, but on the way past it records which tool the child is in and
 	// what it last said, so the dock has something true to show. The drainer
 	// exits when the child's channel closes via childAgent.Close().
+	//
+	// Confirmation asks are the exception: re-emitted on the parent's channel
+	// with provenance, they reach the UI that is still pumping this agent's
+	// events while it sits blocked inside the task tool. Without this, a
+	// subagent's permission ask disappeared into the drain and expired after
+	// the ten-minute timeout, silently denied.
 	trackedID := subagent.AgentIDFrom(ctx)
 	go func() {
 		for ev := range childAgent.Events() {
+			switch ev.Type {
+			case EventConfirm, EventAskUser:
+				if p, ok := ev.Payload.(map[string]any); ok {
+					p["agent_type"] = string(agentType)
+					p["agent_id"] = trackedID
+					p["agent_name"] = subagentDisplayName(trackedID, agentType)
+					a.Emit(ev.Type, p)
+				}
+				continue
+			}
 			if trackedID == "" {
 				continue
 			}
@@ -152,9 +183,22 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 	}
 }
 
+// subagentDisplayName resolves the instance's chosen name, falling back to
+// the agent type when the instance is untracked (direct Execute calls).
+func subagentDisplayName(id string, agentType subagent.AgentType) string {
+	if id != "" {
+		if inst, ok := subagent.GetAgentManager().Get(id); ok {
+			if snap := inst.Snapshot(); snap.Name != "" {
+				return snap.Name
+			}
+		}
+	}
+	return string(agentType)
+}
+
 // reportSubagentProgress translates one child event into the live fields the
-// dock reads. Only the four event kinds that say something about observable
-// progress are handled; the rest are the child's business.
+// dock reads, and appends the steps worth remembering to the activity log the
+// agent viewer shows as the subagent's own short conversation.
 func reportSubagentProgress(agentID string, ev Event) {
 	mgr := subagent.GetAgentManager()
 	switch ev.Type {
@@ -162,8 +206,10 @@ func reportSubagentProgress(agentID string, ev Event) {
 		switch p := ev.Payload.(type) {
 		case ToolCallEvent:
 			mgr.NoteTool(agentID, p.Name)
+			mgr.NoteActivity(agentID, subagent.ToolActivityLine(p.Name, p.Args))
 		case ai.ToolCall:
 			mgr.NoteTool(agentID, p.Name)
+			mgr.NoteActivity(agentID, subagent.ToolActivityLine(p.Name, p.Args))
 		}
 	case EventToolDone:
 		mgr.NoteTool(agentID, "")
@@ -275,14 +321,22 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 		provider:            provider,
 		sess:                sess,
 		tools:               reg,
-		events:              make(chan Event, 8192),
-		steer:               make(chan string, 8),
-		sessionAllowedTools: make(map[string]bool),
-		approvalSource:      "tui",
-		skillPaths:          newSkillTracker(12),
-		editReview:          nil,
-		currentAgentDef:     builtin.GeneralAgent(),
+		events:          make(chan Event, 8192),
+		steer:           make(chan string, 8),
+		approvalSource:  "tui",
+		skillPaths:      newSkillTracker(12),
+		editReview:      nil,
+		currentAgentDef: builtin.GeneralAgent(),
 	}
+
+	// Grants persist into this agent's session; subagents spawned later share
+	// the object (see Execute) so the tree answers to one allow set.
+	agent.sessionGrants = newGrants(func(scope string) {
+		if agent.sess != nil {
+			agent.sess.AddApproval(scope, agent.approvalSource)
+		}
+		agent.tryPersist()
+	})
 
 	// Surface provider-internal retries as events so the UI can show that a
 	// request is being retried rather than appearing to hang.
@@ -325,9 +379,7 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 	// Seed always-allow approvals persisted in the session so resumed runs
 	// do not re-prompt for tools the user already approved.
 	if sess != nil {
-		for _, scope := range sess.ApprovalScopes() {
-			agent.sessionAllowedTools[scope] = true
-		}
+		agent.sessionGrants.Reset(sess.ApprovalScopes())
 	}
 
 	return agent
@@ -517,9 +569,9 @@ func (a *Agent) Approvals() []session.ToolApproval {
 func (a *Agent) EditReviewStore() *editreview.Store { return a.editReview }
 
 func (a *Agent) RevokeApproval(scope string) bool {
+	a.sessionGrants.Delete(scope)
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	delete(a.sessionAllowedTools, scope)
 	if a.sess == nil {
 		return false
 	}
@@ -534,11 +586,10 @@ func (a *Agent) SetSession(sess *session.Session) {
 	defer a.mu.Unlock()
 	a.sess = sess
 	a.firstMessageHandled = sess != nil && len(sess.Messages) > 0
-	a.sessionAllowedTools = make(map[string]bool)
 	if sess != nil {
-		for _, scope := range sess.ApprovalScopes() {
-			a.sessionAllowedTools[scope] = true
-		}
+		a.sessionGrants.Reset(sess.ApprovalScopes())
+	} else {
+		a.sessionGrants.Reset(nil)
 	}
 }
 
@@ -970,12 +1021,10 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 	approvalScope := a.scopedToolApprovalKey(tc, t)
 	legacyScope := legacyToolApprovalScope(tc, t)
 
-	a.mu.RLock()
-	allowed := a.sessionAllowedTools[approvalScope] || a.sessionAllowedTools[legacyScope]
+	allowed := a.sessionGrants.Has(approvalScope) || a.sessionGrants.Has(legacyScope)
 	if !allowed {
 		allowed = a.shellGrantMatches(approvalScope)
 	}
-	a.mu.RUnlock()
 
 	if !allowed && a.needsConfirmation(tc, t) {
 		res := a.requestConfirmation(tc)
@@ -987,13 +1036,7 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 			return tools.Result{IsError: true, Content: msg}, nil
 		}
 		if res.Always {
-			a.mu.Lock()
-			a.sessionAllowedTools[approvalScope] = true
-			a.mu.Unlock()
-			if a.sess != nil {
-				a.sess.AddApproval(approvalScope, a.approvalSource)
-			}
-			a.tryPersist()
+			a.sessionGrants.Add(approvalScope) // persist hook writes session + storage
 		}
 	}
 
@@ -1214,7 +1257,25 @@ func (a *Agent) buildActiveToolSchemas() []ai.ToolSchema {
 	} else {
 		schemas = all
 	}
-	return applyModeMask(schemas, a.currentMode())
+	schemas = applyModeMask(schemas, a.currentMode())
+	return applyDefinitionMask(schemas, a.currentAgentDef)
+}
+
+// SetDefinition applies an agent-type definition to this agent: the
+// definition's system prompt and phase configuration take over from the
+// general-purpose default, and its Tools list (when non-empty) becomes the
+// agent's capability mask. Called on children before they run (see Execute);
+// the general-purpose definition's empty list means the full registry.
+func (a *Agent) SetDefinition(def *agentdef.AgentDefinition) {
+	if def == nil {
+		return
+	}
+	a.currentAgentDef = def
+	if a.promptSystem != nil && a.provider != nil {
+		llmClient := promptpkg.NewAIProviderAdapter(a.provider, "")
+		a.phaseManager = promptpkg.NewPhaseManager(a.promptSystem, def)
+		a.phaseClassifier = promptpkg.NewPhaseClassifier(a.phaseManager, llmClient)
+	}
 }
 
 func (a *Agent) selectToolProfile(ctx context.Context, userPrompt string) map[string]bool {
@@ -1340,8 +1401,8 @@ func allToolNames(all []ai.ToolSchema) map[string]bool {
 
 func readOnlyToolNames() map[string]bool {
 	names := map[string]bool{
-		"read_file": true, "view": true, "list_directory": true,
-		"grep": true, "glob": true, "search": true,
+		"read_file": true, "list_directory": true,
+		"grep": true, "glob": true,
 		"lsp_diagnostics": true, "list_shells": true, "read_shell": true,
 		"list_agents": true, "read_agent": true,
 		"web_search": true, "web_fetch": true,
@@ -1364,9 +1425,8 @@ func verificationToolNames() map[string]bool {
 
 func contextToolNames() map[string]bool {
 	return map[string]bool{
-		"context_bucket_create": true, "context_bucket_list": true,
-		"context_bucket_get": true, "context_bucket_update": true,
-		"context_share": true, "remember": true,
+		"context_bucket_get": true, "context_bucket_set": true,
+		"context_bucket_delete": true, "context_get": true,
 	}
 }
 
@@ -1499,8 +1559,8 @@ func (a *Agent) toolSetToProfile(ts shared.ToolSet) map[string]bool {
 		return map[string]bool{}
 	case shared.ToolSetReadOnly:
 		for _, schema := range all {
-			if schema.Name == "read_file" || schema.Name == "view" || schema.Name == "list_directory" ||
-				schema.Name == "grep" || schema.Name == "glob" || schema.Name == "search" ||
+			if schema.Name == "read_file" || schema.Name == "list_directory" ||
+				schema.Name == "grep" || schema.Name == "glob" ||
 				schema.Name == "lsp_diagnostics" || schema.Name == "list_shells" || schema.Name == "read_shell" ||
 				schema.Name == "list_agents" || schema.Name == "read_agent" ||
 				schema.Name == "web_search" || schema.Name == "web_fetch" {
@@ -1509,8 +1569,8 @@ func (a *Agent) toolSetToProfile(ts shared.ToolSet) map[string]bool {
 		}
 	case shared.ToolSetBasic:
 		for _, schema := range all {
-			if schema.Name == "read_file" || schema.Name == "view" || schema.Name == "list_directory" ||
-				schema.Name == "grep" || schema.Name == "glob" || schema.Name == "search" ||
+			if schema.Name == "read_file" || schema.Name == "list_directory" ||
+				schema.Name == "grep" || schema.Name == "glob" ||
 				schema.Name == "bash" || schema.Name == "task" {
 				profile[schema.Name] = true
 			}
@@ -1571,11 +1631,9 @@ func (a *Agent) RegisterContextTools() ContextToolRegistration {
 	if a.tools != nil && a.promptSystem != nil {
 		tools.RegisterTaskStateTools(a.tools, a.promptSystem.GetTaskState())
 		names = append(names,
-			"task_list", "task_get", "task_update",
-			"context_bucket_create", "context_bucket_list", "context_bucket_get",
-			"context_bucket_set", "context_bucket_delete", "context_list_buckets",
-			"context_get_intent", "context_get_init",
-			"todo_list", "todo_next", "todo_write",
+			"todo_write", "todo_list",
+			"context_bucket_get", "context_bucket_set", "context_bucket_delete",
+			"context_get",
 		)
 
 		// Surface model-driven todo mutations as UI events.

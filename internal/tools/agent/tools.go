@@ -58,6 +58,11 @@ type AgentInstance struct {
 	TokensIn    int
 	TokensOut   int
 
+	// Activity is the bounded log of what the agent has done, one line per
+	// observable step ("grep "palette" internal/tui"). It is what the agent
+	// viewer shows as the subagent's own short conversation.
+	Activity []string
+
 	mu           sync.Mutex
 	lastLine     atomicString
 	lastActivity atomicTime
@@ -663,7 +668,7 @@ func (t *BatchTaskTool) Schema() map[string]any {
 					"properties": map[string]any{
 						"agent_type": map[string]any{
 							"type":        "string",
-							"enum":        []string{"general-purpose", "explore", "review", "contexter", "task"},
+							"enum":        []string{"general-purpose", "explore", "review", "contexter", "coordinator", "task", "code-review"},
 							"description": "Type of agent.",
 						},
 						"prompt": map[string]any{

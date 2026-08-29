@@ -42,6 +42,10 @@ type PermissionInfo struct {
 	Fields    []PermissionField
 	Risk      string
 	Dangerous bool // warning tint on the risk line
+	// AgentName/AgentType carry provenance when a subagent's tool call is
+	// asking: the user must see who is requesting, not just what.
+	AgentName string
+	AgentType string
 }
 
 type confirmMode int
@@ -243,6 +247,10 @@ func (c Confirm) renderPermission() string {
 	tool := lipgloss.NewStyle().Foreground(c.styles.T.Accent).Bold(true).Render(p.Tool)
 	action := lipgloss.NewStyle().Foreground(c.styles.T.Subtext).Render("  " + p.Action)
 	lines := []string{title, tool + action}
+	if p.AgentName != "" || p.AgentType != "" {
+		who := firstNonEmptyPerm(p.AgentName, p.AgentType)
+		lines = append(lines, c.styles.Dim.Render("requested by "+who+" subagent"))
+	}
 	for _, field := range p.Fields {
 		label := lipgloss.NewStyle().Foreground(c.styles.T.Muted).Render(field.Label + ": ")
 		maxValueWidth := c.width - lipgloss.Width(label) - 4
@@ -261,6 +269,15 @@ func (c Confirm) renderPermission() string {
 		lines = append(lines, lipgloss.NewStyle().Foreground(riskColor).Bold(p.Dangerous).Render("Risk: "+p.Risk))
 	}
 	return strings.Join(lines, "\n")
+}
+
+func firstNonEmptyPerm(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
 }
 
 func (c Confirm) formatPrompt() string {

@@ -127,9 +127,9 @@ func (s agentSource) Facts() []string {
 	return facts
 }
 
-// Lines renders the agent's task, then its turns, newest last. A subagent's
-// observable life is its prompt and what it reported back; showing the prompt
-// first is what makes a stalled agent diagnosable.
+// Lines renders the agent's task, then its live activity log, then its turns,
+// newest last. A subagent's observable life is its prompt, the steps it took,
+// and what it reported back — in that order.
 func (s agentSource) Lines() []string {
 	inst, ok := toolsagent.GetAgentManager().Get(s.id)
 	if !ok {
@@ -142,6 +142,13 @@ func (s agentSource) Lines() []string {
 
 	for _, l := range strings.Split(strings.TrimRight(prompt, "\n"), "\n") {
 		out = append(out, "  "+l)
+	}
+
+	// The activity log is the subagent's own short conversation: one line per
+	// tool call it made, in order. Tool names are marked so the eye can scan
+	// for the heavy ones.
+	for _, l := range snap.Activity {
+		out = append(out, "▸ "+l)
 	}
 
 	for _, turn := range turns {

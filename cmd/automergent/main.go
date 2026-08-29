@@ -329,14 +329,12 @@ func run(cmd *cobra.Command, args []string) error {
 	reg := tools.NewRegistry()
 
 	// Filesystem tools
-	reg.Register(&toolsFS.ViewFileTool{})
 	reg.Register(&toolsFS.ReadFileTool{})
 	reg.Register(toolsFS.NewWriteFileTool(cfg))
 	reg.Register(toolsFS.NewEditFileTool(cfg))
 	reg.Register(&toolsFS.ListDirectoryTool{})
 	reg.Register(&toolsFS.GlobTool{})
 	reg.Register(&toolsFS.GrepTool{})
-	reg.Register(&toolsFS.RefinedSearchTool{})
 
 	// Shell tools (async-capable)
 	reg.Register(toolsShell.NewAsyncRunnerTool(0))

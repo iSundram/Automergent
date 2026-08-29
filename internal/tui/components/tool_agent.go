@@ -1,9 +1,8 @@
 package components
 
 // Coordination families: agent (task, read_agent, list_agents, agent_control),
-// plan (plan, replan), todo (todo_write, todo_list, todo_next), taskstate
-// (task_list, task_get, task_update), context (the context_* bookkeeping
-// tools) and interaction (ask_user, notify).
+// plan (plan, replan), todo (todo_write, todo_list), context (the context_*
+// bookkeeping tools) and interaction (ask_user, notify).
 //
 // Status glyphs here deliberately match taskboard.go, so a todo shown inline
 // in the log and the same todo on the side board read as one object.
@@ -189,63 +188,6 @@ func (c *Conversation) renderTodoCard(m ConversationMsg, width int) string {
 	}
 	if more := len(items) - limit; more > 0 {
 		rows = append(rows, c.moreRow(more, "item"))
-	}
-	return join(head, strings.Join(rows, "\n"))
-}
-
-// renderTaskStateCard renders task_list / task_get / task_update.
-//
-//	● Tasks  1 in progress · 3 pending
-//	  ▸ #1  Redesign tool cards
-//	● Task  #1  ·  ✓ completed
-func (c *Conversation) renderTaskStateCard(m ConversationMsg, width int) string {
-	args := argsOf(m)
-
-	// task_update is a state transition: one line naming the new state.
-	if m.ToolName == "task_update" {
-		status, _ := args["status"].(string)
-		subject := "#" + strings.TrimPrefix(scalarString(args["task_id"]), "#")
-		var chips []string
-		if status != "" {
-			chips = append(chips, c.todoMark(status)+" "+status)
-		}
-		head := c.callLine(m, width, subject, chips, durationChip(m.Duration))
-		if m.IsError {
-			return join(head, c.resultRow(c.severityMark("error"), oneLine(m.Content), width))
-		}
-		return head
-	}
-
-	items := parseTodoItems(m.Content)
-	var chips []string
-	if len(items) > 0 {
-		chips = append(chips, plural(len(items), "task"))
-	}
-	head := c.callLine(m, width, subjectFor(m), chips, durationChip(m.Duration))
-
-	if m.IsError {
-		return join(head, c.resultRow(c.severityMark("error"), oneLine(m.Content), width))
-	}
-	if !c.showDetail() {
-		return head
-	}
-	if len(items) == 0 {
-		if s := oneLine(m.Content); s != "" {
-			return join(head, c.resultRow("", s, width))
-		}
-		return head
-	}
-
-	limit := c.bodyLimit(len(items))
-	rows := make([]string, 0, limit+1)
-	for i, it := range items {
-		if i >= limit {
-			break
-		}
-		rows = append(rows, c.plainRow(c.todoMark(it.status), it.text, width))
-	}
-	if more := len(items) - limit; more > 0 {
-		rows = append(rows, c.moreRow(more, "task"))
 	}
 	return join(head, strings.Join(rows, "\n"))
 }

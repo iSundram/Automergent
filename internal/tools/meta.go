@@ -171,7 +171,7 @@ func CategoryRank(category string) int {
 func InferCategory(name string) string {
 	n := strings.ToLower(name)
 	switch {
-	case n == "view" || strings.HasPrefix(n, "read") || strings.HasPrefix(n, "list_dir"):
+	case strings.HasPrefix(n, "read") || strings.HasPrefix(n, "list_dir"):
 		return "read"
 	case strings.HasPrefix(n, "glob"), strings.HasPrefix(n, "grep"), n == "search":
 		return "search"
@@ -195,7 +195,7 @@ func InferCategory(name string) string {
 	case n == "task" || n == "read_agent" || n == "list_agents":
 		return "agents"
 	case strings.HasPrefix(n, "todo_") || strings.HasPrefix(n, "context_") ||
-		n == "task_list" || n == "task_get" || n == "task_update" || n == "memory_write":
+		n == "memory_write":
 		return "memory"
 	case strings.HasPrefix(n, "plan"), n == "replan":
 		return "planning"

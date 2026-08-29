@@ -72,9 +72,9 @@ func TestBuildApprovalScopeDangerousExact(t *testing.T) {
 }
 
 func TestShellGrantMatchesPrefix(t *testing.T) {
-	a := &Agent{sessionAllowedTools: map[string]bool{
-		"name=\"bash\";action=write;risk=low;cmd=\"go test\";generalizable=prefix": true,
-	}}
+	a := &Agent{sessionGrants: newGrantsWithScopes(
+		"name=\"bash\";action=write;risk=low;cmd=\"go test\";generalizable=prefix",
+	)}
 	req := "name=\"bash\";action=write;risk=low;cmd=\"go test\";generalizable=prefix"
 	if !a.shellGrantMatches(req) {
 		t.Error("exact prefix grant must match itself")

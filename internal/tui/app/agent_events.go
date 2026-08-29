@@ -274,6 +274,17 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 				// that can drift out of sync with it.
 				name := components.ToolDisplayName(tc.Name)
 
+				// A subagent's ask is re-emitted by the parent with provenance;
+				// surface who is asking so "always allow" is an informed call.
+				subName, _ := payload["agent_name"].(string)
+				subType, _ := payload["agent_type"].(string)
+				provenance := func(pi components.PermissionInfo) components.PermissionInfo {
+					if subName != "" || subType != "" {
+						pi.AgentName, pi.AgentType = subName, subType
+					}
+					return pi
+				}
+
 				// Special handling for file edits: show diff
 				// Special handling for file edits: show diff with inline confirmation
 				if tc.Name == "write_file" || tc.Name == "edit_file" {
@@ -312,10 +323,13 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 					a.layout()
 				} else {
 					// Non-file tools use confirm component
-					permission := permissionInfoForTool(tc, name)
+					permission := provenance(permissionInfoForTool(tc, name))
 					a.confirm.ShowPermission(permission)
 					a.permissionTool = name
-					a.statusBar.SetPermission(permission.Tool)
+					if subName != "" || subType != "" {
+						a.permissionTool = name + " · " + firstNonEmptyDock(subName, subType)
+					}
+					a.statusBar.SetPermission(a.permissionTool)
 					a.layout()
 					if replyCh, ok := payload["reply"].(chan agent.ConfirmationResponse); ok {
 						a.confirm.SetReply(bridgeConfirmation(replyCh))
@@ -330,6 +344,10 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		if payload, ok := ev.Payload.(map[string]any); ok {
 			question, _ := payload["question"].(string)
 			replyCh, _ := payload["reply"].(chan string)
+			// A subagent's question carries provenance; name the asker.
+			if subName, _ := payload["agent_name"].(string); subName != "" {
+				question = subName + " asks: " + question
+			}
 			a.askUserReplyCh = replyCh
 			if !(a.questionnaire != nil && a.questionnaire.Visible()) {
 				a.statusBar.SetStatus("PROMPT: " + question)

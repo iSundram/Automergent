@@ -29,11 +29,11 @@ func (a *ToolExecutorAdapter) Glob(ctx context.Context, pattern, workingDir stri
 }
 
 func (a *ToolExecutorAdapter) Grep(ctx context.Context, pattern, workingDir string) (string, error) {
-	tool, ok := a.registry.Get("search")
+	tool, ok := a.registry.Get("grep")
 	if !ok {
-		return "", fmt.Errorf("tool not found: search")
+		return "", fmt.Errorf("tool not found: grep")
 	}
-	result, err := tool.Execute(ctx, map[string]any{"query": pattern})
+	result, err := tool.Execute(ctx, map[string]any{"pattern": pattern})
 	if err != nil {
 		return "", err
 	}
@@ -41,9 +41,9 @@ func (a *ToolExecutorAdapter) Grep(ctx context.Context, pattern, workingDir stri
 }
 
 func (a *ToolExecutorAdapter) Read(ctx context.Context, path, workingDir string) (string, error) {
-	tool, ok := a.registry.Get("view")
+	tool, ok := a.registry.Get("read_file")
 	if !ok {
-		return "", fmt.Errorf("tool not found: view")
+		return "", fmt.Errorf("tool not found: read_file")
 	}
 	result, err := tool.Execute(ctx, map[string]any{"path": path})
 	if err != nil {

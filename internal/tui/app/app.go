@@ -123,6 +123,10 @@ type App struct {
 	checkpoints     []conversationCheckpoint
 	extraSearchDirs []string
 
+	// settledAgentRows records subagent live rows that reached a terminal
+	// state, so the tick stops rewriting them (see agent_rows.go).
+	settledAgentRows map[string]bool
+
 	showFileTree  bool
 	showHelp      bool
 	focusMode     bool // When true, show Diff on top and Confirm on bottom
@@ -219,6 +223,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		dock:               components.NewBottomDock(styles),
 		inspector:          components.NewInspector(styles),
 		passthroughCards:   make(map[string]bool),
+		settledAgentRows:   make(map[string]bool),
 		queueStrip:         components.NewQueueStrip(styles),
 		taskBoard:          components.NewTaskBoard(styles),
 		spin:               components.NewSpinner(styles),
@@ -627,6 +632,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.layout()
 			}
 		}
+		// Subagent live rows in the conversation refresh on the same tick.
+		a.syncAgentRows()
 		if a.inspector != nil && a.inspector.Visible() {
 			// The inspector samples its source on every render; the tick is what
 			// makes live output scroll while nothing else is happening.

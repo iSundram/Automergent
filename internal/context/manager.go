@@ -1022,9 +1022,9 @@ func toolContextPatterns(tool string) []string {
 	switch strings.ToLower(tool) {
 	case "glob":
 		return []string{".go", ".ts", ".js", ".py", ".tsx", ".jsx", ".md", ".yaml", ".yml", ".json"}
-	case "grep", "search":
+	case "grep":
 		return []string{".go", ".ts", ".js", ".py", ".tsx", ".jsx"}
-	case "view", "read":
+	case "read_file", "read":
 		return []string{".go", ".ts", ".js", ".py", ".tsx", ".jsx", ".md"}
 	case "edit", "write":
 		return []string{".go", ".ts", ".js", ".py", ".tsx", ".jsx"}

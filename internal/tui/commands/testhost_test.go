@@ -132,6 +132,8 @@ type mockHost struct {
 	showStatsCalls int
 	showHelpCalls  int
 
+	openAgentViewCalls []string
+
 	setThemeCalls      []string
 	setKeybindingCalls []string
 
@@ -676,6 +678,14 @@ func (m *mockHost) ShowHelp() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.showHelpCalls++
+}
+
+func (m *mockHost) AgentRoster() []AgentRow { return nil }
+
+func (m *mockHost) OpenAgentView(agentID string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.openAgentViewCalls = append(m.openAgentViewCalls, agentID)
 }
 
 func (m *mockHost) SetTheme(name string) error {

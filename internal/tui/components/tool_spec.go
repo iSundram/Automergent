@@ -37,7 +37,6 @@ const (
 	familyAgent                          // task, read_agent, list_agents, agent_control
 	familyPlan                           // plan, replan
 	familyTodo                           // todo_write, todo_list, todo_next
-	familyTaskState                      // task_list, task_get, task_update
 	familyContext                        // context_bucket_*, context_get_*
 	familyInteraction                    // ask_user, notify
 )
@@ -77,7 +76,6 @@ type toolSpec struct {
 var toolSpecs = map[string]toolSpec{
 	// --- read ---------------------------------------------------------
 	"read_file": {"Read", aBlue, familyRead, []string{"path"}, true},
-	"view":      {"View", aBlue, familyRead, []string{"path"}, true},
 
 	// --- list ---------------------------------------------------------
 	"list_directory": {"List", aBlue, familyList, []string{"path"}, true},
@@ -85,7 +83,6 @@ var toolSpecs = map[string]toolSpec{
 
 	// --- search -------------------------------------------------------
 	"grep":   {"Grep", aMagenta, familySearch, []string{"pattern"}, true},
-	"search": {"Search", aMagenta, familySearch, []string{"query"}, true},
 
 	// --- edit ---------------------------------------------------------
 	"write_file": {"Write", aGreen, familyEdit, []string{"path"}, false},
@@ -129,22 +126,12 @@ var toolSpecs = map[string]toolSpec{
 	// --- todos --------------------------------------------------------
 	"todo_write": {"Todos", aAccent, familyTodo, []string{"action"}, false},
 	"todo_list":  {"Todos", aAccent, familyTodo, []string{"status_filter"}, false},
-	"todo_next":  {"Next todo", aAccent, familyTodo, nil, false},
-
-	// --- task state ---------------------------------------------------
-	"task_list":   {"Tasks", aAccent, familyTaskState, nil, false},
-	"task_get":    {"Task", aAccent, familyTaskState, []string{"task_id"}, false},
-	"task_update": {"Task", aAccent, familyTaskState, []string{"task_id"}, false},
 
 	// --- context bookkeeping ------------------------------------------
-	"context_bucket_create": {"Context", aMuted, familyContext, []string{"name"}, true},
-	"context_bucket_list":   {"Context", aMuted, familyContext, []string{"bucket"}, true},
-	"context_bucket_get":    {"Context", aMuted, familyContext, []string{"key"}, true},
+	"context_bucket_get":    {"Context", aMuted, familyContext, []string{"key", "bucket"}, true},
 	"context_bucket_set":    {"Context", aMuted, familyContext, []string{"key"}, true},
 	"context_bucket_delete": {"Context", aMuted, familyContext, []string{"key"}, true},
-	"context_list_buckets":  {"Context", aMuted, familyContext, nil, true},
-	"context_get_intent":    {"Context", aMuted, familyContext, nil, true},
-	"context_get_init":      {"Context", aMuted, familyContext, nil, true},
+	"context_get":           {"Context", aMuted, familyContext, []string{"what"}, true},
 
 	// --- interaction --------------------------------------------------
 	"ask_user": {"Ask", aAccent, familyInteraction, []string{"question"}, false},
@@ -208,8 +195,8 @@ func specFor(name string) toolSpec {
 }
 
 // groupKeyFor keys the run detector that collapses consecutive calls. Tools
-// group per FAMILY, so read_file and view merge into one "Read 3 files" card
-// while an edit between them breaks the run.
+// group per FAMILY, so read_file and list_directory merge into one
+// "Read 3 files" card while an edit between them breaks the run.
 func groupKeyFor(name string) string {
 	spec := specFor(name)
 	if !spec.Groups {
@@ -259,8 +246,6 @@ func familyName(f toolFamily) string {
 		return "plan"
 	case familyTodo:
 		return "todo"
-	case familyTaskState:
-		return "taskstate"
 	case familyContext:
 		return "context"
 	case familyInteraction:

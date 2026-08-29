@@ -24,20 +24,18 @@ func testConv() *Conversation {
 // than letting it silently fall back to the generic card.
 var allToolNames = []string{
 	"agent_control", "ask_user", "bash",
-	"context_bucket_create", "context_bucket_delete", "context_bucket_get",
-	"context_bucket_list", "context_bucket_set", "context_get_init",
-	"context_get_intent", "context_list_buckets",
+	"context_bucket_delete", "context_bucket_get", "context_bucket_set",
+	"context_get",
 	"dependency_audit", "edit_file",
 	"glob", "grep", "list_agents", "list_directory", "list_shells",
 	"lsp_diagnostics", "multi_edit", "notify", "plan",
 	"read_agent", "read_file", "read_shell", "replan",
-	"search", "secrets_scan", "sql", "stop_shell", "task", "task_get",
-	"task_list", "task_update", "todo_list", "todo_next", "todo_write",
-	"view", "wait", "web_fetch", "web_search", "write_file", "write_shell",
+	"todo_list", "todo_write",
+	"wait", "web_fetch", "web_search", "write_file", "write_shell",
 }
 
 func TestEveryToolHasASpec(t *testing.T) {
-	if len(allToolNames) != 43 {
+	if len(allToolNames) != 29 {
 		t.Fatalf("expected 48 registered tools, list has %d", len(allToolNames))
 	}
 	for _, name := range allToolNames {
@@ -123,7 +121,7 @@ func TestReadGroupCollapsesFiles(t *testing.T) {
 	c := testConv()
 	group := []ConversationMsg{
 		{Role: "tool_call", ToolName: "read_file", ToolArgs: `{"path":"a.go"}`, Status: "done", Content: "x\ny"},
-		{Role: "tool_call", ToolName: "view", ToolArgs: `{"path":"b.go"}`, Status: "done", Content: "z"},
+		{Role: "tool_call", ToolName: "read_file", ToolArgs: `{"path":"b.go"}`, Status: "done", Content: "z"},
 		{Role: "tool_call", ToolName: "read_file", ToolArgs: `{"path":"c.go"}`, Status: "done", Content: "w"},
 	}
 	plain := ansi.Strip(c.renderToolGroup(group, 90))
@@ -416,15 +414,15 @@ func TestExpandFullNeverTruncates(t *testing.T) {
 }
 
 func TestGroupKeyFamilies(t *testing.T) {
-	if groupKeyFor("read_file") != groupKeyFor("view") {
-		t.Error("read family should merge read_file + view")
+	if groupKeyFor("list_directory") != groupKeyFor("glob") {
+		t.Error("list family should merge list_directory + glob")
 	}
 	if groupKeyFor("edit_file") == groupKeyFor("read_file") {
 		t.Error("edit and read must not merge")
 	}
 	// Terminal calls are deliberately NOT grouped: each command's output slab
 	// is the point of the entry, so collapsing them would hide the work.
-	if groupKeyFor("bash") == groupKeyFor("run_command") {
+	if groupKeyFor("bash") == groupKeyFor("read_file") {
 		t.Error("terminal calls must stay separate cards")
 	}
 	if groupsFor("bash") {

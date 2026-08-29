@@ -68,6 +68,64 @@ func (m *AgentManager) NoteSpawn(childID, parentID string) {
 	child.mu.Unlock()
 }
 
+// maxActivityLines bounds the per-agent activity log. The viewer is a "what
+// is it doing" pane, not a transcript; anything older than the last fifty
+// steps is diagnosable from the result, not from here.
+const maxActivityLines = 50
+
+// NoteActivity appends one line to the agent's bounded activity log — the
+// subagent's own short conversation, shown by the agent viewer.
+func (m *AgentManager) NoteActivity(agentID, line string) {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return
+	}
+	inst, ok := m.Get(agentID)
+	if !ok {
+		return
+	}
+	inst.mu.Lock()
+	inst.Activity = append(inst.Activity, line)
+	if len(inst.Activity) > maxActivityLines {
+		inst.Activity = inst.Activity[len(inst.Activity)-maxActivityLines:]
+	}
+	inst.mu.Unlock()
+	inst.lastActivity.Store(timePtr(time.Now()))
+}
+
+// ActivityLines returns a copy of the agent's activity log.
+func (a *AgentInstance) ActivityLines() []string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]string, len(a.Activity))
+	copy(out, a.Activity)
+	return out
+}
+
+// ToolActivityLine renders one tool call as a single activity line:
+// "grep "palette" internal/tui", "bash go test ./...". Arguments are reduced
+// to the one or two that identify the call; everything else is noise at this
+// zoom level.
+func ToolActivityLine(name string, args map[string]any) string {
+	if args == nil {
+		return name
+	}
+	subject := ""
+	for _, key := range []string{"command", "pattern", "query", "path", "file_path", "url", "agent_type", "name"} {
+		if v, ok := args[key].(string); ok && strings.TrimSpace(v) != "" {
+			subject = v
+			break
+		}
+	}
+	if subject == "" {
+		return name
+	}
+	if len(subject) > 60 {
+		subject = subject[:57] + "…"
+	}
+	return name + " " + subject
+}
+
 // NoteTool records that an agent entered a tool. Passing "" clears the current
 // tool, which is what the gap between one tool finishing and the next starting
 // actually looks like.

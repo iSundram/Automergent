@@ -32,7 +32,7 @@ func permissionInfoForTool(tc ai.ToolCall, name string) components.PermissionInf
 	}
 
 	switch tc.Name {
-	case "read_file", "view":
+	case "read_file":
 		info.Icon, info.Action, info.Risk = "▸", "Read file contents", "Reads workspace data"
 		add("Path", str("path"))
 	case "list_directory":

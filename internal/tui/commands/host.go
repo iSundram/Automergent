@@ -56,6 +56,22 @@ type APIErrorInfo struct {
 	Retrying    bool
 }
 
+// AgentRow is one live subagent in the roster backing /agents.
+type AgentRow struct {
+	ID      string
+	Name    string
+	Type    string
+	Status  string
+	// Activity is what the agent is doing right now ("in grep") or its
+	// terminal outcome label.
+	Activity string
+	Elapsed  string
+	// ToolCount and Turns size the work the agent has done.
+	ToolCount int
+	Turns     int
+	Terminal  bool
+}
+
 // Host is the interface that the App must implement to work with the command package.
 // This avoids import cycles: command package depends on this interface, App implements it.
 type Host interface {
@@ -184,6 +200,10 @@ type Host interface {
 	OpenRewindPicker()
 	OpenPermissionsPicker()
 	OpenSettingsPicker()
+
+	// Live subagents (backs /agents)
+	AgentRoster() []AgentRow
+	OpenAgentView(agentID string)
 
 	// Stats & Help
 	ShowStats()

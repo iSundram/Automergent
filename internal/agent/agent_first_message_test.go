@@ -73,7 +73,7 @@ func newFirstMessageTestAgent(provider ai.Provider) *Agent {
 		sess:                session.New(),
 		tools:               toolReg,
 		events:              make(chan Event, 128),
-		sessionAllowedTools: map[string]bool{},
+		sessionGrants: newGrants(nil),
 		promptSystem:        promptpkg.NewPromptSystemWithLLM(promptpkg.DefaultPromptConfig(), nil, "", mockClient, toolReg),
 	}
 }

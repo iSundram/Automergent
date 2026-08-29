@@ -52,8 +52,6 @@ func (c *Conversation) renderToolCall(m ConversationMsg, width int) string {
 		return c.renderPlanCard(m, width)
 	case familyTodo:
 		return c.renderTodoCard(m, width)
-	case familyTaskState:
-		return c.renderTaskStateCard(m, width)
 	case familyContext:
 		return c.renderContextCard(m, width)
 	case familyInteraction:

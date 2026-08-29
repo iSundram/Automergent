@@ -686,6 +686,9 @@ func (c *Conversation) refresh() {
 				return c.styles.SystemMsg.Width(msgW).Render("  "+mm.Content) + "\n\n"
 			case "tool_call":
 				return c.renderToolCall(mm, msgW) + "\n\n"
+			case "agent_live":
+				// Live subagent row, updated in place by the App's tick.
+				return c.renderAgentLiveRow(mm, msgW) + "\n\n"
 			default:
 				return ""
 			}

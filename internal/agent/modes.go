@@ -3,6 +3,7 @@ package agent
 import (
 	"strings"
 
+	"github.com/iSundram/Automergent/internal/agent/agentdef"
 	"github.com/iSundram/Automergent/internal/ai"
 )
 
@@ -18,11 +19,11 @@ type ModeSpec struct {
 
 var readOnlyPlusFinish = func(extra ...string) map[string]bool {
 	m := map[string]bool{
-		"read_file": true, "view": true, "list_directory": true,
-		"grep": true, "glob": true, "search": true,
+		"read_file": true, "list_directory": true,
+		"grep": true, "glob": true,
 		"lsp_diagnostics": true, "list_shells": true, "read_shell": true,
 		"web_search": true, "web_fetch": true,
-		"todo_list": true, "todo_next": true, "todo_write": true,
+		"todo_list": true, "todo_write": true,
 		"ask_user": true, "wait": true,
 	}
 	for _, name := range extra {
@@ -66,7 +67,7 @@ var knownModes = map[string]*ModeSpec{
 		Name: "triage",
 		AllowedTools: map[string]bool{
 			"task": true, "read_agent": true, "list_agents": true,
-			"todo_write": true, "todo_list": true, "todo_next": true,
+			"todo_write": true, "todo_list": true,
 			"ask_user": true,
 		},
 		PromptBlock: "# Mode: Triage (orchestrator)\n" +
@@ -147,6 +148,28 @@ func applyModeMask(schemas []ai.ToolSchema, spec *ModeSpec) []ai.ToolSchema {
 	out := make([]ai.ToolSchema, 0, len(schemas))
 	for _, s := range schemas {
 		if spec.AllowedTools[s.Name] {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// applyDefinitionMask filters schemas down to the agent-type definition's
+// tool list. This is what makes "explore is read-only" a fact about the
+// runtime rather than a suggestion in a prompt: the write tools are simply
+// not offered to the model. An empty or nil Tools list (general-purpose)
+// means the full registry.
+func applyDefinitionMask(schemas []ai.ToolSchema, def *agentdef.AgentDefinition) []ai.ToolSchema {
+	if def == nil || len(def.Tools) == 0 {
+		return schemas
+	}
+	allowed := make(map[string]bool, len(def.Tools))
+	for _, name := range def.Tools {
+		allowed[name] = true
+	}
+	out := make([]ai.ToolSchema, 0, len(schemas))
+	for _, s := range schemas {
+		if allowed[s.Name] {
 			out = append(out, s)
 		}
 	}

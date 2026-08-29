@@ -8,6 +8,7 @@ import (
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/sandbox"
+	toolsagent "github.com/iSundram/Automergent/internal/tools/agent"
 	"github.com/iSundram/Automergent/internal/tui/commands"
 	"github.com/iSundram/Automergent/internal/tui/components"
 	"github.com/iSundram/Automergent/internal/tui/keys"
@@ -617,8 +618,46 @@ func (a *App) OpenPermissionsPicker() {
 	})
 }
 
-func (a *App) OpenSettingsPicker() {
-	pc := a.ProviderConfig(a.Provider())
+// AgentRoster snapshots the live subagents for the /agents page.
+func (a *App) AgentRoster() []commands.AgentRow {
+	instances := toolsagent.GetAgentManager().List(true)
+	out := make([]commands.AgentRow, 0, len(instances))
+	for _, inst := range instances {
+		snap := inst.Snapshot()
+		activity := snap.CurrentTool
+		status := render.CanonicalStatus(snap.Status)
+		if activity == "" {
+			activity = render.FirstLine(snap.LastLine)
+		}
+		if status.Terminal() {
+			activity = status.Label()
+		}
+		out = append(out, commands.AgentRow{
+			ID:        snap.ID,
+			Name:      firstNonEmptyDock(snap.Name, snap.ID),
+			Type:      snap.Type,
+			Status:    snap.Status,
+			Activity:  activity,
+			Elapsed:   snap.Elapsed,
+			ToolCount: snap.ToolCount,
+			Turns:     snap.Turns,
+			Terminal:  status.Terminal(),
+		})
+	}
+	return out
+}
+
+// OpenAgentView opens the live inspector on one subagent (the /agents page's
+// numbered actions land here).
+func (a *App) OpenAgentView(agentID string) {
+	if _, ok := toolsagent.GetAgentManager().Get(agentID); !ok {
+		a.AddSystemMessage("No such agent: " + agentID)
+		return
+	}
+	a.openInspector(components.DockEntry{Kind: components.DockAgent, ID: agentID})
+}
+
+func (a *App) OpenSettingsPicker() {	pc := a.ProviderConfig(a.Provider())
 	effort := pc.Effort
 	if effort == "" {
 		effort = pc.ThinkingLevel
