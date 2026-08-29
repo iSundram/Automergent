@@ -370,7 +370,31 @@ func (a *App) fuzzyFilter(items []components.PaletteItem, filter string) []compo
 	return filtered
 }
 
+// maxDispatchDepth bounds cross-command invocation chains (Host.DispatchCommand
+// and page actions). Five lets a page action dispatch a command whose page
+// offers another action, and stops accidental self-referencing loops from
+// hanging the UI.
+const maxDispatchDepth = 5
+
+// handleSlashCommand runs one slash-command input and flushes any tea.Cmds
+// accumulated by nested dispatches. It is the single entry point for typed
+// commands, palette selections and page actions alike.
 func (a *App) handleSlashCommand(input string) tea.Cmd {
+	top := !a.dispatchActive
+	a.dispatchActive = true
+	cmd := a.dispatchSlashCommand(input)
+	if top {
+		a.dispatchActive = false
+		if len(a.pendingDispatchCmds) > 0 {
+			pending := a.pendingDispatchCmds
+			a.pendingDispatchCmds = nil
+			cmd = tea.Batch(append(pending, cmd)...)
+		}
+	}
+	return cmd
+}
+
+func (a *App) dispatchSlashCommand(input string) tea.Cmd {
 	name, args := commands.Parse(input)
 	if name == "" {
 		return nil
@@ -412,15 +436,20 @@ func (a *App) handleSlashCommand(input string) tea.Cmd {
 	}
 }
 
-// handlePromptCommand injects the command's PromptTemplate into the agent conversation.
+// handlePromptCommand injects the command's PromptTemplate into the agent
+// conversation. The conversation entry carries the command as provenance (the
+// "❯ /commit" chip) and the agent receives the expansion wrapped in a short
+// origin header, so both the user and the model know where the prompt came
+// from.
 func (a *App) handlePromptCommand(cmd commands.Command, args []string) tea.Cmd {
 	prompt := cmd.ExpandPrompt(args)
 	if prompt == "" {
 		// Fall back to handler if no template.
 		return a.handleHandlerCommand(cmd, args)
 	}
-	a.conversation.AddMessage("user", prompt, false)
-	return a.startAgent(prompt)
+	a.conversation.AddUserCommandMessage(cmd.Name, prompt)
+	agentPrompt := fmt.Sprintf("<command-message>/%s</command-message>\n%s", cmd.Name, prompt)
+	return a.startAgent(agentPrompt)
 }
 
 // handleFullPageCommand opens a full-page overlay with command output.
@@ -436,6 +465,14 @@ func (a *App) handleFullPageCommand(cmd commands.Command, args []string) tea.Cmd
 		a.layout()
 		return nil
 	}
+	// Structured page: the command's view builder renders sections and
+	// action shortcuts into the PageViewer.
+	if cmd.Page != nil {
+		a.pageViewer.Show(cmd.Page(a))
+		a.fullPage.Hide()
+		a.layout()
+		return nil
+	}
 	// Execute the handler to get output text.
 	result, err := a.commands.Dispatch(a, cmd.Name, args)
 	if err != nil {
@@ -446,11 +483,14 @@ func (a *App) handleFullPageCommand(cmd commands.Command, args []string) tea.Cmd
 	if title == "" {
 		title = cmd.Name
 	}
-	content := result.Text
-	if content == "" {
-		content = "No output."
+	// An empty Result means the handler did its own UI (session browser, diff
+	// pane, help overlay) — showing a "No output" page on top of it would
+	// bury that.
+	if result.Text == "" {
+		return result.Cmd
 	}
-	a.fullPage.Show(title, content)
+	a.pageViewer.Hide()
+	a.fullPage.Show(title, result.Text)
 	a.layout()
 	return result.Cmd
 }

@@ -71,7 +71,14 @@ func (a *App) handleEscape() tea.Cmd {
 		a.layout()
 		return nil
 
-	// 4c. Full-page command overlay.
+	// 4c. Structured page viewer (full-page command output with actions).
+	case a.pageViewer.Visible():
+		a.pageViewer.Hide()
+		a.disarmEscape()
+		a.layout()
+		return nil
+
+	// 4c'. Full-page command overlay.
 	case a.fullPage.Visible():
 		a.fullPage.Hide()
 		a.disarmEscape()

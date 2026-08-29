@@ -27,6 +27,9 @@ type PaletteItem struct {
 	Icon           string
 	Category       string
 	Hint           string
+	// Kind is a short execution hint badge: "↵" prompt commands (start an
+	// agent run), "⤢" full-page commands, "" plain handlers.
+	Kind           string
 	Tier           CommandTier
 	Current        bool
 	Disabled       bool
@@ -306,6 +309,9 @@ func (p CommandPalette) renderItem(item PaletteItem, selected bool, width int) s
 	}
 	prefix := "  " + indicator + iconStyle.Render(icon) + "  "
 	label := p.renderMatch(item.Label, labelStyle)
+	if item.Kind != "" {
+		label += lipgloss.NewStyle().Foreground(p.styles.T.Muted).Render(" " + item.Kind)
+	}
 	if item.Hint != "" {
 		label += lipgloss.NewStyle().Foreground(p.styles.T.Muted).Render(" " + item.Hint)
 	}

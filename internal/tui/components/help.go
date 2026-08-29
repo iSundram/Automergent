@@ -6,6 +6,12 @@ import (
 	"github.com/iSundram/Automergent/internal/tui/themes"
 )
 
+// HelpSection is one titled group of [key, description] rows.
+type HelpSection struct {
+	Title string
+	Rows  [][2]string
+}
+
 // HelpOverlay shows keyboard shortcuts and slash commands.
 type HelpOverlay struct {
 	styles *themes.Styles
@@ -14,6 +20,9 @@ type HelpOverlay struct {
 	// slashCommands is injected by the app layer (derived from the command
 	// registry) so this view never hardcodes a drifting copy of the list.
 	slashCommands [][2]string
+	// slashSections is the categorized sibling of slashCommands; when set it
+	// replaces the flat Slash Commands section with grouped subsections.
+	slashSections []HelpSection
 }
 
 // NewHelpOverlay creates a new HelpOverlay component.
@@ -23,6 +32,10 @@ func NewHelpOverlay(styles *themes.Styles) HelpOverlay {
 
 // SetSlashCommands supplies the slash-command rows rendered by View.
 func (h *HelpOverlay) SetSlashCommands(items [][2]string) { h.slashCommands = items }
+
+// SetSlashSections supplies categorized slash-command sections rendered by
+// View. When set, these take precedence over the flat row list.
+func (h *HelpOverlay) SetSlashSections(sections []HelpSection) { h.slashSections = sections }
 
 // SetSize updates dimensions.
 func (h *HelpOverlay) SetSize(w, v int) { h.width = w; h.height = v }
@@ -68,16 +81,39 @@ func (h HelpOverlay) View() string {
 				{"Ctrl+Q", "Quit"},
 			},
 		},
-		{
-			"Slash Commands",
-			h.slashCommands,
-		},
 	}
 
 	keyW := 22
 	for _, sec := range sections {
 		sb.WriteString("\n" + h.styles.Success.Render("  "+sec.header) + "\n")
 		for _, item := range sec.items {
+			key := h.styles.Bold.Render(item[0])
+			padding := keyW - len(item[0])
+			if padding < 1 {
+				padding = 1
+			}
+			sb.WriteString("    " + key + strings.Repeat(" ", padding) + h.styles.Dim.Render(item[1]) + "\n")
+		}
+	}
+
+	// Slash commands: categorized subsections when the registry's
+	// HelpSections are supplied, otherwise the legacy flat list.
+	if len(h.slashSections) > 0 {
+		sb.WriteString("\n" + h.styles.Success.Render("  Slash Commands") + "\n")
+		for _, group := range h.slashSections {
+			sb.WriteString("\n    " + h.styles.Bold.Render(group.Title) + "\n")
+			for _, item := range group.Rows {
+				key := h.styles.Bold.Render(item[0])
+				padding := keyW - 4 - len(item[0])
+				if padding < 1 {
+					padding = 1
+				}
+				sb.WriteString("      " + key + strings.Repeat(" ", padding) + h.styles.Dim.Render(item[1]) + "\n")
+			}
+		}
+	} else if len(h.slashCommands) > 0 {
+		sb.WriteString("\n" + h.styles.Success.Render("  Slash Commands") + "\n")
+		for _, item := range h.slashCommands {
 			key := h.styles.Bold.Render(item[0])
 			padding := keyW - len(item[0])
 			if padding < 1 {

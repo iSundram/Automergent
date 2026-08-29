@@ -65,6 +65,17 @@ type Host interface {
 	SetStatus(status string)
 	CommandUsage(usage string)
 	CommandError(message string)
+	// AddUserCommandMessage records a prompt-command expansion in the
+	// conversation with its command provenance (the "/commit" chip above the
+	// expanded prompt body).
+	AddUserCommandMessage(command, prompt string)
+	// DispatchCommand runs another slash command by name from inside a
+	// handler, sub-command or page action — this is the cross-command
+	// invocation path. The host owns the depth guard against recursion.
+	DispatchCommand(name string, args ...string) error
+	// ReloadCustomCommands re-reads markdown custom commands from disk and
+	// reports how many are registered after the reload.
+	ReloadCustomCommands() int
 
 	// Agent / Workflow
 	StartAgent(prompt string) tea.Cmd

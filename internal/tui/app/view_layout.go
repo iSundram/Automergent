@@ -21,6 +21,7 @@ func (a *App) layout() {
 	a.selector.SetSize(a.width, a.height)
 	a.confirm.SetSize(a.width, a.height)
 	a.fullPage.SetSize(a.width, a.height)
+	a.pageViewer.SetSize(a.width, a.height)
 	a.providerStudio.SetSize(a.width, a.height)
 	a.modelHub.SetSize(a.width, a.height)
 
@@ -137,7 +138,7 @@ func (a *App) infoLineVisible() bool {
 	if a.zenMode || a.width <= 0 {
 		return false
 	}
-	if a.showHelp || a.selector.Visible() || a.diffPane.Visible() || a.fullPage.Visible() {
+	if a.showHelp || a.selector.Visible() || a.diffPane.Visible() || a.fullPage.Visible() || a.pageViewer.Visible() {
 		return false
 	}
 	return a.infoLine.View() != ""
@@ -279,6 +280,11 @@ func (a *App) View() tea.View {
 	// Full-page overlay takes priority over everything.
 	if a.fullPage.Visible() {
 		fullView = a.fullPage.View()
+	}
+	// The structured page viewer sits at the same layer as the plain full
+	// page and only one of them is ever visible at a time.
+	if a.pageViewer.Visible() {
+		fullView = a.pageViewer.View()
 	}
 	// Provider Studio overlay.
 	if a.providerStudio.Visible() {

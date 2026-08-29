@@ -207,8 +207,7 @@ Automergent includes 10 built-in color themes optimized for truecolor and standa
 ```text
 Automergent/
 ├── cmd/
-│   ├── automergent/      # Primary CLI entrypoint & command bootstrapping
-│   └── installer/        # Self-updating standalone installer
+│   └── automergent/      # Primary CLI entrypoint & command bootstrapping
 ├── internal/
 │   ├── agent/            # AI agent loop, orchestration, planning & approval policies
 │   ├── tui/              # Bubble Tea v2 TUI, Lip Gloss styles & Glamour rendering

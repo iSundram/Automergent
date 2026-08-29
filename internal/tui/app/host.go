@@ -63,6 +63,42 @@ func (a *App) StartAgent(prompt string) tea.Cmd {
 	return a.startAgent(prompt)
 }
 
+// AddUserCommandMessage records a prompt-command expansion in the conversation
+// with its command provenance (the accent "❯ /command" chip).
+func (a *App) AddUserCommandMessage(command, prompt string) {
+	a.conversation.AddUserCommandMessage(command, prompt)
+}
+
+// DispatchCommand runs another slash command by name from inside a handler,
+// sub-command or page action. The depth counter stops runaway cross-command
+// recursion; nested tea.Cmds are flushed by the outermost handleSlashCommand
+// frame so they execute exactly once.
+func (a *App) DispatchCommand(name string, args ...string) error {
+	if a.dispatchDepth >= maxDispatchDepth {
+		return fmt.Errorf("command dispatch nested more than %d deep — aborting", maxDispatchDepth)
+	}
+	if _, ok := a.commands.Lookup(name); !ok {
+		return commands.ErrUnknownCommand(name)
+	}
+	a.dispatchDepth++
+	input := "/" + name
+	if len(args) > 0 {
+		input += " " + strings.Join(args, " ")
+	}
+	cmd := a.handleSlashCommand(input)
+	a.dispatchDepth--
+	if cmd != nil {
+		a.pendingDispatchCmds = append(a.pendingDispatchCmds, cmd)
+	}
+	return nil
+}
+
+// ReloadCustomCommands re-reads markdown custom commands from disk and
+// reports how many are registered after the reload.
+func (a *App) ReloadCustomCommands() int {
+	return a.refreshCustomCommands()
+}
+
 func (a *App) CancelActiveRun(status string) {
 	a.cancelActiveRun(status)
 }
@@ -337,6 +373,7 @@ func (a *App) refreshCustomCommands() int {
 	if loaded != a.customCmdCount {
 		a.customCmdCount = loaded
 		a.helpOverlay.SetSlashCommands(a.commands.HelpRows())
+		a.syncCommandHints()
 	}
 	return loaded
 }

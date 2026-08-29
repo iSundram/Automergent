@@ -80,6 +80,7 @@ type App struct {
 	stats             components.Stats
 	helpOverlay       components.HelpOverlay
 	fullPage          components.FullPage
+	pageViewer        components.PageViewer
 	providerStudio    *components.ProviderStudio
 	modelHub          *components.ModelHub
 	fileTree          components.FileTree
@@ -98,6 +99,13 @@ type App struct {
 	// commands is the app-wide command registry: the single source of truth
 	// for slash-command dispatch, palette items and help documentation.
 	commands *commands.Registry
+
+	// dispatchDepth guards cross-command invocation (Host.DispatchCommand)
+	// against runaway recursion; pendingDispatchCmds collects the tea.Cmds
+	// produced by nested dispatches so they are executed exactly once.
+	dispatchDepth       int
+	dispatchActive      bool
+	pendingDispatchCmds []tea.Cmd
 
 	// Custom command hot-reload state (see refreshCustomCommands).
 	customCmdCount int
@@ -212,6 +220,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		stats:              components.NewStats(styles),
 		helpOverlay:        components.NewHelpOverlay(styles),
 		fullPage:           components.NewFullPage(styles),
+		pageViewer:         components.NewPageViewer(styles),
 		providerStudio:     components.NewProviderStudio(styles),
 		modelHub:           components.NewModelHub(styles),
 		fileTree:           components.NewFileTree(styles),
@@ -264,6 +273,8 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	}
 
 	app.helpOverlay.SetSlashCommands(app.commands.HelpRows())
+	app.helpOverlay.SetSlashSections(a_placeholder())
+	app.syncCommandHints()
 	app.header.SetModel(cfg.Model)
 	app.header.SetProvider(cfg.Provider)
 	// Normalise a legacy "edit" mode from a persisted config to its current
@@ -413,11 +424,39 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, cmd
 			}
 		}
+		// Structured page viewer (full-page command output with actions)
+		// captures keys while visible, ahead of the plain-text full page.
+		if a.pageViewer.Visible() && !a.confirm.Visible() {
+			// ESC resolves through the shared chain so the overlay closes the
+			// same way every other full-screen surface does.
+			if m.String() == "esc" {
+				if cmd := a.handleEscape(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				a.refreshChrome()
+				return a, tea.Batch(cmds...)
+			}
+			var cmd tea.Cmd
+			var handled bool
+			a.pageViewer, handled, cmd = a.pageViewer.Update(m)
+			if handled {
+				cmds = append(cmds, cmd)
+				return a, tea.Batch(cmds...)
+			}
+			return a, tea.Batch(append(cmds, cmd)...)
+		}
 		// Full-page overlay captures keys while visible.
 		if a.fullPage.Visible() && !a.confirm.Visible() {
+			if m.String() == "esc" {
+				if cmd := a.handleEscape(); cmd != nil {
+					cmds = append(cmds, cmd)
+				}
+				a.refreshChrome()
+				return a, tea.Batch(cmds...)
+			}
 			var cmd tea.Cmd
 			a.fullPage, cmd = a.fullPage.Update(m)
-			return a, cmd
+			return a, tea.Batch(append(cmds, cmd)...)
 		}
 		// Provider Studio captures keys while visible.
 		if a.providerStudio.Visible() && !a.confirm.Visible() {
@@ -502,6 +541,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 		}
+	case components.PageActionMsg:
+		// A full-page command's action shortcut was pressed: run the command
+		// it names through the normal dispatch path, so pages can invoke
+		// other commands (and their pages) the same way typed input does.
+		if a.pageViewer.Visible() {
+			input := "/" + m.Command
+			if len(m.Args) > 0 {
+				input += " " + strings.Join(m.Args, " ")
+			}
+			cmd := a.handleSlashCommand(input)
+			if cmd != nil {
+				cmds = append(cmds, cmd)
+			}
+			a.layout()
+		}
+		return a, tea.Batch(cmds...)
 	case agentEventMsg:
 		cmd = a.handleAgentEvent(m.ev)
 		if cmd != nil {

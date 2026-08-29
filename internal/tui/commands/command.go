@@ -68,8 +68,15 @@ type Command struct {
 	PromptTemplate string
 	// FullPageTitle is the title shown in the full-page overlay when Type == CmdFullPage.
 	FullPageTitle string
+	// Page builds the structured full-page view for this command when
+	// Type == CmdFullPage. When nil the handler's plain-text Result.Text is
+	// shown in the legacy FullPage overlay instead.
+	Page func(Host) components.Page
 	// Completion returns tab-completion suggestions for the given partial argument.
 	Completion func(Host, string) []string
+	// Source records where a custom command was loaded from (markdown path);
+	// empty for built-ins.
+	Source string
 	// Hidden excludes the command from the palette and help overlay.
 	Hidden bool
 	// Sensitive marks commands whose arguments must never be logged verbatim.
@@ -84,6 +91,20 @@ type Command struct {
 	DisabledReason func(Host) string
 	// Current decorates stateful toggle commands with their on/off status.
 	Current func(Host) bool
+}
+
+// kindBadge returns the palette glyph hinting how the command executes:
+// "↵" for prompt commands (they start an agent run), "⤢" for full-page
+// commands, "" for plain handlers.
+func (c Command) kindBadge() string {
+	switch c.Type {
+	case CmdPrompt:
+		return "↵"
+	case CmdFullPage:
+		return "⤢"
+	default:
+		return ""
+	}
 }
 
 // ExpandPrompt replaces $ARGUMENTS and $1..$9 placeholders in the prompt template.
@@ -192,7 +213,9 @@ func (r *Registry) RegisterCustom(cmd Command, handler Handler) error {
 		Tier: cmd.Tier, Type: cmd.Type, Immediate: cmd.Immediate,
 		SubPalette: cmd.SubPalette, SubCommands: cmd.SubCommands,
 		PromptTemplate: cmd.PromptTemplate, FullPageTitle: cmd.FullPageTitle,
+		Page:       cmd.Page,
 		Completion: cmd.Completion,
+		Source:     cmd.Source,
 		Hidden: cmd.Hidden, Sensitive: cmd.Sensitive,
 		SupportsHeadless: cmd.SupportsHeadless,
 	}
@@ -340,8 +363,9 @@ func (r *Registry) PaletteItems(host Host) []components.PaletteItem {
 			Icon:        cmd.Icon,
 			Category:    cmd.Category,
 			Hint:        cmd.ArgsHint,
+			Kind:        cmd.kindBadge(),
 			Tier:        components.CommandTier(cmd.Tier),
-			SearchTerms: strings.Join(append(append([]string{}, cmd.Aliases...), cmd.Description, cmd.Category), " "),
+			SearchTerms: strings.Join(append(append([]string{}, cmd.Aliases...), cmd.Description, cmd.Category, cmd.WhenToUse), " "),
 		}
 		if host != nil && cmd.Current != nil {
 			item.Current = cmd.Current(host)

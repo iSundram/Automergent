@@ -38,6 +38,27 @@ type mockHost struct {
 	cancelActiveRuns    []string
 	compactContextCalls int
 
+	// Cross-command invocation (DispatchCommand) and custom reload state.
+	commandMessages     [][2]string
+	dispatchDepth       int
+	reloadCustomCalls   int
+	reloadCustomCount   int
+	registry            *Registry
+
+	// MCP state
+	mcpServers         []MCPServerStatus
+	mcpTools           []MCPToolInfo
+	mcpResources       []MCPResourceInfo
+	mcpPrompts         []MCPPromptInfo
+	mcpEvents          []MCPEventInfo
+	mcpReconnectCalls  []string
+	mcpRefreshCalls    []string
+	mcpEnableCalls     []string
+	mcpDisableCalls    []string
+	mcpAddCalls        []string
+	mcpRemoveCalls     []string
+	mcpCacheDeleteCalls int
+
 	switchProviderCalls []struct{ provider, model string }
 	fetchModelsCalls    int
 
@@ -160,7 +181,6 @@ func (m *mockHost) Reset() {
 	m.clearAPIErrorCalls = 0
 	m.toggleFileTreeCalls = 0
 	m.toggleDiffPaneCalls = 0
-	m.toggleLSPPanelCalls = 0
 	m.toggleReviewModeCalls = 0
 	m.searchWorkspaceCalls = nil
 	m.exportConversationCalls = nil
@@ -209,6 +229,149 @@ func (m *mockHost) CommandError(message string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.errorMessages = append(m.errorMessages, message)
+}
+
+func (m *mockHost) AddUserCommandMessage(command, prompt string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.commandMessages = append(m.commandMessages, [2]string{command, prompt})
+}
+
+func (m *mockHost) DispatchCommand(name string, args ...string) error {
+	m.mu.Lock()
+	if m.dispatchDepth >= 5 {
+		m.mu.Unlock()
+		return errors.New("dispatch depth exceeded")
+	}
+	m.dispatchDepth++
+	m.mu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		m.dispatchDepth--
+		m.mu.Unlock()
+	}()
+	// The mock host dispatches straight through a registry the test sets up;
+	// Default() when no override is configured.
+	reg := m.registry
+	if reg == nil {
+		reg = defaultTestRegistry()
+	}
+	if _, err := reg.Dispatch(m, name, args); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m *mockHost) ReloadCustomCommands() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.reloadCustomCalls++
+	return m.reloadCustomCount
+}
+
+// defaultTestRegistry memoizes a Default() registry for DispatchCommand.
+var defaultTestReg *Registry
+
+func defaultTestRegistry() *Registry {
+	if defaultTestReg == nil {
+		defaultTestReg = Default()
+	}
+	return defaultTestReg
+}
+
+// --- MCP ---
+
+func (m *mockHost) MCPStatus() []MCPServerStatus {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]MCPServerStatus, len(m.mcpServers))
+	copy(out, m.mcpServers)
+	return out
+}
+
+func (m *mockHost) MCPTools(server string) []MCPToolInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if server == "" {
+		return append([]MCPToolInfo{}, m.mcpTools...)
+	}
+	var out []MCPToolInfo
+	for _, t := range m.mcpTools {
+		if t.Server == server {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
+func (m *mockHost) MCPResources() []MCPResourceInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]MCPResourceInfo{}, m.mcpResources...)
+}
+
+func (m *mockHost) MCPPrompts() []MCPPromptInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]MCPPromptInfo{}, m.mcpPrompts...)
+}
+
+func (m *mockHost) MCPReconnect(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mcpReconnectCalls = append(m.mcpReconnectCalls, name)
+	return nil
+}
+
+func (m *mockHost) MCPRefresh(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mcpRefreshCalls = append(m.mcpRefreshCalls, name)
+	return nil
+}
+
+func (m *mockHost) MCPEnable(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mcpEnableCalls = append(m.mcpEnableCalls, name)
+	return nil
+}
+
+func (m *mockHost) MCPDisable(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mcpDisableCalls = append(m.mcpDisableCalls, name)
+	return nil
+}
+
+func (m *mockHost) MCPCallTool(server, name string, args map[string]any) (string, error) {
+	return "", errors.New("not implemented in mock")
+}
+
+func (m *mockHost) MCPEvents() []MCPEventInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]MCPEventInfo{}, m.mcpEvents...)
+}
+
+func (m *mockHost) MCPDeleteToolCache(pattern string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mcpCacheDeleteCalls++
+}
+
+func (m *mockHost) MCPAddServer(name, transport, urlOrCmd string, args []string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mcpAddCalls = append(m.mcpAddCalls, name)
+	return nil
+}
+
+func (m *mockHost) MCPRemoveServer(name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.mcpRemoveCalls = append(m.mcpRemoveCalls, name)
+	return nil
 }
 
 func (m *mockHost) StartAgent(prompt string) tea.Cmd {

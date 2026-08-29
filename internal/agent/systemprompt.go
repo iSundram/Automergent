@@ -102,6 +102,9 @@ func (a *Agent) buildUnifiedSystemPrompt(ctx context.Context, provider ai.Provid
 	// --- Skills availability ---
 	sb.WriteString(skillsPromptBlock(a.skills))
 
+	// --- Slash-command availability (recommendable, not executable) ---
+	sb.WriteString(commandHintsPromptBlock(a.commandHintSnapshot()))
+
 	// --- Mode block (capability-mask specific guidance; see modes.go) ---
 	if block := a.modePromptBlock(); block != "" {
 		sb.WriteString(block)

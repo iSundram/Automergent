@@ -14,6 +14,12 @@ import (
 
 func (c *Conversation) renderUser(m ConversationMsg, msgW, w int) string {
 	label := c.styles.UserLabel.Copy().MarginBottom(0).Render(" You ")
+	if m.Command != "" {
+		// Prompt-command provenance: the user typed "/commit", so the bubble
+		// is labelled with that chip instead of a generic "You".
+		label = c.styles.UserLabel.Copy().MarginBottom(0).
+			Foreground(c.styles.T.Accent).Render(" ❯ /" + m.Command + " ")
+	}
 	content := c.styles.UserBubble.Width(msgW).Render(m.Content)
 
 	fullWidth := lipgloss.Width(content)

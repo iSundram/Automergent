@@ -43,6 +43,8 @@ type Agent struct {
 	decisionRecords     []ToolDecisionRecord
 	skills              []Skill
 	skillPaths          *skillTracker
+	commandHints        []CommandHint
+	commandHintsMu      sync.RWMutex
 	editReview          *editreview.Store
 
 	// Persistent components

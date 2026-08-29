@@ -20,6 +20,10 @@ type ConversationMsg struct {
 	Thought     string
 	IsError     bool
 	Timestamp   time.Time
+	// Command carries the provenance of a prompt-command expansion ("/commit"):
+	// when set on a user message, the bubble's label renders as an accent
+	// "❯ /command" chip instead of "You".
+	Command      string
 	ToolID      string
 	ToolName    string
 	ToolArgs    string
@@ -279,6 +283,21 @@ func (c *Conversation) AddMessage(role, content string, isError bool) {
 	c.AddMessageFull(role, content, "", isError)
 }
 
+// AddUserCommandMessage appends a user message that came from expanding a
+// prompt-type slash command. The command name is kept as provenance so the
+// bubble is labelled with the "/commit" chip the user actually typed.
+func (c *Conversation) AddUserCommandMessage(command, prompt string) {
+	c.ensureViewport()
+	c.FinalizeStreaming()
+	c.messages = append(c.messages, ConversationMsg{
+		Role:      "user",
+		Content:   prompt,
+		Command:   command,
+		Timestamp: time.Now(),
+	})
+	c.refreshAndFollow(true)
+}
+
 // AddMessageFull appends a message including an optional thought (thinking
 // box). Used when restoring a session so resuming shows the conversation
 // exactly as it did while running.
@@ -529,9 +548,9 @@ func (c *Conversation) UpdateToolContent(id, content string) {
 func hashMessage(epoch uint64, expand ExpandMode, review bool, m ConversationMsg, spanExtra string) uint64 {
 	h := fnv.New64a()
 	fmt.Fprintf(h, "%d|%d|%t|", epoch, expand, review)
-	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%d\x00%d",
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%s\x00%d\x00%d",
 		m.Role, m.Content, m.Thought, m.ToolName, m.ToolArgs,
-		m.ToolContext, m.ToolSummary, m.IsError, m.Status,
+		m.ToolContext, m.ToolSummary, m.IsError, m.Status, m.Command,
 		m.Duration.Nanoseconds(), m.Timestamp.UnixNano())
 	// Metadata drives family renderers, so it must participate — over sorted
 	// keys, since map iteration order would otherwise churn the cache.

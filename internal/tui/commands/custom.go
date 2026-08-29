@@ -32,9 +32,12 @@ import (
 
 const (
 	customCategory = "Custom"
-	customIcon     = "󰆙"
-	userCommandsNm = ".automergent/commands"
-	maxCommandBody = 64 * 1024
+	// CustomCategory is the exported palette/help category for user-defined
+	// markdown commands.
+	CustomCategory   = customCategory
+	customIcon       = "󰆙"
+	userCommandsNm   = ".automergent/commands"
+	maxCommandBody   = 64 * 1024
 )
 
 // ParseMarkdownCommand derives a command definition and prompt body from a
@@ -264,7 +267,7 @@ func LoadMarkdownCommands(reg *Registry, dir string) (int, []string) {
 			warnings = append(warnings, parseErr.Error())
 			return nil
 		}
-		if regErr := registerCustomMarkdownCommand(reg, cmd, body); regErr != nil {
+		if regErr := registerCustomMarkdownCommand(reg, cmd, body, path); regErr != nil {
 			warnings = append(warnings, regErr.Error())
 			return nil
 		}
@@ -278,7 +281,9 @@ func LoadMarkdownCommands(reg *Registry, dir string) (int, []string) {
 }
 
 // registerCustomMarkdownCommand wires a parsed command into the registry.
-func registerCustomMarkdownCommand(reg *Registry, cmd Command, body string) error {
+// path is the file it was loaded from, surfaced by /commands list.
+func registerCustomMarkdownCommand(reg *Registry, cmd Command, body string, path string) error {
+	cmd.Source = path
 	return reg.RegisterCustom(cmd, func(host Host, args []string) Result {
 		prompt := ExpandPromptTemplate(body, args)
 		switch cmd.Type {
