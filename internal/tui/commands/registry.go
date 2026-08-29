@@ -15,6 +15,7 @@ func Default() *Registry {
 	r.MustRegister(providerCommand(), handleProvider)
 	r.MustRegister(modeCommand(), handleMode)
 	r.MustRegister(contextCommand(), handleContext)
+	r.MustRegister(costCommand(), handleCost)
 	r.MustRegister(compactCommand(), handleCompact)
 
 	// --- Session ---
@@ -82,7 +83,7 @@ func Default() *Registry {
 	r.MustRegister(mcpCommand(), handleMCP)
 
 	// --- Knowledge ---
-	r.MustRegister(skillsCommand(), handleSkills)
+	r.MustRegister(skillsCommand(r), handleSkills(r))
 	r.MustRegister(agentsCommand(), handleAgents)
 	r.MustRegister(tldrCommand(), handleTldr)
 

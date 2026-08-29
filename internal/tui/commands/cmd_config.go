@@ -82,10 +82,13 @@ func configPage(h Host) components.Page {
 			{
 				Heading: "Security",
 				Rows: [][2]string{
-					components.Row("Blocked paths", fmt.Sprintf("%d", len(blocked))),
-					components.Row("Allowed paths", fmt.Sprintf("%d", len(allowed))),
+					components.Row("Write rules", fmt.Sprintf("%d blocked · %d allowed paths", len(blocked), len(allowed))),
 				},
 				Flagged: []components.PageFlag{validationFlag},
+			},
+			{
+				Heading: "Notes",
+				Lines:   []string{"Full layer breakdown: `automergent config show` from your shell."},
 			},
 		},
 		Actions: []components.PageAction{

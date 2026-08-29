@@ -164,6 +164,10 @@ func providerUse(host Host, args []string) Result {
 	if len(args) > 1 {
 		model = args[1]
 	}
+	if !config.IsKnownProvider(provider) && !containsString(host.Providers(), provider) {
+		host.CommandError(fmt.Sprintf("Unknown provider %q", provider))
+		return Done(nil)
+	}
 	if err := host.SwitchProvider(provider, model); err != nil {
 		host.CommandError(fmt.Sprintf("Error: %v", err))
 		return Done(nil)

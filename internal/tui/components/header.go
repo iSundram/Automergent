@@ -16,7 +16,7 @@ type Header struct {
 	model          string
 	provider       string
 	mode           string
-	phase          string // "research", "plan", "execute"
+	phase          string // "init", "explore", "plan", "build"
 	activeTokens   int    // tokens in current prompt (active context)
 	totalTokens    int    // cumulative session tokens
 	maxTokens      int
@@ -46,11 +46,13 @@ func (h *Header) SetCost(usd float64)         { h.cost = usd }
 func (h *Header) getPhaseStyle() lipgloss.Style {
 	base := lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(h.styles.T.Background)
 	switch strings.ToLower(h.phase) {
-	case "research":
+	case "init":
+		return base.Background(h.styles.T.Muted)
+	case "explore":
 		return base.Background(h.styles.T.Blue)
 	case "plan":
 		return base.Background(h.styles.T.Yellow)
-	case "execute":
+	case "build":
 		return base.Background(h.styles.T.Green)
 	default:
 		return base.Background(h.styles.T.Accent)

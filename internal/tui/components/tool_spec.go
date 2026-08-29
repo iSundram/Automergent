@@ -25,9 +25,9 @@ const (
 	familyRead                           // read_file, view
 	familyList                           // list_directory, glob
 	familySearch                         // grep, search
-	familyEdit                           // write_file, create_file, edit_file, multi_edit
-	familyFileOp                         // delete_file, move_file, copy_file
-	familyTerminal                       // bash, run_command
+	familyEdit                           // write_file, edit_file, multi_edit
+	familyFileOp                         // reserved: legacy file op tools (removed)
+	familyTerminal                       // bash
 	familyShellSession                   // read_shell, write_shell, stop_shell, wait
 	familyShellList                      // list_shells
 	familyWeb                            // web_fetch, web_search
@@ -88,19 +88,12 @@ var toolSpecs = map[string]toolSpec{
 	"search": {"Search", aMagenta, familySearch, []string{"query"}, true},
 
 	// --- edit ---------------------------------------------------------
-	"write_file":  {"Write", aGreen, familyEdit, []string{"path"}, false},
-	"create_file": {"Create", aGreen, familyEdit, []string{"path"}, false},
-	"edit_file":   {"Edit", aYellow, familyEdit, []string{"path"}, false},
-	"multi_edit":  {"Multi-edit", aYellow, familyEdit, []string{"path"}, false},
-
-	// --- file operations ----------------------------------------------
-	"delete_file": {"Delete", aRed, familyFileOp, []string{"path"}, true},
-	"move_file":   {"Move", aBlue, familyFileOp, []string{"source"}, true},
-	"copy_file":   {"Copy", aBlue, familyFileOp, []string{"source"}, true},
+	"write_file": {"Write", aGreen, familyEdit, []string{"path"}, false},
+	"edit_file":  {"Edit", aYellow, familyEdit, []string{"path"}, false},
+	"multi_edit": {"Multi-edit", aYellow, familyEdit, []string{"path"}, false},
 
 	// --- terminal -----------------------------------------------------
-	"bash":        {"Bash", aYellow, familyTerminal, []string{"command"}, false},
-	"run_command": {"Run", aYellow, familyTerminal, []string{"command"}, false},
+	"bash": {"Bash", aYellow, familyTerminal, []string{"command"}, false},
 
 	// --- shell sessions -----------------------------------------------
 	"read_shell":  {"Read shell", aYellow, familyShellSession, []string{"shell_id"}, false},

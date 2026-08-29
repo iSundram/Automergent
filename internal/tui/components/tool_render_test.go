@@ -27,17 +27,17 @@ var allToolNames = []string{
 	"context_bucket_create", "context_bucket_delete", "context_bucket_get",
 	"context_bucket_list", "context_bucket_set", "context_get_init",
 	"context_get_intent", "context_list_buckets",
-	"copy_file", "create_file", "delete_file", "dependency_audit", "edit_file",
+	"dependency_audit", "edit_file",
 	"glob", "grep", "list_agents", "list_directory", "list_shells",
-	"lsp_diagnostics", "move_file", "multi_edit", "notify", "plan",
-	"read_agent", "read_file", "read_shell", "replan", "run_command",
+	"lsp_diagnostics", "multi_edit", "notify", "plan",
+	"read_agent", "read_file", "read_shell", "replan",
 	"search", "secrets_scan", "sql", "stop_shell", "task", "task_get",
 	"task_list", "task_update", "todo_list", "todo_next", "todo_write",
 	"view", "wait", "web_fetch", "web_search", "write_file", "write_shell",
 }
 
 func TestEveryToolHasASpec(t *testing.T) {
-	if len(allToolNames) != 48 {
+	if len(allToolNames) != 43 {
 		t.Fatalf("expected 48 registered tools, list has %d", len(allToolNames))
 	}
 	for _, name := range allToolNames {

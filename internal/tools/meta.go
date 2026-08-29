@@ -181,7 +181,7 @@ func InferCategory(name string) string {
 		return "edit"
 	case strings.HasPrefix(n, "git_"):
 		return "git"
-	case n == "bash" || n == "run_command" || strings.HasSuffix(n, "_shell") ||
+	case n == "bash" || strings.HasSuffix(n, "_shell") ||
 		n == "wait" || n == "command_status":
 		return "shell"
 	case strings.HasPrefix(n, "web_"):

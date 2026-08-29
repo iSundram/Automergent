@@ -1,7 +1,11 @@
 package commands
 
 import (
+	"fmt"
+
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/iSundram/Automergent/internal/tui/components"
 )
 
 // /stats — show session statistics.
@@ -18,6 +22,7 @@ func statsCommand() Command {
 		Tier:          TierTertiary,
 		Type:          CmdFullPage,
 		FullPageTitle: "Statistics",
+		Page:          statsPage,
 		Immediate:     true,
 	}
 }
@@ -50,6 +55,41 @@ func quitCommand() Command {
 func handleStats(host Host, args []string) Result {
 	host.ShowStats()
 	return Done(nil)
+}
+
+// statsPage builds the structured usage page: current session tokens/cost plus
+// all-time totals across stored sessions.
+func statsPage(h Host) components.Page {
+	page := components.Page{
+		Title:    "Statistics",
+		Subtitle: "Token usage and cost",
+		Sections: []components.PageSection{
+			{
+				Heading: "This Session",
+				Rows: [][2]string{
+					components.Row("Input tokens", fmt.Sprintf("%d", h.InputTokens())),
+					components.Row("Output tokens", fmt.Sprintf("%d", h.OutputTokens())),
+					components.Row("Cost", fmt.Sprintf("$%.4f", h.TotalCost())),
+				},
+			},
+		},
+	}
+	sessions, totalIn, totalOut := h.SessionTokenTotals()
+	if sessions > 0 {
+		page.Sections = append(page.Sections, components.PageSection{
+			Heading: "All Sessions",
+			Rows: [][2]string{
+				components.Row("Sessions", fmt.Sprintf("%d", sessions)),
+				components.Row("Input tokens", fmt.Sprintf("%d", totalIn)),
+				components.Row("Output tokens", fmt.Sprintf("%d", totalOut)),
+			},
+		})
+	}
+	page.Actions = []components.PageAction{
+		{Key: "c", Label: "Context", Command: "context"},
+		{Key: "e", Label: "Errors", Command: "error"},
+	}
+	return page
 }
 
 func handleHelp(host Host, args []string) Result {

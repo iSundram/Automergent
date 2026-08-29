@@ -13,6 +13,7 @@ func planCommand() Command {
 		Category:    "Workflow",
 		Icon:        "󰈙",
 		ArgsHint:    "[focus|copy]",
+		SubPalette:  "plan",
 		Tier:        TierPrimary,
 		Type:        CmdPrompt,
 		SubCommands: []SubCommand{

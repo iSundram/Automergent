@@ -373,6 +373,7 @@ func (a *App) refreshCustomCommands() int {
 	if loaded != a.customCmdCount {
 		a.customCmdCount = loaded
 		a.helpOverlay.SetSlashCommands(a.commands.HelpRows())
+		a.helpOverlay.SetSlashSections(a.commands.HelpSections())
 		a.syncCommandHints()
 	}
 	return loaded

@@ -61,9 +61,9 @@ type ProviderStudio struct {
 
 func NewProviderStudio(styles *themes.Styles) *ProviderStudio {
 	return &ProviderStudio{
-		styles:      styles,
-		tab:         TabOverview,
-		addApiType:  "openai",
+		styles:         styles,
+		tab:            TabOverview,
+		addApiType:     "openai",
 		addModelApiURL: "/v1/models",
 	}
 }
@@ -87,9 +87,9 @@ func (p *ProviderStudio) Show() {
 	p.addStepCursor = 0
 }
 
-func (p *ProviderStudio) Hide()               { p.visible = false }
-func (p *ProviderStudio) Visible() bool       { return p.visible }
-func (p *ProviderStudio) Title() string       { return "Provider Studio" }
+func (p *ProviderStudio) Hide()         { p.visible = false }
+func (p *ProviderStudio) Visible() bool { return p.visible }
+func (p *ProviderStudio) Title() string { return "Provider Studio" }
 
 func (p *ProviderStudio) Update(msg tea.Msg) (*ProviderStudio, tea.Cmd) {
 	if !p.visible {
@@ -277,10 +277,10 @@ func (p *ProviderStudio) saveProvider() {
 		return
 	}
 	pc := config.ProviderConfig{
-		APIKey:      p.addAPIKey,
-		BaseURL:     p.addBaseURL,
-		ModelApiUrl: p.addModelApiURL,
-		ApiType:     p.addApiType,
+		APIKey:       p.addAPIKey,
+		BaseURL:      p.addBaseURL,
+		ModelApiUrl:  p.addModelApiURL,
+		ApiType:      p.addApiType,
 		DefaultModel: "",
 	}
 	p.host.EnsureProviderConfig(p.addName)

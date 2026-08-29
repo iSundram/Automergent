@@ -10,227 +10,78 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/iSundram/Automergent/internal/agent"
-	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/tui/commands"
 	"github.com/iSundram/Automergent/internal/tui/components"
 	"github.com/sahilm/fuzzy"
 )
 
+// updatePalette resolves the input's trigger, builds the palette items for
+// it and applies the fuzzy filter. The per-trigger item sets come from the
+// sub-palette spec table (subpalettes.go); the only logic here is the shared
+// pipeline: trigger → items → filter → empty-hint → SetItems.
 func (a *App) updatePalette() {
 	trigger := a.input.TriggerType()
 	filter := a.input.TriggerValue()
 	a.palette.SetQuery(filter)
+	a.palette.SetEmptyHint(paletteEmptyHintFor(trigger))
 
 	var items []components.PaletteItem
 	switch trigger {
 	case "help", "command":
 		items = a.fuzzyFilter(a.commands.PaletteItems(a), filter)
-
-	case "model":
-		var modelItems []components.PaletteItem
-		for _, m := range a.modelsAvailable() {
-			desc := fmt.Sprintf("Limit: %d", m.ContextLimit)
-			if m.InputPrice > 0 || m.OutputPrice > 0 {
-				desc += fmt.Sprintf(" $%.4g/$%.4g", m.InputPrice, m.OutputPrice)
-			}
-			modelItems = append(modelItems, components.PaletteItem{
-				Label:       m.ID,
-				Description: desc,
-				Value:       m.ID,
-				Icon:        "●",
-				Category:    "Models",
-				Current:     m.ID == a.cfg.Model,
-			})
+	default:
+		if spec, ok := subPaletteSpecFor(trigger); ok {
+			items = a.fuzzyFilter(spec.Build(a), filter)
 		}
-		if len(modelItems) == 0 && a.fetchingModels {
-			items = []components.PaletteItem{{Label: "Loading…", Description: "Fetching models from provider", Value: "", Icon: "◌", Category: "Models"}}
-		} else {
-			items = a.fuzzyFilter(modelItems, filter)
-		}
-
-	case "provider":
-		var providerItems []components.PaletteItem
-		for _, p := range a.availableProviders {
-			spec, _ := config.ProviderSpecFor(p)
-			desc := spec.Description
-			if desc == "" {
-				desc = "AI provider"
-			}
-			icon := config.ProviderIcon(p)
-			providerItems = append(providerItems, components.PaletteItem{
-				Label: p, Description: desc, Value: p, Icon: icon, Category: "Providers", Current: p == a.cfg.Provider,
-			})
-		}
-		items = a.fuzzyFilter(providerItems, filter)
-
-	case "mode":
-		modeIcons := map[string]string{
-			"manual":       "○",
-			"accept-edits": "✓",
-			"auto":         "▸",
-			"plan":         "◌",
-		}
-		current := agent.CanonicalMode(a.cfg.Mode)
-		var modeItems []components.PaletteItem
-		for _, mode := range agent.AllModes() {
-			modeItems = append(modeItems, components.PaletteItem{
-				Label:       mode,
-				Description: agent.ModeDescription(mode),
-				Value:       mode,
-				Icon:        modeIcons[mode],
-				Category:    "Modes",
-				Current:     mode == current,
-			})
-		}
-		items = a.fuzzyFilter(modeItems, filter)
-
-	case "theme":
-		var themeItems []components.PaletteItem
-		for _, t := range a.AvailableThemes() {
-			themeItems = append(themeItems, components.PaletteItem{
-				Label: t, Description: "UI theme", Value: t, Icon: "●", Category: "Themes",
-				Current: t == a.cfg.Theme,
-			})
-		}
-		items = a.fuzzyFilter(themeItems, filter)
-
-	case "keybindings":
-		var keyItems []components.PaletteItem
-		for _, k := range a.AvailableKeybindings() {
-			keyItems = append(keyItems, components.PaletteItem{
-				Label: k, Description: "Keybinding scheme", Value: k, Icon: "→", Category: "Keybindings",
-				Current: k == a.cfg.Keybindings,
-			})
-		}
-		items = a.fuzzyFilter(keyItems, filter)
-
-	case "effort":
-		pc := a.ProviderConfig(a.Provider())
-		currentEffort := pc.Effort
-		if currentEffort == "" {
-			currentEffort = pc.ThinkingLevel
-		}
-		var effortItems []components.PaletteItem
-		for _, e := range []string{"minimal", "low", "medium", "high"} {
-			effortItems = append(effortItems, components.PaletteItem{
-				Label: e, Description: "Thinking effort", Value: e, Icon: "●", Category: "Effort",
-				Current: e == currentEffort,
-			})
-		}
-		items = a.fuzzyFilter(effortItems, filter)
-
-	case "file":
-		var fileItems []components.PaletteItem
-		for _, item := range a.fileTree.Items() {
-			if !item.IsDir {
-				fileItems = append(fileItems, components.PaletteItem{
-					Label:       item.Name,
-					Description: item.Path,
-					Value:       item.Path,
-					Icon:        "●",
-					Category:    "Files",
-				})
-			}
-		}
-		items = a.fuzzyFilter(fileItems, filter)
-
-	case "run":
-		runItems := a.detectRunCommands()
-		items = a.fuzzyFilter(runItems, filter)
-
-	case "commit":
-		commitItems := []components.PaletteItem{
-			{Label: "all changes", Description: "Stage and commit all modified files", Value: "", Icon: "⎿", Category: "Commit Scope"},
-			{Label: "staged only", Description: "Commit only already-staged files", Value: "--staged", Icon: "⎿", Category: "Commit Scope"},
-		}
-		items = a.fuzzyFilter(commitItems, filter)
-
-	case "review":
-		reviewItems := []components.PaletteItem{
-			{Label: "uncommitted changes", Description: "Review pending workspace changes", Value: "", Icon: "→", Category: "Review Target"},
-			{Label: "latest commit", Description: "Review the most recent commit", Value: "HEAD", Icon: "→", Category: "Review Target"},
-		}
-		items = a.fuzzyFilter(reviewItems, filter)
-
-	case "mcp":
-		// First try sub-commands. If filter looks like "enable <partial>", delegate to Completion/second-level.
-		subItems := a.commands.SubCommandPaletteItems(a, "mcp")
-		// If user already typed a sub-command plus space, try Completion for argument completion.
-		if strings.Contains(filter, " ") {
-			parts := strings.Fields(filter)
-			if len(parts) >= 1 {
-				subName := parts[0]
-				remaining := ""
-				if len(parts) > 1 {
-					remaining = strings.Join(parts[1:], " ")
-				} else if strings.HasSuffix(filter, " ") {
-					remaining = ""
-				}
-				if _, ok := a.commands.LookupSubCommand("mcp", subName); ok {
-					// For enable/disable show server names.
-					if subName == "enable" || subName == "disable" {
-						var serverItems []components.PaletteItem
-						for _, s := range a.MCPStatus() {
-							serverItems = append(serverItems, components.PaletteItem{
-								Label: s.Name, Description: s.Status, Value: s.Name, Icon: "→", Category: "MCP Servers",
-							})
-						}
-						if len(serverItems) > 0 {
-							items = a.fuzzyFilter(serverItems, remaining)
-							break
-						}
-					}
-				}
-			}
-		}
-		items = a.fuzzyFilter(subItems, filter)
-
-	case "commands":
-		cmdItems := a.commands.SubCommandPaletteItems(a, "commands")
-		items = a.fuzzyFilter(cmdItems, filter)
-
-	case "directory":
-		dirItems := a.commands.SubCommandPaletteItems(a, "directory")
-		items = a.fuzzyFilter(dirItems, filter)
-
-	case "plan":
-		planItems := a.commands.SubCommandPaletteItems(a, "plan")
-		// If user typed "plan " with no sub, also show prompt hint.
-		if len(planItems) == 0 {
-			planItems = []components.PaletteItem{{Label: "plan", Description: "Enter plan mode", Value: "plan", Icon: "◌", Category: "plan"}}
-		}
-		items = a.fuzzyFilter(planItems, filter)
-
-	case "goal":
-		goalItems := a.commands.SubCommandPaletteItems(a, "goal")
-		items = a.fuzzyFilter(goalItems, filter)
 	}
 
-	// Generic Completion fallback: if we are in "command" mode and the filter
-	// contains a command prefix that has a Completion function, show those results.
-	if len(items) == 0 && trigger == "command" && strings.Contains(filter, " ") {
-		parts := strings.Fields(filter)
-		if len(parts) >= 1 {
-			if cmd, ok := a.commands.Lookup(parts[0]); ok && cmd.Completion != nil {
-				partial := ""
-				if len(parts) > 1 {
-					partial = strings.Join(parts[1:], " ")
-				}
-				if completions := cmd.Completion(a, partial); len(completions) > 0 {
-					var compItems []components.PaletteItem
-					for _, c := range completions {
-						compItems = append(compItems, components.PaletteItem{
-							Label: c, Value: c, Icon: cmd.Icon, Category: cmd.Name,
-						})
-					}
-					items = a.fuzzyFilter(compItems, partial)
-				}
-			}
+	// Argument completion: once a sub-command or argument is being typed
+	// ("mcp enable fs"), the item set comes from the command's sub-commands,
+	// dynamic value providers or Completion function instead of the trigger's
+	// item list.
+	if strings.Contains(filter, " ") || len(items) == 0 {
+		if argItems := a.argumentCompletion(trigger, filter); argItems != nil {
+			items = a.fuzzyFilter(argItems, argumentPartial(trigger, filter))
 		}
 	}
 
 	a.palette.SetItems(items)
+}
+
+// argumentCompletion returns item candidates for the argument portion of the
+// filter, or nil when the command has no completion path. For the command
+// trigger the first filter token names the command ("/mcp enable fs"); for
+// sub-palette triggers the command is the trigger itself.
+func (a *App) argumentCompletion(trigger, filter string) []components.PaletteItem {
+	name := trigger
+	if trigger == "command" || trigger == "help" {
+		parts := strings.Fields(filter)
+		if len(parts) == 0 {
+			return nil
+		}
+		name = parts[0]
+		filter = strings.Join(parts[1:], " ")
+	}
+	if _, ok := a.commands.Lookup(name); !ok {
+		return nil
+	}
+	return a.argumentItems(name, filter)
+}
+
+// argumentPartial extracts the partial argument text the completion items
+// should be filtered by (everything after the command/sub-command token).
+func argumentPartial(trigger, filter string) string {
+	parts := strings.Fields(filter)
+	if trigger == "command" || trigger == "help" {
+		if len(parts) <= 1 {
+			return ""
+		}
+		parts = parts[1:]
+	}
+	if len(parts) <= 1 {
+		return ""
+	}
+	return strings.Join(parts[1:], " ")
 }
 
 func (a *App) detectRunCommands() []components.PaletteItem {
@@ -447,9 +298,11 @@ func (a *App) handlePromptCommand(cmd commands.Command, args []string) tea.Cmd {
 		// Fall back to handler if no template.
 		return a.handleHandlerCommand(cmd, args)
 	}
-	a.conversation.AddUserCommandMessage(cmd.Name, prompt)
 	agentPrompt := fmt.Sprintf("<command-message>/%s</command-message>\n%s", cmd.Name, prompt)
-	return a.startAgent(agentPrompt)
+	// startAgentCommand renders the "/command" chip bubble in the
+	// conversation; a plain startAgent here would echo the template a second
+	// time (with the raw provenance tags) on top of it.
+	return a.startAgentCommand(prompt, agentPrompt, cmd.Name)
 }
 
 // handleFullPageCommand opens a full-page overlay with command output.
@@ -466,8 +319,9 @@ func (a *App) handleFullPageCommand(cmd commands.Command, args []string) tea.Cmd
 		return nil
 	}
 	// Structured page: the command's view builder renders sections and
-	// action shortcuts into the PageViewer.
-	if cmd.Page != nil {
+	// action shortcuts into the PageViewer. Args fall through to the handler
+	// so argument paths (/context detail, /error clear) keep working.
+	if cmd.Page != nil && len(args) == 0 {
 		a.pageViewer.Show(cmd.Page(a))
 		a.fullPage.Hide()
 		a.layout()
@@ -517,6 +371,109 @@ func (a *App) deliverCommandResult(result commands.Result) tea.Cmd {
 		a.conversation.AddMessage("system", result.Text, false)
 	}
 	return result.Cmd
+}
+
+// paletteEnter implements enter while the palette is open. The rule table,
+// in priority order:
+//
+//	disabled item          → show reason in status bar; palette stays open
+//	command list selection →
+//	  sub-palette command  → insert "/<name> " and open its picker
+//	  immediate command    → dispatch "/<name>" right away
+//	  other command        → insert "/<name> " so arguments can follow
+//	argument completion    → replace the partial argument token with the
+//	                         selected value and dispatch the composed command
+//	file mention           → insert "@<path> " into the message text
+//	sub-palette value      → compose "/<trigger> <value>" and dispatch
+//	no selection           → dispatch raw input if it names a command (or has
+//	                         arguments); otherwise close and keep the text
+//
+// Typed input never silently overrides a highlighted selection: the raw-input
+// dispatch only runs when there is no selection to act on.
+func (a *App) paletteEnter() tea.Cmd {
+	sel := a.palette.Selected()
+	trigger := a.input.TriggerType()
+	filter := strings.TrimSpace(a.input.TriggerValue())
+
+	if sel == nil {
+		// Free-form escape: dispatch raw input only when there's no
+		// selection (the user bypassed the palette).
+		raw := strings.TrimSpace(a.input.Value())
+		if raw != "" && strings.HasPrefix(raw, "/") {
+			name := strings.TrimPrefix(strings.Fields(raw)[0], "/")
+			if _, known := a.commands.Lookup(name); known || strings.Contains(raw, " ") {
+				a.input.Reset()
+				a.palette.Hide()
+				a.layout()
+				return a.handleSlashCommand(raw)
+			}
+		}
+		a.palette.Hide()
+		a.layout()
+		return nil
+	}
+
+	if sel.Disabled {
+		a.statusBar.SetStatus(sel.DisabledReason)
+		return nil
+	}
+
+	// File mentions insert into the message text; they are not commands.
+	if trigger == "file" {
+		a.input.InsertValue(sel.Value)
+		a.updatePalette()
+		a.palette.Hide()
+		a.layout()
+		return nil
+	}
+
+	// Command list (no argument typed yet): dispatch or insert the command.
+	if trigger == "command" || trigger == "help" {
+		if !strings.Contains(filter, " ") {
+			// Sub-palette command → insert value and open its picker.
+			if components.SlashSubPalettes[sel.Value] {
+				a.input.InsertValue(sel.Value)
+				a.updatePalette()
+				a.palette.Show(a.palette.Items(), a.input.TriggerValue())
+				a.layout()
+				if sel.Value == "model" && len(a.availableModels) == 0 {
+					return a.fetchModels()
+				}
+				return nil
+			}
+			if definition, known := a.commands.Lookup(sel.Value); known {
+				if definition.Immediate {
+					a.input.Reset()
+					a.palette.Hide()
+					a.layout()
+					return a.handleSlashCommand("/" + sel.Value)
+				}
+				// Non-immediate: insert into input so arguments can follow.
+				a.input.InsertValue("/" + sel.Value)
+				return nil
+			}
+		}
+		// Argument completion selection: replace the trailing partial token
+		// with the selected value and dispatch the composed command.
+		raw := strings.TrimRight(a.input.Value(), " ")
+		fields := strings.Fields(raw)
+		composed := strings.Join(fields[:max(1, len(fields)-1)], " ") + " " + sel.Value
+		a.input.Reset()
+		a.palette.Hide()
+		a.layout()
+		return a.handleSlashCommand(composed)
+	}
+
+	// Sub-palette value (model name, provider, commit scope, …): compose
+	// "/<trigger> <value>" and dispatch. Empty value keeps the bare command.
+	input := "/" + trigger
+	if sel.Value != "" {
+		input += " " + sel.Value
+	}
+	a.input.Reset()
+	a.palette.Hide()
+	a.layout()
+	return a.handleSlashCommand(input)
 }
 
 func (a *App) dispatchByName(name string) tea.Cmd {

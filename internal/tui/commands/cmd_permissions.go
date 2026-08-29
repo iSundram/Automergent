@@ -20,6 +20,14 @@ func permissionsCommand() Command {
 	}
 }
 
+// handleApprovals forwards an approvals invocation to the host's approvals
+// command implementation (the /permissions handler uses it for both the bare
+// picker path and the scriptable arg path).
+func handleApprovals(host Host, args []string) Result {
+	host.HandleApprovalsCommand(args)
+	return Done(nil)
+}
+
 func handlePermissions(host Host, args []string) Result {
 	if len(args) == 0 {
 		// Log the current grants so they are part of the transcript, then
@@ -29,7 +37,7 @@ func handlePermissions(host Host, args []string) Result {
 		return Done(nil)
 	}
 	// Argument path keeps the scriptable list/revoke flow.
-	host.HandleApprovalsCommand(args)
+	handleApprovals(host, args)
 	blocked, allowed := host.SecurityPaths()
 	if len(blocked) == 0 && len(allowed) == 0 {
 		return Done(nil)

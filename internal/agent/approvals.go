@@ -16,7 +16,7 @@ import (
 // shellToolNames are the tools whose approval scope carries the executed
 // command and participates in prefix generalization.
 var shellToolNames = map[string]bool{
-	"bash": true, "run_command": true,
+	"bash": true,
 }
 
 // dangerousCommandPatterns disable prefix generalization: a grant for these

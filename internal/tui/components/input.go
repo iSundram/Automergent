@@ -355,6 +355,18 @@ func RegisterSubPalette(name string) {
 	slashSubMu.Unlock()
 }
 
+// SyncSubPaletteTriggers replaces the trigger set with the given names,
+// derived from the command registry's SubPalette fields. The static map above
+// is only the seed; this keeps the input layer and the registry from drifting.
+func SyncSubPaletteTriggers(names []string) {
+	slashSubMu.Lock()
+	SlashSubPalettes = make(map[string]bool, len(names))
+	for _, name := range names {
+		SlashSubPalettes[name] = true
+	}
+	slashSubMu.Unlock()
+}
+
 // isSubPalette reports whether name is a registered sub-palette command.
 // It is safe to call from multiple goroutines.
 func isSubPalette(name string) bool {
@@ -631,7 +643,7 @@ func (i *Input) View() string {
 	}
 	promptStr := ""
 	if i.showPrompt {
-		promptStr = promptStyle.Render("▸ ")
+		promptStr = promptStyle.Render("❯ ")
 	}
 
 	// ❯ prefixes the FIRST line — it is an input marker, not a cursor

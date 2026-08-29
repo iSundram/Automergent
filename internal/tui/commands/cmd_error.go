@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/iSundram/Automergent/internal/tui/components"
 )
 
 // /error (alias /errors) — show recorded API errors and retries.
@@ -20,10 +22,63 @@ func errorsCommand() Command {
 		Tier:             TierTertiary,
 		Type:             CmdFullPage,
 		FullPageTitle:    "Errors",
+		Page:             errorPage,
 		Immediate:        true,
 		SupportsHeadless: true,
 		WhenToUse:        "After a request failed or took unusually long",
 	}
+}
+
+// errorPage builds the structured error log page: retried attempts as
+// warnings, terminal failures as failures, newest first with the same
+// 1-based numbering /error <n> accepts.
+func errorPage(h Host) components.Page {
+	records := h.APIErrors()
+	page := components.Page{Title: "API Errors"}
+
+	if len(records) == 0 {
+		page.Subtitle = "No errors recorded this session"
+		return page
+	}
+
+	retried, terminal := countErrors(records)
+	page.Subtitle = fmt.Sprintf("%d this session · %d retried · %d final", len(records), retried, terminal)
+
+	sec := components.PageSection{Heading: "Errors"}
+	for i, rec := range records {
+		status := components.PageStatusWarn
+		if !rec.Retrying {
+			status = components.PageStatusFail
+		}
+		detail := rec.Code
+		if rec.Detail != "" {
+			detail += " · " + rec.Detail
+		}
+		switch {
+		case rec.Retrying && rec.MaxAttempts > 0:
+			detail += fmt.Sprintf(" · retry %d/%d", rec.Attempt, rec.MaxAttempts)
+		case rec.Retrying:
+			detail += " · retried"
+		case rec.MaxAttempts > 1:
+			detail += fmt.Sprintf(" · failed after %d attempts", rec.MaxAttempts)
+		default:
+			detail += " · failed"
+		}
+		detail += " · " + humanAge(time.Since(rec.At)) + " ago"
+		if msg := firstLine(rec.Message); msg != "" {
+			detail += " — " + truncate(msg, 100)
+		}
+		sec.Flagged = append(sec.Flagged, components.PageFlag{
+			Label:  fmt.Sprintf("%d", i+1),
+			Detail: detail,
+			Status: status,
+		})
+	}
+	page.Sections = append(page.Sections, sec)
+	page.Actions = []components.PageAction{
+		{Key: "c", Label: "Clear log", Command: "error", Args: []string{"clear"}},
+	}
+	return page
 }
 
 // handleErrors renders the recorded provider API failures.

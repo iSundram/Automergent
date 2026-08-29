@@ -33,10 +33,10 @@ func (f *FullPage) Show(title, content string) {
 	f.scroll = 0
 }
 
-func (f *FullPage) Hide()              { f.visible = false }
-func (f FullPage) Visible() bool       { return f.visible }
-func (f FullPage) Title() string       { return f.title }
-func (f FullPage) Content() string     { return f.content }
+func (f *FullPage) Hide()          { f.visible = false }
+func (f FullPage) Visible() bool   { return f.visible }
+func (f FullPage) Title() string   { return f.title }
+func (f FullPage) Content() string { return f.content }
 
 func (f FullPage) Update(msg tea.Msg) (FullPage, tea.Cmd) {
 	if !f.visible {

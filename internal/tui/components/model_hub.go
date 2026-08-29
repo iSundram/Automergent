@@ -74,9 +74,9 @@ func (m *ModelHub) Show() {
 	m.showAll = false
 	m.refreshModelList()
 }
-func (m *ModelHub) Hide()          { m.visible = false }
-func (m *ModelHub) Visible() bool  { return m.visible }
-func (m *ModelHub) Title() string  { return "Model Hub" }
+func (m *ModelHub) Hide()         { m.visible = false }
+func (m *ModelHub) Visible() bool { return m.visible }
+func (m *ModelHub) Title() string { return "Model Hub" }
 
 func (m *ModelHub) refreshModelList() {
 	if m.host == nil {
@@ -301,7 +301,7 @@ func (m *ModelHub) renderFailureAlert() string {
 	alert := m.failureAlert
 	actions := []struct {
 		label string
-		hot  rune
+		hot   rune
 	}{
 		{"Fallback", 'y'},
 		{"Continue", 'n'},

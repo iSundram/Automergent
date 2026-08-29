@@ -53,11 +53,18 @@ type App struct {
 	// inspectorFilterMode routes printable keys into the inspector's filter
 	// pattern instead of its command grammar.
 	inspectorFilterMode bool
+	// passthroughCards tracks "!command" runs whose terminal card is still in
+	// flight, so shell status hooks can tell an inline passthrough (handled by
+	// its own done message) from a real background command.
+	passthroughCards map[string]bool
+	// inspected is the dock entry currently shown in the inspector, so its
+	// shortcuts act on the entry on screen rather than the dock's cursor row.
+	inspected components.DockEntry
 	// queueStrip shows what is waiting to be sent. The queue itself lives in
 	// msgQueue; this is the only thing that ever made it visible.
-	queueStrip    *components.QueueStrip
-	zenMode       bool
-	sendToProgram func(tea.Msg)
+	queueStrip        *components.QueueStrip
+	zenMode           bool
+	sendToProgram     func(tea.Msg)
 	pendingAsk        *pendingAsk
 	ag                *agent.Agent
 	sess              *session.Session
@@ -145,8 +152,8 @@ type App struct {
 	msgQueue []queuedMessage
 
 	// MCP orchestrator for external tool servers.
-	mcpOrch    *mcp.Orchestrator
-	mcpEvents  []MCPEventEntry
+	mcpOrch   *mcp.Orchestrator
+	mcpEvents []MCPEventEntry
 
 	// activeTool is the tool currently executing, "" when none is.
 	activeTool string
@@ -162,13 +169,13 @@ type App struct {
 	// API error history and live retry state backing /error and the footer's
 	// retry indicator.
 	apiErrors    []apiErrorRecord
-	retrying       bool
-	retryAttempt   int
-	retryMax       int
-	retryCode      string
-	retryDetail    string
-	retryDelay     time.Duration
-	retryDelayAt   time.Time // when retryDelay was set, for live countdown
+	retrying     bool
+	retryAttempt int
+	retryMax     int
+	retryCode    string
+	retryDetail  string
+	retryDelay   time.Duration
+	retryDelayAt time.Time // when retryDelay was set, for live countdown
 
 	// pendingDiffHide is set when confirmation completes and diff should be hidden
 	pendingDiffHide bool
@@ -211,6 +218,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		questionnaire:      components.NewQuestionnaire(styles),
 		dock:               components.NewBottomDock(styles),
 		inspector:          components.NewInspector(styles),
+		passthroughCards:   make(map[string]bool),
 		queueStrip:         components.NewQueueStrip(styles),
 		taskBoard:          components.NewTaskBoard(styles),
 		spin:               components.NewSpinner(styles),
@@ -273,7 +281,12 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	}
 
 	app.helpOverlay.SetSlashCommands(app.commands.HelpRows())
-	app.helpOverlay.SetSlashSections(a_placeholder())
+	app.helpOverlay.SetSlashSections(app.commands.HelpSections())
+	// Derive the input layer's sub-palette trigger set from the registry so
+	// the two can never drift: every command with a SubPalette becomes a
+	// trigger. (The static map in input.go seeds this; registration here is
+	// idempotent.)
+	components.SyncSubPaletteTriggers(app.commands.SubPaletteNames())
 	app.syncCommandHints()
 	app.header.SetModel(cfg.Model)
 	app.header.SetProvider(cfg.Provider)
@@ -563,7 +576,22 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cmds = append(cmds, cmd)
 		}
 	case shellNotificationMsg:
+		// Inline "!command" runs resolve through their own passthroughDoneMsg;
+		// the status hook toast is only for commands the user backgrounded.
+		if a.passthroughCards[m.id] {
+			break
+		}
 		cmd = a.handleShellNotification(m)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case passthroughDoneMsg:
+		cmd = a.handlePassthroughDone(m)
+		if cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case passthroughBackgroundedMsg:
+		cmd = a.handlePassthroughBackgrounded(m)
 		if cmd != nil {
 			cmds = append(cmds, cmd)
 		}

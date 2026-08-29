@@ -3,18 +3,24 @@ package commands
 import (
 	"fmt"
 	"strings"
+
+	"github.com/iSundram/Automergent/internal/tui/components"
 )
 
 // /mcp — manage MCP servers, tools, resources, and prompts.
 
 func mcpCommand() Command {
 	return Command{
-		Name:        "mcp",
-		Description: "Manage MCP servers, tools, resources, and prompts",
-		Category:    "MCP",
-		Icon:        "󰌠",
-		ArgsHint:    "[sub-command]",
-		Tier:        TierSecondary,
+		Name:          "mcp",
+		Description:   "Manage MCP servers, tools, resources, and prompts",
+		Category:      "MCP",
+		Icon:          "󰌠",
+		ArgsHint:      "[sub-command]",
+		SubPalette:    "mcp",
+		Tier:          TierSecondary,
+		Type:          CmdFullPage,
+		FullPageTitle: "MCP Servers",
+		Page:          mcpPage,
 		SubCommands: []SubCommand{
 			{Name: "list", Description: "List all MCP servers", Handler: handleMCP},
 			{Name: "enable", Description: "Enable an MCP server", ArgsHint: "<name>", Handler: handleMCP},
@@ -151,6 +157,76 @@ func handleMCPStatus(h Host) Result {
 		sb.WriteString("\n")
 	}
 	return Result{Text: sb.String()}
+}
+
+// mcpPage builds the structured /mcp status page: one flagged row per server
+// plus capability counts and inventory sections, with actions for the common
+// sub-commands.
+func mcpPage(h Host) components.Page {
+	statuses := h.MCPStatus()
+	page := components.Page{Title: "MCP Servers"}
+
+	if len(statuses) == 0 {
+		page.Subtitle = "No servers configured"
+		page.Sections = append(page.Sections, components.PageSection{
+			Lines: []string{
+				"No MCP servers configured.",
+				"Add servers to your config under mcp.servers to enable MCP,",
+				"or add one at runtime with /mcp add <name> <http|stdio|sse> <url|command>.",
+			},
+		})
+		page.Actions = []components.PageAction{
+			{Key: "h", Label: "Help", Command: "mcp", Args: []string{"help"}},
+		}
+		return page
+	}
+
+	servers := components.PageSection{Heading: "Servers"}
+	for _, s := range statuses {
+		status := components.PageStatusFail
+		switch {
+		case s.Connected:
+			status = components.PageStatusOK
+		case s.LastError != "":
+			status = components.PageStatusFail
+		default:
+			status = components.PageStatusWarn
+		}
+		detail := fmt.Sprintf("%s · v%s · %d tools, %d resources, %d prompts · %s",
+			s.Transport, s.Version, s.Tools, s.Resources, s.Prompts, s.Latency)
+		if s.LastError != "" {
+			detail += " · last error: " + s.LastError
+		}
+		servers.Flagged = append(servers.Flagged, components.PageFlag{
+			Label: s.Name, Detail: detail, Status: status,
+		})
+	}
+	page.Sections = append(page.Sections, servers)
+
+	if events := h.MCPEvents(); len(events) > 0 {
+		sec := components.PageSection{Heading: "Recent Events"}
+		for _, ev := range events {
+			line := fmt.Sprintf("[%s] %s: %s", ev.Timestamp, ev.Type, ev.Server)
+			if ev.Message != "" {
+				line += " — " + ev.Message
+			}
+			if ev.Error != "" {
+				line += " ERROR: " + ev.Error
+			}
+			sec.Lines = append(sec.Lines, line)
+		}
+		page.Sections = append(page.Sections, sec)
+	}
+
+	page.Actions = []components.PageAction{
+		{Key: "t", Label: "Tools", Command: "mcp", Args: []string{"tools"}},
+		{Key: "r", Label: "Resources", Command: "mcp", Args: []string{"resources"}},
+		{Key: "p", Label: "Prompts", Command: "mcp", Args: []string{"prompts"}},
+		{Key: "c", Label: "Reconnect", Command: "mcp", Args: []string{"reconnect"}},
+		{Key: "f", Label: "Refresh", Command: "mcp", Args: []string{"refresh"}},
+		{Key: "e", Label: "Events", Command: "mcp", Args: []string{"events"}},
+	}
+	return page
 }
 
 func handleMCPTools(h Host, server string) Result {

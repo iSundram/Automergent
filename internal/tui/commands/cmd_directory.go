@@ -14,6 +14,7 @@ func directoryCommand() Command {
 		Category:    "Project",
 		Icon:        "󰉖",
 		ArgsHint:    "[add <path>|show]",
+		SubPalette:  "directory",
 		Tier:        TierSecondary,
 		SubCommands: []SubCommand{
 			{Name: "add", Description: "Add a search directory", ArgsHint: "<path>", Handler: handleDirectory},

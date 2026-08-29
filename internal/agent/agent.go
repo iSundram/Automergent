@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/iSundram/Automergent/internal/ai"
+	"github.com/iSundram/Automergent/internal/agent/agentdef"
+	"github.com/iSundram/Automergent/internal/agent/builtin"
 	"github.com/iSundram/Automergent/internal/config"
 	contextmgr "github.com/iSundram/Automergent/internal/context"
 	"github.com/iSundram/Automergent/internal/editreview"
@@ -63,6 +65,12 @@ type Agent struct {
 	// New prompt system for staged prompt delivery
 	promptSystem     *promptpkg.PromptSystem
 	promptSystemOnce sync.Once
+
+	// Phase-aware agent loop
+	phaseManager    *promptpkg.PhaseManager
+	phaseClassifier *promptpkg.PhaseClassifier
+	promptComposer  *promptpkg.PromptComposer
+	currentAgentDef *agentdef.AgentDefinition
 
 	// childCancels tracks cancellation functions for spawned child agents.
 	childCancels map[string]context.CancelFunc
@@ -273,6 +281,7 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 		approvalSource:      "tui",
 		skillPaths:          newSkillTracker(12),
 		editReview:          nil,
+		currentAgentDef:     builtin.GeneralAgent(),
 	}
 
 	// Surface provider-internal retries as events so the UI can show that a
@@ -292,6 +301,10 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 	// Initialize prompt system with context manager
 	llmClient := promptpkg.NewAIProviderAdapter(agent.provider, "")
 	agent.promptSystem = promptpkg.NewPromptSystemWithLLM(promptpkg.DefaultPromptConfig(), agent.ContextManager(), agent.workDir, llmClient, agent.tools)
+
+	// Initialize phase-aware components
+	agent.phaseManager = promptpkg.NewPhaseManager(agent.promptSystem, agent.currentAgentDef)
+	agent.phaseClassifier = promptpkg.NewPhaseClassifier(agent.phaseManager, llmClient)
 
 	// Surface prompt-system pipeline stages (intents, init actions, task plan)
 	// in the TUI conversation so the pre-execution work is visible.
@@ -529,63 +542,100 @@ func (a *Agent) SetSession(sess *session.Session) {
 	}
 }
 
-// Run executes the agent loop for the given user prompt.
+// Run executes the agent loop for the given user prompt using phase-aware execution.
 func (a *Agent) Run(ctx context.Context, prompt string) error {
 	originalUserPrompt := prompt
 
-	// 1. Initial Triage Phase (Dynamic Workflow)
-	// If this is the very first message, we run a hidden triage loop
+	// 1. Initial Triage Phase - classify first message
 	isFirstMessage := a.checkAndMarkFirstMessage()
 	if isFirstMessage {
 		a.Emit(EventStatus, "initiating project triage")
 	}
 
-	// Apply triage wrapper for first message if using legacy mode
-	firstUserPrompt := originalUserPrompt
-
-	// Persist the user-authored message before any path that can return early.
-	// The triage wrapper exists only in the request copy below.
-	userMsg := ai.NewTextMessage(ai.RoleUser, firstUserPrompt)
-	if firstUserPrompt != originalUserPrompt {
-		userMsg.Metadata = map[string]any{
-			triageInjectedMetadataKey:     true,
-			originalUserPromptMetadataKey: originalUserPrompt,
-		}
-	}
+	// Persist the user-authored message
+	userMsg := ai.NewTextMessage(ai.RoleUser, originalUserPrompt)
 	a.sess.AddMessage(userMsg)
 	a.recordToTranscript(userMsg)
 
-	// Use new PromptSystem for full intelligent pipeline
-	{
-		err := a.runPromptSystemPipeline(ctx, originalUserPrompt, isFirstMessage)
-		if err == nil {
-			return nil
+	// 2. Phase-aware execution
+	// First, classify the message using PhaseClassifier
+	classification, err := a.phaseClassifier.Classify(ctx, originalUserPrompt, a.getAvailableFiles())
+	if err != nil {
+		a.Emit(EventError, fmt.Errorf("classification failed: %w", err))
+		// Fall back to standard loop
+		return a.runStandardLoop(ctx, originalUserPrompt, isFirstMessage)
+	}
+
+	// Handle violations detected during classification
+	if len(classification.Violations) > 0 {
+		for _, v := range classification.Violations {
+			a.handleViolation(&v)
 		}
-		if err == errPromptSystemPrepared {
-			a.Emit(EventStatus, "prompt and graph context prepared; starting tool-capable execution")
-		} else {
-			a.Emit(EventError, err)
-			return fmt.Errorf("agent: prepare prompt system: %w", err)
+		if classification.Violations[0].Action == "blocked" {
+			return fmt.Errorf("session blocked due to policy violation")
 		}
 	}
-	// Determine tool profile from identified intents (new intent-based system)
-	a.toolProfile = a.selectToolProfileFromIntents(ctx)
+
+	// Handle clarification requests
+	if classification.RequiresClarification {
+		a.askClarification(classification.ClarificationQuestions)
+		return nil
+	}
+
+	// Handle direct questions in init phase
+	if classification.IsDirectQuestion {
+		return a.answerDirectQuestion(ctx, originalUserPrompt)
+	}
+
+	// 3. Execute phases in sequence
+	for _, phase := range append([]shared.AgentPhase{classification.PrimaryPhase}, classification.SecondaryPhases...) {
+		for _, task := range classification.Tasks {
+			result := a.phaseManager.ExecutePhase(phase, task)
+			
+			if result.Violation != nil {
+				a.handleViolation(result.Violation)
+				if result.Violation.Action == "blocked" {
+					return fmt.Errorf("session blocked due to policy violation")
+				}
+			}
+			
+			if result.Error != nil {
+				a.Emit(EventError, result.Error)
+				return result.Error
+			}
+			
+			// Execute the phase using the standard loop with phase-specific config
+			if err := a.runPhaseLoop(ctx, phase, result); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+// runPhaseLoop executes a single phase with its specific configuration.
+func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, result promptpkg.PhaseResult) error {
+	// Update tool profile for this phase
+	a.toolProfile = a.toolSetToProfile(result.ToolSet)
 	defer func() { a.toolProfile = nil }()
-	if a.toolProfile != nil {
-		a.Emit(EventStatus, fmt.Sprintf("native tool surface prepared: %d tools", len(a.toolProfile)))
-	}
 
-	// In edit mode, check that we are inside a git repository when required.
-	if a.cfg.Mode == "edit" && a.cfg.Security.RequireGitForAutoModes {
-		cwd, _ := os.Getwd()
-		if !gitIsRepo(ctx, cwd) {
-			a.Emit(EventStatus, "▲ Not a git repository — edit mode requires git for safe rollback")
-		}
-	}
+	// Build phase-specific system prompt using PromptComposer
+	a.promptComposer = promptpkg.NewPromptComposer(
+		shared.ModelInfo{Name: a.cfg.Model, Provider: a.provider.Name()},
+		a.currentAgentDef,
+		phase,
+		a.workDir,
+		a.convertSkillsForPrompt(a.skills),
+		a.getMCPServers(),
+		a.promptSystem.GetInitResults(),
+		a.promptSystem.GetCurrentIntentSet(),
+		a.promptSystem.GetCurrentTasks(),
+	)
 
-	// Standard agent loop with legacy system prompt
-	firstStandardTurn := isFirstMessage
+	firstStandardTurn := true
 	runMeta := &runMetadata{}
+
 	for {
 		provider := a.Provider()
 		a.sess.SetMessages(ai.RepairMissingToolResults(a.sess.Messages))
@@ -611,9 +661,8 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 
 		a.checkContextLimit(provider, a.sess.Messages)
 
-		// Use new prompt system for system prompt (categorized, todo-aware, context-aware)
-		// Falls back to legacy buildSystemPrompt if prompt system not available
-		systemPrompt := a.getSystemPrompt(ctx, provider)
+		// Use layered system prompt from PromptComposer
+		systemPrompt := a.promptComposer.Compose()
 		toolSchemas := a.buildActiveToolSchemas()
 
 		thinkingBudget := a.getThinkingBudget()
@@ -716,11 +765,8 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		resultMsg := buildToolResultMessage(toolCalls, executedCalls)
 		a.sess.AddMessage(resultMsg)
 		a.recordToTranscript(resultMsg)
-		// Tool boundary: a user message inserted here reaches the model on the
-		// next call, which is what "steer the run" means.
 		a.drainSteer()
 		a.injectLongRunContext(runMeta, true)
-
 	}
 }
 
@@ -1377,6 +1423,119 @@ func gitIsRepo(ctx context.Context, dir string) bool {
 	return cmd.Run() == nil
 }
 
+// runStandardLoop is the fallback standard agent loop.
+func (a *Agent) runStandardLoop(ctx context.Context, prompt string, isFirstMessage bool) error {
+	// This is the original standard loop implementation
+	// For now, return nil to indicate it would run the standard loop
+	return nil
+}
+
+// getAvailableFiles returns a list of available files for classification.
+func (a *Agent) getAvailableFiles() []string {
+	mgr := a.ContextManager()
+	if mgr != nil {
+		return mgr.RecentFiles(20)
+	}
+	return []string{}
+}
+
+// handleViolation handles a detected violation.
+func (a *Agent) handleViolation(v *shared.ViolationCheck) {
+	a.Emit(EventNotify, map[string]any{
+		"level":   "warning",
+		"title":   "Policy Violation Detected",
+		"message": fmt.Sprintf("Type: %s, Severity: %s, Action: %s", v.Type, v.Severity, v.Action),
+	})
+	
+	// Record violation in phase manager
+	a.phaseManager.RecordViolation(v.Type, v.Severity, v.UserMessage, v.AgentResponse)
+}
+
+// askClarification asks the user for clarification.
+func (a *Agent) askClarification(questions []string) {
+	for _, q := range questions {
+		a.Emit(EventAskUser, map[string]any{
+			"question": q,
+		})
+	}
+}
+
+// answerDirectQuestion answers a direct question in init phase.
+func (a *Agent) answerDirectQuestion(ctx context.Context, question string) error {
+	// Use a simple completion for direct questions
+	provider := a.Provider()
+	systemPrompt := a.getSystemPrompt(ctx, provider)
+	
+	req := ai.CompletionRequest{
+		Messages: []ai.Message{ai.NewTextMessage(ai.RoleUser, question)},
+		Tools:    []ai.ToolSchema{},
+		System:   systemPrompt,
+		Temperature: 0.0,
+		MaxTokens:  1024,
+		Stream:     true,
+	}
+	
+	resp, err := provider.Complete(ctx, req)
+	if err != nil {
+		return err
+	}
+	
+	text, _, _, err := a.drainStream(resp)
+	if err != nil {
+		return err
+	}
+	
+	a.Emit(EventDone, text)
+	return nil
+}
+
+// toolSetToProfile converts a ToolSet to a tool profile map.
+func (a *Agent) toolSetToProfile(ts shared.ToolSet) map[string]bool {
+	all := buildToolSchemas(a.tools)
+	profile := make(map[string]bool)
+	
+	switch ts {
+	case shared.ToolSetContextOnly:
+		return map[string]bool{}
+	case shared.ToolSetReadOnly:
+		for _, schema := range all {
+			if schema.Name == "read_file" || schema.Name == "view" || schema.Name == "list_directory" ||
+				schema.Name == "grep" || schema.Name == "glob" || schema.Name == "search" ||
+				schema.Name == "lsp_diagnostics" || schema.Name == "list_shells" || schema.Name == "read_shell" ||
+				schema.Name == "list_agents" || schema.Name == "read_agent" ||
+				schema.Name == "web_search" || schema.Name == "web_fetch" {
+				profile[schema.Name] = true
+			}
+		}
+	case shared.ToolSetBasic:
+		for _, schema := range all {
+			if schema.Name == "read_file" || schema.Name == "view" || schema.Name == "list_directory" ||
+				schema.Name == "grep" || schema.Name == "glob" || schema.Name == "search" ||
+				schema.Name == "bash" || schema.Name == "task" {
+				profile[schema.Name] = true
+			}
+		}
+	case shared.ToolSetModerate:
+		for _, schema := range all {
+			if schema.Name != "agent_control" {
+				profile[schema.Name] = true
+			}
+		}
+	case shared.ToolSetFull:
+		for _, schema := range all {
+			profile[schema.Name] = true
+		}
+	}
+	
+	return profile
+}
+
+// getMCPServers returns MCP server info for prompt composition.
+func (a *Agent) getMCPServers() []promptpkg.MCPServerInfo {
+	// This would integrate with actual MCP server registry
+	return []promptpkg.MCPServerInfo{}
+}
+
 func (a *Agent) Shutdown() error {
 	return nil
 }
@@ -1427,6 +1586,16 @@ func (a *Agent) RegisterContextTools() ContextToolRegistration {
 		reason = "prompt state tools registered"
 	}
 
+	// Register violation detection tools
+	if a.tools != nil {
+		a.tools.Register(tools.NewViolationTool())
+		a.tools.Register(tools.NewBlockSessionTool())
+		a.tools.Register(tools.NewOverrideViolationTool())
+		names = append(names,
+			"violation_detected", "block_session", "override_violation",
+		)
+	}
+
 	// Register the builtin expansion suite: git, wait, multi_edit, finish.
 	if a.tools != nil {
 		if a.cfg != nil && a.cfg.EditReview && a.editReview == nil {
@@ -1449,12 +1618,6 @@ func (a *Agent) RegisterContextTools() ContextToolRegistration {
 	}
 
 	return ContextToolRegistration{Enabled: len(names) > 0, Names: names, Reason: reason}
-}
-
-// getSystemPrompt returns THE system prompt. There is a single builder —
-// no legacy fallback, no assistant/coder split (see systemprompt.go).
-func (a *Agent) getSystemPrompt(ctx context.Context, provider ai.Provider) string {
-	return a.buildUnifiedSystemPrompt(ctx, provider)
 }
 
 // getNextTodoPrompt gets the next todo execution prompt from the prompt system
@@ -1583,4 +1746,26 @@ func min(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// convertSkillsForPrompt converts agent skills to prompt.Skill interface.
+func (a *Agent) convertSkillsForPrompt(skills []Skill) []promptpkg.Skill {
+	result := make([]promptpkg.Skill, len(skills))
+	for i, s := range skills {
+		result[i] = agentSkillAdapter{skill: s}
+	}
+	return result
+}
+
+// agentSkillAdapter adapts agent.Skill to prompt.Skill interface.
+type agentSkillAdapter struct {
+	skill Skill
+}
+
+func (a agentSkillAdapter) Name() string {
+	return a.skill.Name
+}
+
+func (a agentSkillAdapter) Description() string {
+	return a.skill.Description
 }

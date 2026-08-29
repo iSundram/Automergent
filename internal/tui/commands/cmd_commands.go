@@ -19,6 +19,7 @@ func commandsCommand(r *Registry) Command {
 		Category:      "System",
 		Icon:          "󰘳",
 		ArgsHint:      "[list|reload]",
+		SubPalette:    "commands",
 		Tier:          TierSecondary,
 		Type:          CmdFullPage,
 		FullPageTitle: "Custom Commands",
@@ -39,16 +40,11 @@ func commandsCommand(r *Registry) Command {
 func commandsHandler(r *Registry) Handler {
 	return func(host Host, args []string) Result {
 		if len(args) > 0 && args[0] == "reload" {
-			removed := r.RemoveCustom()
-			loaded, warnings := LoadProjectAndUserCommands(r, host.WorkDir())
-			if removed > 0 || loaded > 0 {
-				host.AddSystemMessage(fmt.Sprintf("Reloaded custom commands: %d removed, %d loaded.", removed, loaded))
-			} else {
-				host.AddSystemMessage("Custom commands reloaded — no changes found.")
-			}
-			for _, w := range warnings {
-				host.CommandError("Reload warning: " + w)
-			}
+			// Host-level reload keeps dependent surfaces (help overlay,
+			// palette, agent command hints) in sync; registry-only reload
+			// would leave them stale.
+			loaded := host.ReloadCustomCommands()
+			host.AddSystemMessage(fmt.Sprintf("Custom commands reloaded — %d loaded.", loaded))
 			host.SetStatus(fmt.Sprintf("%d custom commands loaded", loaded))
 			return Done(nil)
 		}

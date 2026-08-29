@@ -218,16 +218,16 @@ type Host interface {
 
 // MCPServerStatus is the status info for a connected MCP server.
 type MCPServerStatus struct {
-	Name       string
-	Transport  string
-	Status     string
-	Version    string
-	Tools      int
-	Resources  int
-	Prompts    int
-	Latency    string
-	LastError  string
-	Connected  bool
+	Name      string
+	Transport string
+	Status    string
+	Version   string
+	Tools     int
+	Resources int
+	Prompts   int
+	Latency   string
+	LastError string
+	Connected bool
 }
 
 // MCPToolInfo describes an MCP tool for the command layer.

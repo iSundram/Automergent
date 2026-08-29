@@ -76,7 +76,8 @@ func TestMemoryListsSurfaces(t *testing.T) {
 
 	handleMemory(m, nil)
 	out := m.systemMessages[0]
-	if !strings.Contains(out, "– Global config") || !strings.Contains(out, "– Project memory") {
+	// memoryPage renders missing surfaces as warn-flagged rows ("! label").
+	if !strings.Contains(out, "! Global config") || !strings.Contains(out, "! Project memory") {
 		t.Fatalf("missing surfaces:\n%s", out)
 	}
 }

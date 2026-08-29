@@ -2,6 +2,8 @@ package agentdef
 
 import (
 	"time"
+
+	"github.com/iSundram/Automergent/internal/shared"
 )
 
 // AgentType defines the type of agent.
@@ -46,18 +48,27 @@ const (
 
 // AgentDefinition describes an agent's capabilities, constraints, and behavior.
 type AgentDefinition struct {
-	Name         string        `json:"name"`
-	Description  string        `json:"description"`
-	WhenToUse    string        `json:"when_to_use"`
-	SystemPrompt string        `json:"system_prompt"`
-	Model        string        `json:"model,omitempty"`
-	Tools        []string      `json:"tools,omitempty"`
-	Color        string        `json:"color,omitempty"`
-	Effort       AgentEffort   `json:"effort,omitempty"`
-	Source       AgentSource   `json:"source"`
-	MemoryScope  MemoryScope   `json:"memory_scope,omitempty"`
-	MaxTokens    int           `json:"max_tokens,omitempty"`
-	Timeout      time.Duration `json:"timeout,omitempty"`
+	Name              string                    `json:"name"`
+	Description       string                    `json:"description"`
+	WhenToUse         string                    `json:"when_to_use"`
+	SystemPrompt      string                    `json:"system_prompt"`
+	Model             string                    `json:"model,omitempty"`
+	Tools             []string                  `json:"tools,omitempty"`
+	Color             string                    `json:"color,omitempty"`
+	Effort            AgentEffort               `json:"effort,omitempty"`
+	Source            AgentSource               `json:"source"`
+	MemoryScope       MemoryScope               `json:"memory_scope,omitempty"`
+	MaxTokens         int                       `json:"max_tokens,omitempty"`
+	Timeout           time.Duration             `json:"timeout,omitempty"`
+
+	// Phase-specific configuration
+	PhasePrompts     map[shared.AgentPhase]string              `json:"phase_prompts,omitempty"`
+	PhaseTools       map[shared.AgentPhase][]string            `json:"phase_tools,omitempty"`
+	PhaseMaxSteps    map[shared.AgentPhase]int                 `json:"phase_max_steps,omitempty"`
+	ToolPrompts      map[string]shared.ToolPromptConfig        `json:"tool_prompts,omitempty"`
+	BehavioralPrompts []string                                 `json:"behavioral_prompts,omitempty"`
+	ParentAgent      string                                    `json:"parent_agent,omitempty"`
+	ViolationPolicy  shared.ViolationPolicy                    `json:"violation_policy,omitempty"`
 }
 
 // AgentConfig holds runtime configuration for agent execution.

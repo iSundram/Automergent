@@ -16,14 +16,14 @@ type mockHost struct {
 	mu sync.Mutex
 
 	// State
-	provider    string
-	model       string
-	providers   []string
-	models      []ai.Model
-	mode        string
-	theme       string
-	keybindings string
-	thinking    bool
+	provider     string
+	model        string
+	providers    []string
+	models       []ai.Model
+	mode         string
+	theme        string
+	keybindings  string
+	thinking     bool
 	defaultModel string
 	apiKey       string
 
@@ -39,31 +39,31 @@ type mockHost struct {
 	compactContextCalls int
 
 	// Cross-command invocation (DispatchCommand) and custom reload state.
-	commandMessages     [][2]string
-	dispatchDepth       int
-	reloadCustomCalls   int
-	reloadCustomCount   int
-	registry            *Registry
+	commandMessages   [][2]string
+	dispatchDepth     int
+	reloadCustomCalls int
+	reloadCustomCount int
+	registry          *Registry
 
 	// MCP state
-	mcpServers         []MCPServerStatus
-	mcpTools           []MCPToolInfo
-	mcpResources       []MCPResourceInfo
-	mcpPrompts         []MCPPromptInfo
-	mcpEvents          []MCPEventInfo
-	mcpReconnectCalls  []string
-	mcpRefreshCalls    []string
-	mcpEnableCalls     []string
-	mcpDisableCalls    []string
-	mcpAddCalls        []string
-	mcpRemoveCalls     []string
+	mcpServers          []MCPServerStatus
+	mcpTools            []MCPToolInfo
+	mcpResources        []MCPResourceInfo
+	mcpPrompts          []MCPPromptInfo
+	mcpEvents           []MCPEventInfo
+	mcpReconnectCalls   []string
+	mcpRefreshCalls     []string
+	mcpEnableCalls      []string
+	mcpDisableCalls     []string
+	mcpAddCalls         []string
+	mcpRemoveCalls      []string
 	mcpCacheDeleteCalls int
 
 	switchProviderCalls []struct{ provider, model string }
 	fetchModelsCalls    int
 
 	ensureProviderConfigCalls []string
-	providerConfigs map[string]config.ProviderConfig
+	providerConfigs           map[string]config.ProviderConfig
 	persistProjectConfigCalls int
 
 	setModeCalls []string

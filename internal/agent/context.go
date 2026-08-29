@@ -20,32 +20,37 @@ import (
 type AgentPhase string
 
 const (
-	PhaseResearch AgentPhase = "research"
+	PhaseInit     AgentPhase = "init"
+	PhaseExplore  AgentPhase = "explore"
 	PhasePlan     AgentPhase = "plan"
-	PhaseExecute  AgentPhase = "execute"
+	PhaseBuild    AgentPhase = "build"
+	PhaseVerify   AgentPhase = "verify"
 )
 
 // DetectPhase analyzes the current state to determine the agent phase.
 func DetectPhase(messages []ai.Message) AgentPhase {
 	if len(messages) == 0 {
-		return PhaseResearch
+		return PhaseInit
 	}
 
-	hasResearched := hasResearchToolResult(messages)
+	hasExplored := hasExploreToolResult(messages)
+	hasPlanned := hasPlanFile()
+	hasBuilt := hasBuildToolResult(messages)
 
-	if hasResearched {
-		// Check if a plan file was created
-		cwd, _ := os.Getwd()
-		if _, err := os.Stat(filepath.Join(cwd, "AUTOMERGENT_PLAN.md")); err == nil {
-			return PhaseExecute
-		}
+	if hasBuilt {
+		return PhaseVerify
+	}
+	if hasPlanned {
+		return PhaseBuild
+	}
+	if hasExplored {
 		return PhasePlan
 	}
 
-	return PhaseResearch
+	return PhaseInit
 }
 
-func hasResearchToolResult(messages []ai.Message) bool {
+func hasExploreToolResult(messages []ai.Message) bool {
 	toolNameByCallID := make(map[string]string)
 	for _, m := range messages {
 		for _, tc := range m.ToolCallParts() {
@@ -68,14 +73,13 @@ func hasResearchToolResult(messages []ai.Message) bool {
 			if toolName == "" {
 				toolName = metadataToolName
 			}
-			if isResearchToolName(toolName) {
+			if isExploreToolName(toolName) {
 				return true
 			}
 		}
 	}
 	return false
 }
-
 func toolNameFromMetadata(metadata map[string]any) string {
 	if len(metadata) == 0 {
 		return ""
@@ -93,7 +97,8 @@ func toolNameFromMetadata(metadata map[string]any) string {
 	return ""
 }
 
-func isResearchToolName(name string) bool {
+
+func isExploreToolName(name string) bool {
 	name = strings.ToLower(strings.TrimSpace(name))
 	if name == "" {
 		return false
@@ -103,6 +108,55 @@ func isResearchToolName(name string) bool {
 		strings.HasPrefix(name, "read") ||
 		name == "view" ||
 		strings.Contains(name, "search")
+}
+
+func hasPlanFile() bool {
+	cwd, _ := os.Getwd()
+	if _, err := os.Stat(filepath.Join(cwd, "AUTOMERGENT_PLAN.md")); err == nil {
+		return true
+	}
+	return false
+}
+
+func hasBuildToolResult(messages []ai.Message) bool {
+	toolNameByCallID := make(map[string]string)
+	for _, m := range messages {
+		for _, tc := range m.ToolCallParts() {
+			if tc.ID != "" {
+				toolNameByCallID[tc.ID] = tc.Name
+			}
+		}
+	}
+
+	for _, m := range messages {
+		if m.Role != ai.RoleTool {
+			continue
+		}
+		metadataToolName := toolNameFromMetadata(m.Metadata)
+		for _, p := range m.Content {
+			if p.Type != ai.ContentTypeToolResult || p.ToolResult == nil {
+				continue
+			}
+			toolName := toolNameByCallID[p.ToolResult.ToolCallID]
+			if toolName == "" {
+				toolName = metadataToolName
+			}
+			if isBuildToolName(toolName) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func isBuildToolName(name string) bool {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return false
+	}
+	return strings.HasPrefix(name, "edit") ||
+		strings.HasPrefix(name, "write") ||
+		name == "bash"
 }
 
 type promptSection struct {
@@ -338,7 +392,7 @@ func (a *Agent) isImportantMessage(msg ai.Message) bool {
 			return true
 		}
 		for _, tc := range msg.ToolCallParts() {
-			if tc.Name == "edit_file" || tc.Name == "create_file" || tc.Name == "write_file" {
+			if tc.Name == "edit_file" || tc.Name == "write_file" {
 				return true
 			}
 		}

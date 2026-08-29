@@ -15,15 +15,15 @@ import (
 )
 
 type ConversationMsg struct {
-	Role        string
-	Content     string
-	Thought     string
-	IsError     bool
-	Timestamp   time.Time
+	Role      string
+	Content   string
+	Thought   string
+	IsError   bool
+	Timestamp time.Time
 	// Command carries the provenance of a prompt-command expansion ("/commit"):
 	// when set on a user message, the bubble's label renders as an accent
 	// "❯ /command" chip instead of "You".
-	Command      string
+	Command     string
 	ToolID      string
 	ToolName    string
 	ToolArgs    string

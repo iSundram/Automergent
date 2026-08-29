@@ -335,10 +335,12 @@ func TestCommandImmediateFlags(t *testing.T) {
 	r := Default()
 	immediateCmds := []string{"context", "tree", "diff", "lsp", "test", "build", "review-mode", "cancel", "stats", "help", "quit", "compact",
 		"new", "sessions", "resume", "clear", "reset", "export", "permissions",
-		"init", "recap", "memory", "env", "version", "doctor", "commit",
+		"init", "recap", "memory", "env", "version", "doctor",
 		"rewind", "cost", "config", "context-files", "security-review"}
 	nonImmediateCmds := []string{"model", "provider", "mode", "search", "run", "api-key", "base-url", "effort", "provider-api-key", "provider-base-url", "theme", "keybindings", "rename",
-		"review", "branch", "summary", "issue", "pr-comments", "add-dir"}
+		"review", "branch", "summary", "issue", "pr-comments", "add-dir",
+		// /commit is non-Immediate: it opens a scope sub-palette first.
+		"commit"}
 
 	for _, name := range immediateCmds {
 		cmd, ok := r.Lookup(name)

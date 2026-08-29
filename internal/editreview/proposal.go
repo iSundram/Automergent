@@ -28,7 +28,7 @@ func WrapWriteTools(reg *tools.Registry, store *Store) {
 	if reg == nil || store == nil {
 		return
 	}
-	for _, name := range []string{"edit_file", "write_file", "create_file", "multi_edit"} {
+	for _, name := range []string{"edit_file", "write_file", "multi_edit"} {
 		if base, ok := reg.Get(name); ok {
 			reg.Register(&ProposalTool{wrapped: base, store: store})
 		}
@@ -70,11 +70,6 @@ func (p *ProposalTool) Execute(ctx context.Context, args map[string]any) (tools.
 	}
 
 	switch p.wrapped.Name() {
-	case "create_file":
-		content := contentOf(args)
-		id := p.store.Add("create_file", path, "", content, "new file")
-		return proposed(id, path), nil
-
 	case "write_file":
 		original := readIfExists(path)
 		content := contentOf(args)

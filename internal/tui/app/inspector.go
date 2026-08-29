@@ -191,6 +191,9 @@ func (a *App) openInspector(entry components.DockEntry) {
 	default:
 		return
 	}
+	// Remember what is on screen so "s" stops the entry being inspected, not
+	// whatever the dock cursor happens to rest on behind the pane.
+	a.inspected = entry
 	a.inspectorFilterMode = false
 	a.layout()
 }
@@ -233,6 +236,7 @@ func (a *App) handleInspectorKeys(m tea.KeyMsg) (tea.Cmd, bool) {
 	switch m.String() {
 	case "esc", "q":
 		a.inspector.Hide()
+		a.inspected = components.DockEntry{}
 		a.layout()
 		return nil, true
 	case "up", "k":
@@ -261,8 +265,9 @@ func (a *App) handleInspectorKeys(m tea.KeyMsg) (tea.Cmd, bool) {
 		a.inspector.SetFilter("")
 		return nil, true
 	case "s":
-		if entry, ok := a.dock.Selected(); ok {
-			return a.stopDockEntry(entry), true
+		// Stop the entry on screen, not the dock's cursor row.
+		if a.inspected.ID != "" {
+			return a.stopDockEntry(a.inspected), true
 		}
 		return nil, true
 	}

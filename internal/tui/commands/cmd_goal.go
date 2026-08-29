@@ -13,6 +13,7 @@ func goalCommand() Command {
 		Category:    "Session",
 		Icon:        "󰘧",
 		ArgsHint:    "[clear|edit|pause|resume|<objective>]",
+		SubPalette:  "goal",
 		Tier:        TierSecondary,
 		SubCommands: []SubCommand{
 			{Name: "clear", Description: "Clear the thread goal", Handler: handleGoal},

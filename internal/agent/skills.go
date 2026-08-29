@@ -24,6 +24,16 @@ type Skill struct {
 	Path        string
 }
 
+// SkillName returns the skill name (implements prompt.Skill interface).
+func (s Skill) SkillName() string {
+	return s.Name
+}
+
+// SkillDescription returns the skill description (implements prompt.Skill interface).
+func (s Skill) SkillDescription() string {
+	return s.Description
+}
+
 // loadSkills scans directories for skills. Each immediate subdirectory may
 // contain SKILL.md; plain *.md files are also accepted as single-file skills.
 // Later sources win on name conflicts (project over user).
@@ -229,7 +239,7 @@ func (t *skillTracker) snapshot() []string {
 // toolAccessedPath extracts the primary file path from tool args for skills tracking.
 func toolAccessedPath(name string, args map[string]any) string {
 	switch name {
-	case "read_file", "view", "edit_file", "write_file", "create_file", "multi_edit":
+	case "read_file", "view", "edit_file", "write_file", "multi_edit":
 		if p, ok := args["path"].(string); ok {
 			return p
 		}

@@ -77,7 +77,7 @@ func (b *TaskBoard) View() string {
 	title := lipgloss.NewStyle().Foreground(b.styles.T.Accent).Bold(true).Render("BOARD")
 	sb.WriteString(title + "\n")
 	sb.WriteString(lipgloss.NewStyle().Foreground(b.styles.T.Muted).
-		Render(render.GlyphRule + render.GlyphRule + " todos " + render.GlyphRule + render.GlyphRule) + "\n")
+		Render(render.GlyphRule+render.GlyphRule+" todos "+render.GlyphRule+render.GlyphRule) + "\n")
 
 	if len(b.todos) == 0 {
 		sb.WriteString(b.styles.Dim.Render("no plan yet") + "\n")

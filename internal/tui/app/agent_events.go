@@ -276,10 +276,10 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 
 				// Special handling for file edits: show diff
 				// Special handling for file edits: show diff with inline confirmation
-				if tc.Name == "write_file" || tc.Name == "edit_file" || tc.Name == "create_file" {
+				if tc.Name == "write_file" || tc.Name == "edit_file" {
 					path, _ := tc.Args["path"].(string)
 					newContent := ""
-					if tc.Name == "write_file" || tc.Name == "create_file" {
+					if tc.Name == "write_file" {
 						newContent, _ = tc.Args["content"].(string)
 					} else {
 						// Patch: read file and apply patch

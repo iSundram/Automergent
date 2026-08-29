@@ -27,7 +27,9 @@ import (
 	"github.com/iSundram/Automergent/internal/tui/render"
 )
 
-// refreshDock pulls live background shells and agents into the dock.
+// refreshDock pulls live background shells and agents into the dock. When
+// nothing is left to show the tray closes itself — the dock's contract is
+// that it exists only while background work does.
 func (a *App) refreshDock() {
 	if a.dock == nil {
 		return
@@ -36,14 +38,34 @@ func (a *App) refreshDock() {
 	entries = append(entries, a.shellEntries()...)
 	entries = append(entries, a.agentEntries()...)
 	a.dock.SetEntries(entries)
+	if len(entries) == 0 && a.dock.Focused() {
+		a.unfocusDock()
+	}
 }
 
-// shellEntries snapshots every background shell, running or finished.
+// dockShellMinRuntime is how long a shell must run before it earns a dock
+// row. Short commands live and die in the conversation as terminal cards;
+// the dock is for work that is still going — a two-second `git status`
+// flashing through the tray is noise, not information.
+const dockShellMinRuntime = 10 * time.Second
+
+// shellEntries snapshots the shells that belong in the dock: still running
+// AND either past the minimum runtime or already promoted from an inline
+// "!command". Terminal records are excluded on purpose — the dock reports
+// work in flight, and when everything finishes it disappears rather than
+// accumulating dead rows. Completion outcomes reach the user through the
+// terminal card or the toast, not through a lingering row.
 func (a *App) shellEntries() []components.DockEntry {
 	records := toolsshell.GetManager().ListRecords(true)
 	out := make([]components.DockEntry, 0, len(records))
 	for _, rec := range records {
 		status := render.CanonicalStatus(string(rec.Status))
+		if status.Terminal() {
+			continue
+		}
+		if !a.passthroughCards[rec.ID] && time.Since(rec.StartedAt) < dockShellMinRuntime {
+			continue
+		}
 
 		// Activity is the newest thing the process said. For a finished command
 		// there is nothing live left to report, so the cell carries the outcome
@@ -53,15 +75,6 @@ func (a *App) shellEntries() []components.DockEntry {
 		if session, ok := toolsshell.GetManager().Get(rec.ID); ok {
 			activity = session.LastLine()
 			hasStderr = session.SawStderr()
-		}
-		if status.Terminal() {
-			if rec.ExitCode == 0 && status == render.StatusDone {
-				activity = "exit 0"
-			} else if status == render.StatusStopped {
-				activity = "stopped"
-			} else {
-				activity = fmt.Sprintf("exit %d", rec.ExitCode)
-			}
 		}
 
 		out = append(out, components.DockEntry{

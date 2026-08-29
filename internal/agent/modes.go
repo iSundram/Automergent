@@ -52,8 +52,8 @@ var knownModes = map[string]*ModeSpec{
 	"debug": {
 		Name: "debug",
 		AllowedTools: func() map[string]bool {
-			m := readOnlyPlusFinish("bash", "run_command", "write_shell")
-			for _, name := range []string{"edit_file", "write_file", "create_file", "multi_edit"} {
+			m := readOnlyPlusFinish("bash", "write_shell")
+			for _, name := range []string{"edit_file", "write_file", "multi_edit"} {
 				m[name] = true
 			}
 			return m

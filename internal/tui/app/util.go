@@ -141,7 +141,7 @@ func extractToolContext(name string, args map[string]any) string {
 		if path, ok := args["path"].(string); ok {
 			return "reading " + filepath.Base(path)
 		}
-	case "write_file", "create_file":
+	case "write_file":
 		if path, ok := args["path"].(string); ok {
 			return "writing " + filepath.Base(path)
 		}
@@ -149,23 +149,11 @@ func extractToolContext(name string, args map[string]any) string {
 		if path, ok := args["path"].(string); ok {
 			return "editing " + filepath.Base(path)
 		}
-	case "delete_file":
-		if path, ok := args["path"].(string); ok {
-			return "deleting " + filepath.Base(path)
-		}
-	case "move_file":
-		src, _ := args["source"].(string)
-		dst, _ := args["destination"].(string)
-		return "moving " + filepath.Base(src) + " -> " + filepath.Base(dst)
-	case "copy_file":
-		src, _ := args["source"].(string)
-		dst, _ := args["destination"].(string)
-		return "copying " + filepath.Base(src) + " -> " + filepath.Base(dst)
 	case "list_directory":
 		if path, ok := args["path"].(string); ok {
 			return "listing " + filepath.Base(path)
 		}
-	case "run_shell_command", "run_command":
+	case "run_shell_command":
 		if cmd, ok := args["command"].(string); ok {
 			if len(cmd) > 40 {
 				return "exec: " + cmd[:37] + "..."

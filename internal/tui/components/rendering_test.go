@@ -193,7 +193,7 @@ func TestToolCallUsesDefaultBackgroundAndCompactFields(t *testing.T) {
 
 func TestSelectedPaletteRowUsesNormalBackground(t *testing.T) {
 	palette := NewCommandPalette(testStyles())
-	row := palette.renderItem(PaletteItem{Label: "model", Description: "Switch AI model"}, true, 60)
+	row := palette.renderItem(PaletteItem{Label: "model", Description: "Switch AI model"}, true, 60, 20)
 	if got := lipgloss.Width(row); got != 60 {
 		t.Fatalf("selected row width = %d, want 60", got)
 	}

@@ -17,16 +17,18 @@ func newInputWithValue(t *testing.T, value string) *components.Input {
 
 // TriggerType must use exact token boundaries: longer command names and
 // namespaced custom commands must not be hijacked into argument sub-palettes.
+// Sub-palettes open only after a trailing space, so a bare "/model" still
+// shows the /model command entry (Claude Code behaviour).
 func TestTriggerTypeUsesTokenBoundaries(t *testing.T) {
 	cases := []struct {
 		input string
 		want  string
 	}{
-		{"/model", "model"},
+		{"/model", "command"},
 		{"/model gemini-3.6-flash", "model"},
-		{"/provider", "provider"},
+		{"/provider", "command"},
 		{"/provider google", "provider"},
-		{"/mode", "mode"},
+		{"/mode", "command"},
 		{"/mode plan", "mode"},
 		{"/provider-api-key google x", "command"}, // prefix hijack regression
 		{"/provider-base-url google https://x", "command"},

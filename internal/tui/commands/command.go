@@ -216,7 +216,7 @@ func (r *Registry) RegisterCustom(cmd Command, handler Handler) error {
 		Page:       cmd.Page,
 		Completion: cmd.Completion,
 		Source:     cmd.Source,
-		Hidden: cmd.Hidden, Sensitive: cmd.Sensitive,
+		Hidden:     cmd.Hidden, Sensitive: cmd.Sensitive,
 		SupportsHeadless: cmd.SupportsHeadless,
 	}
 	seen := map[string]bool{cmd.Name: true}
@@ -250,6 +250,19 @@ func (r *Registry) Lookup(name string) (Command, bool) {
 }
 
 func (r *Registry) List() []Command { return r.commands }
+
+// SubPaletteNames returns the names of every command that declares a
+// SubPalette, in registration order. The app derives the input layer's
+// trigger set from this so the two never drift.
+func (r *Registry) SubPaletteNames() []string {
+	var out []string
+	for _, cmd := range r.commands {
+		if cmd.SubPalette != "" {
+			out = append(out, cmd.SubPalette)
+		}
+	}
+	return out
+}
 
 func (r *Registry) HasHandler(name string) bool {
 	_, ok := r.handlers[name]
@@ -356,10 +369,16 @@ func (r *Registry) PaletteItems(host Host) []components.PaletteItem {
 		if cmd.Hidden {
 			continue
 		}
+		description := cmd.Description
+		if description == "" {
+			// WhenToUse doubles as the palette blurb for commands that only
+			// define guidance (custom markdown commands without a description).
+			description = cmd.WhenToUse
+		}
 		item := components.PaletteItem{
 			Label:       cmd.Name,
 			Value:       cmd.Name,
-			Description: cmd.Description,
+			Description: description,
 			Icon:        cmd.Icon,
 			Category:    cmd.Category,
 			Hint:        cmd.ArgsHint,

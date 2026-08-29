@@ -11,13 +11,13 @@ import (
 
 func modeCommand() Command {
 	return Command{
-		Name:          "mode",
-		Description:   "Change agent mode",
-		Category:      "AI & Model",
-		Icon:          "󰒓",
-		ArgsHint:      "<edit|plan>",
-		Tier:          TierSecondary,
-		SubPalette:    "mode",
+		Name:        "mode",
+		Description: "Change agent mode",
+		Category:    "AI & Model",
+		Icon:        "󰒓",
+		ArgsHint:    "<edit|plan>",
+		Tier:        TierSecondary,
+		SubPalette:  "mode",
 		SubCommands: []SubCommand{
 			{Name: "edit", Description: "Edit mode (manual approval)", Handler: handleMode},
 			{Name: "plan", Description: "Plan mode (read-only)", Handler: handleMode},

@@ -8,14 +8,14 @@ import (
 
 func tldrCommand() Command {
 	return Command{
-		Name:        "tldr",
-		Aliases:     []string{"explain"},
-		Description: "Explain current code concisely",
-		Category:    "Knowledge",
-		Icon:        "󰋗",
-		ArgsHint:    "[target]",
-		Tier:        TierTertiary,
-		Type:        CmdPrompt,
+		Name:           "tldr",
+		Aliases:        []string{"explain"},
+		Description:    "Explain current code concisely",
+		Category:       "Knowledge",
+		Icon:           "󰋗",
+		ArgsHint:       "[target]",
+		Tier:           TierTertiary,
+		Type:           CmdPrompt,
 		PromptTemplate: "Explain the following concisely (tldr). Cover what it does, key edge cases, and risks. Target: $ARGUMENTS",
 	}
 }

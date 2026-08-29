@@ -38,7 +38,7 @@ func permissionInfoForTool(tc ai.ToolCall, name string) components.PermissionInf
 	case "list_directory":
 		info.Icon, info.Action, info.Risk = "▸", "Inspect directory structure", "Reads workspace metadata"
 		add("Path", str("path"))
-	case "run_shell_command", "run_command", "bash":
+	case "run_shell_command", "bash":
 		info.Icon, info.Action, info.Risk = "▲", "Execute shell command", "Runs a local process"
 		if agent.CommandIsDangerous(tc.Name, tc.Args) {
 			info.Risk = "▲ dangerous pattern — always-allow will match ONLY this exact command"

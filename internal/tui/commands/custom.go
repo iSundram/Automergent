@@ -34,10 +34,10 @@ const (
 	customCategory = "Custom"
 	// CustomCategory is the exported palette/help category for user-defined
 	// markdown commands.
-	CustomCategory   = customCategory
-	customIcon       = "󰆙"
-	userCommandsNm   = ".automergent/commands"
-	maxCommandBody   = 64 * 1024
+	CustomCategory = customCategory
+	customIcon     = "󰆙"
+	userCommandsNm = ".automergent/commands"
+	maxCommandBody = 64 * 1024
 )
 
 // ParseMarkdownCommand derives a command definition and prompt body from a

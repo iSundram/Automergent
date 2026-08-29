@@ -257,3 +257,127 @@ type Message struct {
 	Timestamp time.Time
 	Metadata  map[string]any
 }
+
+// ============================================================================
+// PHASE-AWARE AGENT LOOP TYPES
+// ============================================================================
+
+// AgentPhase represents the current phase of the agent loop.
+type AgentPhase string
+
+const (
+	PhaseInit     AgentPhase = "init"      // First message: classify, route, handle direct Q&A
+	PhaseExplore  AgentPhase = "explore"   // Codebase search/read (read-only tools)
+	PhasePlan     AgentPhase = "plan"      // Design, clarify, create task graph
+	PhaseBuild    AgentPhase = "build"     // Implementation + testing + todo (full tools)
+)
+
+// PromptLayer represents a layer in the composed system prompt.
+type PromptLayer int
+
+const (
+	LayerBaseModel      PromptLayer = iota // Model-specific base (gpt.txt, claude.txt, gemini.txt)
+	LayerEnvironment                        // Working dir, git, platform, date, model info
+	LayerInstructions                       // AGENTS.md, CLAUDE.md, custom instructions
+	LayerSkills                             // Available skills with descriptions
+	LayerMCP                                // MCP server instructions
+	LayerAgentCustom                        // Per-agent custom prompt from config
+	LayerPhase                              // Phase-specific (init/explore/plan/build)
+	LayerBehavioral                         // Behavioral rules (violations, tone, etc.)
+	LayerTool                               // Per-tool prompts (pre/post execution)
+	LayerDynamic                            // Plan mode reminders, compaction notices
+)
+
+// PhaseConfig holds tool and behavior config for a specific phase.
+type PhaseConfig struct {
+	Tools       []string
+	ToolSet     ToolSet
+	PromptStyle string
+	Agent       string
+	MaxSteps    int
+}
+
+// ViolationType represents the type of policy violation.
+type ViolationType string
+
+const (
+	ViolationHacking      ViolationType = "hacking"
+	ViolationIllegal      ViolationType = "illegal"
+	ViolationHarmful      ViolationType = "harmful_code"
+	ViolationCredentials  ViolationType = "credential_theft"
+	ViolationSecurity     ViolationType = "security_bypass"
+	ViolationPersistence  ViolationType = "persistent_violation"
+)
+
+// ViolationSeverity represents the severity of a violation.
+type ViolationSeverity string
+
+const (
+	ViolationSeverityLow      ViolationSeverity = "low"
+	ViolationSeverityMedium   ViolationSeverity = "medium"
+	ViolationSeverityHigh     ViolationSeverity = "high"
+	ViolationSeverityCritical ViolationSeverity = "critical"
+)
+
+// ViolationCheck represents a detected violation.
+type ViolationCheck struct {
+	Type        ViolationType
+	Severity    ViolationSeverity
+	UserMessage string
+	AgentResponse string
+	Count       int
+	Action      string // "warn", "block_imminent", "blocked", "overridden"
+}
+
+// PhaseTransition represents a transition between phases.
+type PhaseTransition struct {
+	From      AgentPhase
+	To        AgentPhase
+	Reason    string
+	Trigger   string // "user_request", "tool_result", "violation", "clarification"
+	Timestamp time.Time
+}
+
+// BehavioralTrigger represents when a behavioral prompt should be injected.
+type BehavioralTrigger string
+
+const (
+	TriggerAlways         BehavioralTrigger = "always"
+	TriggerViolation      BehavioralTrigger = "violation"
+	TriggerClarification  BehavioralTrigger = "clarification"
+	TriggerPhaseChange    BehavioralTrigger = "phase_change"
+	TriggerToolUse        BehavioralTrigger = "tool_use"
+	TriggerError          BehavioralTrigger = "error"
+)
+
+// BehavioralPrompt represents a behavioral rule prompt.
+type BehavioralPrompt struct {
+	Name     string
+	Content  string
+	Priority int
+	Triggers []BehavioralTrigger
+}
+
+// ToolPromptConfig holds per-tool behavioral prompts.
+type ToolPromptConfig struct {
+	PreExecution    string
+	PostExecution   string
+	Rules           []string
+	RequiresContext []string
+}
+
+// ViolationPolicy defines how an agent handles violations.
+type ViolationPolicy struct {
+	MaxWarnings    int  // Before block (default 2)
+	BlockOnPersist bool
+	AllowOverride  bool // User can convince
+}
+
+// ModelInfo holds model-specific information.
+type ModelInfo struct {
+	Name           string
+	Provider       string
+	ContextWindow  int
+	MaxOutputTokens int
+	SupportsThinking bool
+}

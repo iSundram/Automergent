@@ -12,7 +12,7 @@ import (
 //
 // Why this is a tri-state rather than a bool: tools implement
 // RequiresConfirmation(mode string) and several compare the mode literal
-// (internal/tools/filesystem/write.go and internal/tools/shell/runner.go both
+// (internal/tools/filesystem/write.go and internal/tools/shell/async.go both
 // test `mode == "edit"`). Under a mode name those tools have never heard of,
 // they answer "no confirmation needed" — which would silently auto-approve
 // writes and shell commands. ApprovalDefault therefore preserves the legacy
@@ -116,7 +116,7 @@ func isShellCall(name string, t tools.Tool) bool {
 		return true
 	}
 	n := strings.ToLower(name)
-	return n == "bash" || n == "run_command" || n == "run_shell_command"
+	return n == "bash" || n == "run_shell_command"
 }
 
 // needsConfirmation applies the active mode's approval policy to a tool call,
