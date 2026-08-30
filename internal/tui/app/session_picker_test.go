@@ -120,7 +120,7 @@ func TestSessionPickerRowContent(t *testing.T) {
 	view := a.sessionBrowser.View()
 	view = ansiStrip(view)
 	t.Logf("VIEW:\n%s", view)
-	for _, want := range []string{"Gemini SDK rewrite", "created", "modified", "8 msgs", "google/gemini-2.5-pro", "1.2M in/8.9k out", "/root/OweCode"} {
+	for _, want := range []string{"Gemini SDK rewrite", "3 hours ago", "8 msgs", "google/gemini-2.5-pro", "1.2M in/8.9k out", "Resume session", "OweCode"} {
 		if !strings.Contains(view, want) {
 			t.Fatalf("picker view missing %q:\n%s", want, view)
 		}
@@ -165,8 +165,11 @@ func TestSessionPickerScrollAndTheme(t *testing.T) {
 	a := model.(*App)
 	a.sessionBrowser.SetSize(90, 24)
 	view := ansiStrip(a.sessionBrowser.View())
-	if !strings.Contains(view, "┃") || !strings.Contains(view, "│") {
+	if !strings.Contains(view, "│") || !strings.Contains(view, "█") {
 		t.Fatalf("scrollbar missing:\n%s", view)
+	}
+	if !strings.Contains(view, "Resume session") {
+		t.Fatalf("line-style header missing:\n%s", view)
 	}
 
 	for i := 0; i < 5; i++ {
@@ -174,15 +177,15 @@ func TestSessionPickerScrollAndTheme(t *testing.T) {
 	}
 	a = model.(*App)
 	view = ansiStrip(a.sessionBrowser.View())
-	if !strings.Contains(view, "Session G") {
+	if !strings.Contains(view, "Session F") {
 		t.Fatalf("cursor should follow navigation, view:\n%s", view)
 	}
-	if !strings.Contains(view, "6 of 12") {
-		t.Fatalf("count should read 6 of 12, view:\n%s", view)
+	if !strings.Contains(view, "6/12") {
+		t.Fatalf("count should read 6/12, view:\n%s", view)
 	}
 
-	// Selected row must use the accent indicator (▍) rather than a boxed border.
-	if !strings.Contains(a.sessionBrowser.View(), "▍") {
+	// Selected row must use the accent indicator (▸) rather than a boxed border.
+	if !strings.Contains(a.sessionBrowser.View(), "▸") {
 		t.Fatalf("selected row must use accent indicator")
 	}
 }

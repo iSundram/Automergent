@@ -280,6 +280,10 @@ func (a *App) ResumeSession(id string) error {
 	return a.resumeSession(id)
 }
 
+func (a *App) DeleteSession(id string) error {
+	return a.deleteSession(id)
+}
+
 func (a *App) ClearConversationView() {
 	a.clearConversationView()
 }

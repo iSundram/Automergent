@@ -399,6 +399,10 @@ func run(cmd *cobra.Command, args []string) error {
 	// Build agent
 	ag := agent.New(cfg, provider, sess, reg)
 
+	// Background subagent completions reach the model as <task-notification>
+	// messages instead of waiting for a read_agent poll.
+	ag.EnableSubagentNotifications()
+
 	// Wire MCP bridge to agent for event emission
 	if mcpBr != nil {
 		mcpBr.SetAgent(ag)
@@ -1337,7 +1341,7 @@ func formatComprehensiveExitMessage(sess *session.Session) string {
 
 	tips := []string{
 		"Use /compress to keep your context window lean.",
-		"Type /sessions to browse and resume previous chats.",
+		"Type /sessions to browse, search, rename and resume previous chats.",
 		"Use /diff to toggle the diff view during a session.",
 		"The /stats command shows detailed token information.",
 		"Automergent supports many models; try /provider to switch.",
@@ -1373,6 +1377,7 @@ func formatComprehensiveExitMessage(sess *session.Session) string {
 		rule,
 		"",
 		field("Session", shortID),
+		field("Title", titleOrFallback(sess)),
 		field("Duration", duration.String()),
 		"",
 		" " + dim.Render("Resume this session"),
@@ -1387,6 +1392,30 @@ func formatComprehensiveExitMessage(sess *session.Session) string {
 		" " + success.Render("󰄬 Session saved") + "  " + dim.Render("See you next time."),
 		"",
 	}, "\n")
+}
+
+// titleOrFallback gives the exit banner a session name: the stored title, or
+// the first line of the opening user message when the session is untitled.
+func titleOrFallback(sess *session.Session) string {
+	if t := strings.TrimSpace(sess.Title); t != "" {
+		return t
+	}
+	for _, m := range sess.Messages {
+		if m.Role != aiPkg.RoleUser {
+			continue
+		}
+		line := strings.TrimSpace(m.PlaintextForHistory())
+		if idx := strings.IndexAny(line, "\n"); idx >= 0 {
+			line = line[:idx]
+		}
+		if len(line) > 60 {
+			line = line[:57] + "..."
+		}
+		if line != "" {
+			return line
+		}
+	}
+	return "Untitled session"
 }
 
 // appendUniquePath appends path to paths unless already present.

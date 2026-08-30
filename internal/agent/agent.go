@@ -64,6 +64,24 @@ type Agent struct {
 	// call instead of waiting for the whole turn to finish.
 	steer chan string
 
+	// Context-window management state (see autocompact.go). usageAnchor is
+	// the message count covered by the last provider-reported usage;
+	// usageAnchoredTokens is that usage total. Compaction rewrites messages
+	// in place, which invalidates the anchor.
+	usageAnchor         int
+	usageAnchoredTokens int
+	compactionFailures  int
+	lastCompactedAt     time.Time
+
+	// userCtx is the conversation-scoped user context (project instructions,
+	// git snapshot) injected as meta user messages at request time. See
+	// usercontext.go.
+	userCtx     map[string]string
+	userCtxOnce sync.Once
+
+	// rules persists user-stated rules captured by the INIT decomposer.
+	rules *RuleStore
+
 	// New prompt system for staged prompt delivery
 	promptSystem     *promptpkg.PromptSystem
 	promptSystemOnce sync.Once
@@ -71,6 +89,7 @@ type Agent struct {
 	// Phase-aware agent loop
 	phaseManager    *promptpkg.PhaseManager
 	phaseClassifier *promptpkg.PhaseClassifier
+	decomposer      *promptpkg.InitDecomposer
 	promptComposer  *promptpkg.PromptComposer
 	currentAgentDef *agentdef.AgentDefinition
 
@@ -91,8 +110,16 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 	childSess.Metadata["parent_id"] = a.sess.ID
 	childSess.Metadata["agent_type"] = string(agentType)
 
-	// 3. Create a child agent.
-	childAgent := New(&childCfg, a.provider, childSess, a.tools)
+	// 3. Create a child agent. The child runs on a CLONE of the tool registry
+	// with the task-state tools re-registered against the child's own prompt
+	// system: without this, a subagent's todo_write would mutate the parent's
+	// task list (the registry was shared, and those tools close over the
+	// parent's task store).
+	childTools := a.tools.Clone()
+	childAgent := New(&childCfg, a.provider, childSess, childTools)
+	if childAgent.promptSystem != nil {
+		tools.RegisterTaskStateTools(childTools, childAgent.promptSystem.GetTaskState())
+	}
 
 	// The child answers to the same always-allow set as its parent: grants
 	// made while answering the main agent's asks cover subagents, and an
@@ -149,6 +176,7 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 
 	// Run the child agent in a goroutine and signal completion on done.
 	go func() {
+		started := time.Now()
 		finalErr = childAgent.Run(childCtx, prompt)
 		// Extract the last assistant message as the result
 		if len(childSess.Messages) > 0 {
@@ -161,6 +189,22 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 			subagent.GetAgentManager().NoteTokens(trackedID,
 				childSess.TotalInputTokens, childSess.TotalOutputTokens)
 			subagent.GetAgentManager().NoteTool(trackedID, "")
+
+			// Task-notification footer: the parent model sees what the child
+			// cost, the same way the reference agent reports usage with every
+			// background completion. Applied only when the child succeeded so
+			// failures keep their error text unobstructed.
+			if finalErr == nil {
+				var toolCount int
+				if inst, ok := subagent.GetAgentManager().Get(trackedID); ok {
+					toolCount = inst.Snapshot().ToolCount
+				}
+				finalResponse += fmt.Sprintf(
+					"\n\n<usage>\ntotal_tokens: %d\ninput_tokens: %d\noutput_tokens: %d\ntool_uses: %d\nduration_ms: %d\n</usage>",
+					childSess.TotalInputTokens+childSess.TotalOutputTokens,
+					childSess.TotalInputTokens, childSess.TotalOutputTokens,
+					toolCount, time.Since(started).Milliseconds())
+			}
 		}
 		// Ensure we close the child's event channel so drainers exit.
 		_ = childAgent.Close()
@@ -597,6 +641,10 @@ func (a *Agent) SetSession(sess *session.Session) {
 func (a *Agent) Run(ctx context.Context, prompt string) error {
 	originalUserPrompt := prompt
 
+	// Agents constructed directly (tests, embedders) skip New's wiring; make
+	// sure the phase machinery exists before it is used.
+	a.ensurePhaseComponents()
+
 	// 1. Initial Triage Phase - classify first message
 	isFirstMessage := a.checkAndMarkFirstMessage()
 	if isFirstMessage {
@@ -608,8 +656,19 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	a.sess.AddMessage(userMsg)
 	a.recordToTranscript(userMsg)
 
-	// 2. Phase-aware execution
-	// First, classify the message using PhaseClassifier
+	// Deliver task notifications queued while the agent was idle (background
+	// subagents that finished between runs) ahead of the model's first
+	// response, the same way they would have landed mid-run.
+	a.drainSteer()
+
+	// 2. INIT: decompose the message into parts and route each one. The
+	// decomposer is the primary path (LLM-driven, understands multi-part
+	// messages, rules, noise, violations); the keyword classifier stays as
+	// the fallback when it is unavailable.
+	if decomposition := a.decomposeFirstMessage(ctx, originalUserPrompt, isFirstMessage); decomposition != nil {
+		return a.executeDecomposition(ctx, decomposition, originalUserPrompt)
+	}
+
 	classification, err := a.phaseClassifier.Classify(ctx, originalUserPrompt, a.getAvailableFiles())
 	if err != nil {
 		a.Emit(EventError, fmt.Errorf("classification failed: %w", err))
@@ -638,23 +697,63 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		return a.answerDirectQuestion(ctx, originalUserPrompt)
 	}
 
-	// 3. Execute phases in sequence
-	for _, phase := range append([]shared.AgentPhase{classification.PrimaryPhase}, classification.SecondaryPhases...) {
-		for _, task := range classification.Tasks {
-			result := a.phaseManager.ExecutePhase(phase, task)
-			
+	// Run the prompt-system pipeline (intent identification, init exploration,
+	// task planning) so phase execution starts with pre-computed context:
+	// intents, discovered files, and a task plan. A pipeline failure degrades
+	// to the keyword-classified phases instead of failing the run.
+	if a.promptSystem != nil && a.provider != nil {
+		if _, err := a.promptSystem.ProcessUserMessage(ctx, originalUserPrompt, a.workDir, a.getAvailableFiles()); err != nil {
+			a.Emit(EventStatus, "prompt pipeline degraded to keyword routing: "+err.Error())
+		}
+	}
+
+	// 3. Execute phases in sequence. A classification without tasks must not
+	// silently do nothing: it degenerates to one direct task for the primary
+	// phase.
+	tasks := classification.Tasks
+	if len(tasks) == 0 {
+		tasks = []shared.TaskSpec{{
+			Type:        "direct",
+			Description: originalUserPrompt,
+			Role:        "assistant",
+			Priority:    1,
+		}}
+	}
+	phases := append([]shared.AgentPhase{classification.PrimaryPhase}, classification.SecondaryPhases...)
+	for _, phase := range phases {
+		for _, task := range tasks {
+			// A repeat ExecutePhase for the same phase is not a valid
+			// transition (explore→explore); the manager already sits in the
+			// phase after the first task, so later tasks reuse its config.
+			var result promptpkg.PhaseResult
+			if a.phaseManager.CurrentPhase() == phase {
+				cfg := a.phaseManager.GetPhaseConfig(phase)
+				result = promptpkg.PhaseResult{
+					Phase:    phase,
+					TaskSpec: task,
+					Config:   cfg,
+					ToolSet:  cfg.ToolSet,
+					MaxSteps: cfg.MaxSteps,
+				}
+			} else {
+				result = a.phaseManager.ExecutePhase(phase, task)
+			}
+
 			if result.Violation != nil {
 				a.handleViolation(result.Violation)
 				if result.Violation.Action == "blocked" {
 					return fmt.Errorf("session blocked due to policy violation")
 				}
 			}
-			
+
 			if result.Error != nil {
 				a.Emit(EventError, result.Error)
 				return result.Error
 			}
-			
+
+			// Make the arc visible: the UI shows which phase is taking over.
+			a.Emit(EventStatus, fmt.Sprintf("phase %s: %s", phase, task.Description))
+
 			// Execute the phase using the standard loop with phase-specific config
 			if err := a.runPhaseLoop(ctx, phase, result); err != nil {
 				return err
@@ -683,34 +782,58 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		a.promptSystem.GetCurrentIntentSet(),
 		a.promptSystem.GetCurrentTasks(),
 	)
+	// Live registry: the tool layer renders each tool's own Meta()
+	// documentation for the tools this phase offers.
+	a.promptComposer.SetRegistry(a.tools)
+
+	// The fleet roster: who can be delegated to and when (task tool).
+	if fleet := FleetFromRegistry(); fleet != "" {
+		a.promptComposer.AddLayer(shared.LayerDynamic, fleet)
+	}
+
+	// The task this phase run is executing, with its routing hint — the
+	// model must know which part of a decomposed message it is on, and
+	// which subagent the INIT router chose for it.
+	if block := currentTaskBlock(result.TaskSpec); block != "" {
+		a.promptComposer.AddLayer(shared.LayerDynamic, block)
+	}
 
 	firstStandardTurn := true
 	runMeta := &runMetadata{}
+	phaseSteps := 0
+	maxSteps := result.MaxSteps
+	if maxSteps <= 0 {
+		maxSteps = 20
+	}
+	reactiveCompactions := 0
 
 	for {
 		provider := a.Provider()
 		a.sess.SetMessages(ai.RepairMissingToolResults(a.sess.Messages))
 
-		// Check context window usage
-		tokens, _ := provider.TokenCount(a.sess.Messages)
-		limit := a.cfg.MaxContextTokens
-		if limit <= 0 {
-			limit = provider.ContextLimit()
+		// Context-window ladder — ghost oversized outputs, micro-compact old
+		// tool results, auto-compact past the threshold, then warn/block.
+		// See autocompact.go for the thresholds and their rationale.
+		if err := a.manageContextWindow(ctx, provider); err != nil {
+			a.Emit(EventError, err)
+			a.tryPersist()
+			return err
 		}
 
-		autoCompressAt := 0.80
-		if a.cfg.AutoCompressAt > 0 {
-			autoCompressAt = a.cfg.AutoCompressAt
+		// Predictive trigger: compact BEFORE the request when one more full
+		// turn (reply + tool growth) would overflow the window, instead of
+		// discovering it from a failed call.
+		if a.predictContextOverflow(provider) && a.compactionFailures < maxConsecutiveCompactionFailures {
+			a.Emit(EventStatus, "Neural Compaction: freeing context window before overflow")
+			compacted := a.CompactSessionMessages(ctx, a.sess.Messages)
+			a.sess.SetMessages(compacted)
+			a.invalidateUsageAnchor()
+			a.lastCompactedAt = time.Now()
+			a.Emit(EventCompacted, map[string]any{
+				"tokens_after": a.tokenCountWithEstimation(compacted),
+				"predictive":   true,
+			})
 		}
-
-		if limit > 0 && float64(tokens)/float64(limit) > autoCompressAt {
-			a.Emit(EventStatus, "Neural Compaction: Freeing up context window...")
-			a.sess.SetMessages(a.CompactSessionMessages(ctx, a.sess.Messages))
-		} else {
-			a.sess.SetMessages(a.GhostLargeOutputs(a.sess.Messages))
-		}
-
-		a.checkContextLimit(provider, a.sess.Messages)
 
 		// Use layered system prompt from PromptComposer
 		systemPrompt := a.promptComposer.Compose()
@@ -719,8 +842,12 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		thinkingBudget := a.getThinkingBudget()
 		thinkingLevel := a.getThinkingLevel()
 
+		// Project instructions + git snapshot ride as leading meta user
+		// messages (never persisted; see usercontext.go).
+		messagesForQuery := prependUserContext(a.sess.Messages, a.userContext())
+
 		req := ai.CompletionRequest{
-			Messages:    a.sess.Messages,
+			Messages:    messagesForQuery,
 			Tools:       toolSchemas,
 			System:      systemPrompt,
 			Temperature: 0.0,
@@ -742,6 +869,13 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 				if a.handleQuotaExceeded(ctx, err) {
 					continue
 				}
+			}
+			// Reactive compaction: the provider rejected the prompt as too
+			// long (estimation drifted from its real counting). Compact and
+			// retry once rather than failing the whole phase.
+			if reactiveCompactions < 1 && a.reactiveCompact(ctx, err, provider) {
+				reactiveCompactions++
+				continue
 			}
 			a.Emit(EventError, err)
 			a.tryPersist()
@@ -778,6 +912,9 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		if len(msg.Content) > 0 {
 			a.sess.AddMessage(msg)
 			a.recordToTranscript(msg)
+			// Anchor token counting on this response's real usage: the
+			// request covered exactly the messages now in the session.
+			a.recordUsageAnchor(usage, len(a.sess.Messages))
 		}
 
 		if stop != ai.StopReasonTools || len(toolCalls) == 0 {
@@ -818,6 +955,24 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		a.recordToTranscript(resultMsg)
 		a.drainSteer()
 		a.injectLongRunContext(runMeta, true)
+
+		// Phase step budget: past MaxSteps the model gets one wrap-up nudge,
+		// and past twice that the phase is cut off so a runaway loop cannot
+		// burn the whole session (subagents inherit the same cap, which is
+		// what bounds their cost).
+		phaseSteps++
+		if phaseSteps == maxSteps {
+			a.sess.AddMessage(ai.Message{
+				Role: ai.RoleSystem,
+				Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: fmt.Sprintf(
+					"[Phase step budget] You have used %d of %d steps in the %s phase. Wrap up: finish the current action, verify what you can, and produce your best partial result now.",
+					phaseSteps, maxSteps, phase)}},
+			})
+			a.Emit(EventStatus, fmt.Sprintf("phase %s hit step budget (%d); requesting wrap-up", phase, maxSteps))
+		}
+		if phaseSteps >= maxSteps*2 {
+			return fmt.Errorf("phase %s exceeded %d steps without completing; aborting to protect the session", phase, phaseSteps)
+		}
 	}
 }
 
@@ -1261,6 +1416,26 @@ func (a *Agent) buildActiveToolSchemas() []ai.ToolSchema {
 	return applyDefinitionMask(schemas, a.currentAgentDef)
 }
 
+// ensurePhaseComponents lazily wires the prompt system, phase manager, and
+// classifier when an Agent was built without New (tests, embedders). Safe to
+// call repeatedly; existing components are left alone.
+func (a *Agent) ensurePhaseComponents() {
+	if a.promptSystem == nil && a.provider != nil {
+		llmClient := promptpkg.NewAIProviderAdapter(a.provider, "")
+		a.promptSystem = promptpkg.NewPromptSystemWithLLM(promptpkg.DefaultPromptConfig(), a.ContextManager(), a.workDir, llmClient, a.tools)
+	}
+	if a.phaseManager == nil {
+		def := a.currentAgentDef
+		if def == nil {
+			def = builtin.GeneralAgent()
+		}
+		a.phaseManager = promptpkg.NewPhaseManager(a.promptSystem, def)
+	}
+	if a.phaseClassifier == nil && a.provider != nil {
+		a.phaseClassifier = promptpkg.NewPhaseClassifier(a.phaseManager, promptpkg.NewAIProviderAdapter(a.provider, ""))
+	}
+}
+
 // SetDefinition applies an agent-type definition to this agent: the
 // definition's system prompt and phase configuration take over from the
 // general-purpose default, and its Tools list (when non-empty) becomes the
@@ -1483,11 +1658,21 @@ func gitIsRepo(ctx context.Context, dir string) bool {
 	return cmd.Run() == nil
 }
 
-// runStandardLoop is the fallback standard agent loop.
+// runStandardLoop is the fallback when first-message classification fails:
+// the request still executes through the build phase with the default
+// general-purpose configuration rather than silently doing nothing.
 func (a *Agent) runStandardLoop(ctx context.Context, prompt string, isFirstMessage bool) error {
-	// This is the original standard loop implementation
-	// For now, return nil to indicate it would run the standard loop
-	return nil
+	result := a.phaseManager.ExecutePhase(shared.PhaseBuild, shared.TaskSpec{
+		Type:        "build",
+		Description: prompt,
+		Role:        "implementer",
+		Priority:    1,
+	})
+	if result.Error != nil {
+		a.Emit(EventError, result.Error)
+		return result.Error
+	}
+	return a.runPhaseLoop(ctx, shared.PhaseBuild, result)
 }
 
 // getAvailableFiles returns a list of available files for classification.
@@ -1527,7 +1712,7 @@ func (a *Agent) answerDirectQuestion(ctx context.Context, question string) error
 	systemPrompt := a.getSystemPrompt(ctx, provider)
 	
 	req := ai.CompletionRequest{
-		Messages: []ai.Message{ai.NewTextMessage(ai.RoleUser, question)},
+		Messages: prependUserContext([]ai.Message{ai.NewTextMessage(ai.RoleUser, question)}, a.userContext()),
 		Tools:    []ai.ToolSchema{},
 		System:   systemPrompt,
 		Temperature: 0.0,
@@ -1544,7 +1729,13 @@ func (a *Agent) answerDirectQuestion(ctx context.Context, question string) error
 	if err != nil {
 		return err
 	}
-	
+
+	// Record the answer so it survives compaction and session resume.
+	msg := ai.NewTextMessage(ai.RoleAssistant, text)
+	a.sess.AddMessage(msg)
+	a.recordToTranscript(msg)
+	a.tryPersist()
+
 	a.Emit(EventDone, text)
 	return nil
 }

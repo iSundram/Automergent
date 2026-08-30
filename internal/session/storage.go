@@ -125,6 +125,7 @@ func (s *Storage) List() ([]*Session, error) {
 		if err := json.Unmarshal(data, &sess); err != nil {
 			continue
 		}
+		sess.SizeBytes = int64(len(data))
 		if migrated, err := MigrateSession(&sess); err == nil {
 			sessions = append(sessions, migrated)
 		} else {

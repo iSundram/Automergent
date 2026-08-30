@@ -57,3 +57,18 @@ func (r *Registry) All() []Tool {
 	}
 	return out
 }
+
+// Clone returns a new registry sharing this one's tool set. Tools themselves
+// are shared (they are stateless or hold their own state); cloning exists so
+// a caller can override individual entries — e.g. re-registering the
+// task-state tools against a subagent's own task store — without mutating
+// the registry every other agent in the tree runs against.
+func (r *Registry) Clone() *Registry {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := NewRegistry()
+	for name, t := range r.tools {
+		out.tools[name] = t
+	}
+	return out
+}

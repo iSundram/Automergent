@@ -153,6 +153,9 @@ type Host interface {
 	NewSession()
 	ShowSessions()
 	ResumeSession(id string) error
+	// DeleteSession removes a stored session. Implementations must refuse
+	// the active session.
+	DeleteSession(id string) error
 	ClearConversationView()
 	ResetSessionHistory()
 	ExportConversation(path string) error

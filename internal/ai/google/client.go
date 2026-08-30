@@ -1050,6 +1050,13 @@ func (c *Client) mapError(err error) error {
 			code = automergentErrors.CodeServiceUnavailable
 		case http.StatusInternalServerError:
 			code = automergentErrors.CodeServerError
+		case http.StatusBadRequest:
+			// The API reports oversized prompts as a plain 400; surface them
+			// as CONTEXT_TOO_LONG so the agent loop can reactively compact
+			// and retry instead of failing the turn.
+			if isContextLengthMessage(msg) {
+				code = automergentErrors.CodeContextTooLong
+			}
 		}
 
 		oce := automergentErrors.New(code, msg).
@@ -1064,4 +1071,20 @@ func (c *Client) mapError(err error) error {
 	}
 
 	return automergentErrors.NewConnectionError(c.baseURL, err)
+}
+
+// isContextLengthMessage matches the phrasing providers use when a request
+// exceeds the model's context window.
+func isContextLengthMessage(msg string) bool {
+	lower := strings.ToLower(msg)
+	for _, marker := range []string{
+		"context length", "context window", "too many tokens",
+		"exceeds the maximum number of tokens", "input tokens exceed",
+		"token limit", "request too large",
+	} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
 }

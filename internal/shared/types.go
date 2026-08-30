@@ -239,6 +239,13 @@ type TaskSpec struct {
 	Context      map[string]any
 	Tools        []string
 	Description  string
+	// Agent is the subagent type the INIT decomposer routed this task to:
+	// "main" (inline in the main agent), "explore", "general-purpose",
+	// "review", "contexter", or "coordinator". Empty behaves as "main".
+	Agent string
+	// Phase is the arc phase this task runs in: explore | plan | build.
+	// Empty means infer from Type.
+	Phase AgentPhase
 }
 
 // PromptPart represents a part of a prompt sent at a specific stage.

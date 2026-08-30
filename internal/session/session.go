@@ -34,6 +34,10 @@ type Session struct {
 	TotalInputTokens  int `json:"total_input_tokens"`
 	TotalOutputTokens int `json:"total_output_tokens"`
 
+	// SizeBytes is the on-disk JSON size, filled in by Storage.List for
+	// display purposes only — never persisted.
+	SizeBytes int64 `json:"-"`
+
 	// AllowedTools records user-approved "always allow" tool scopes so they
 	// survive process restarts and session resumes.
 	AllowedTools []ToolApproval `json:"allowed_tools,omitempty"`

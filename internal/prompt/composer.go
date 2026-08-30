@@ -4,6 +4,7 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/iSundram/Automergent/internal/agent/agentdef"
 	"github.com/iSundram/Automergent/internal/shared"
+	"github.com/iSundram/Automergent/internal/tools"
 )
 
 //go:embed bases/default.txt
@@ -56,6 +58,16 @@ type PromptComposer struct {
 	initResults *shared.InitResults
 	intentSet  *shared.IntentSet
 	tasks      []shared.TaskSpec
+	// registry gives the tool layer access to live tool metadata (Meta()),
+	// the self-documenting per-tool prompt system. Nil is legal: the layer
+	// then falls back to the static table only.
+	registry *tools.Registry
+}
+
+// SetRegistry attaches the live tool registry so the tool layer renders the
+// registry's own per-tool documentation (ToolMeta) for offered tools.
+func (c *PromptComposer) SetRegistry(reg *tools.Registry) {
+	c.registry = reg
 }
 
 // MCPServerInfo represents an MCP server for prompt injection.
@@ -198,47 +210,112 @@ func (c *PromptComposer) buildEnvironmentLayer() {
 	sb.WriteString("<env>\n")
 	sb.WriteString(fmt.Sprintf("  Working directory: %s\n", c.workingDir))
 	sb.WriteString(fmt.Sprintf("  Workspace root folder: %s\n", c.workingDir))
-	
+
 	// Check if git repo
 	if _, err := os.Stat(filepath.Join(c.workingDir, ".git")); err == nil {
 		sb.WriteString("  Is directory a git repo: yes\n")
+		sb.WriteString(c.gitStatusBlock())
 	} else {
 		sb.WriteString("  Is directory a git repo: no\n")
 	}
-	
+
 	sb.WriteString(fmt.Sprintf("  Platform: %s\n", runtime.GOOS))
 	sb.WriteString(fmt.Sprintf("  Today's date: %s\n", time.Now().Format("Mon Jan 2 2006")))
 	sb.WriteString("</env>\n")
-	
+
 	c.layers[shared.LayerEnvironment] = []string{sb.String()}
 }
 
-// buildInstructionsLayer adds AGENTS.md and custom instructions.
-func (c *PromptComposer) buildInstructionsLayer() {
-	var parts []string
-	
-	// Check for AGENTS.md in working directory and parents
-	agentsContent := c.findAndReadInstructions(c.workingDir, []string{"AGENTS.md", "CLAUDE.md"})
-	if agentsContent != "" {
-		parts = append(parts, "## Project Instructions (AGENTS.md/CLAUDE.md)\n"+agentsContent)
+// gitStatusBlock renders a compact, read-only git snapshot: current branch,
+// the default branch, and the first lines of the working-tree status. Bounded
+// so a dirty tree cannot flood the system prompt.
+func (c *PromptComposer) gitStatusBlock() string {
+	return GitStatusBlock(c.workingDir)
+}
+
+// GitStatusBlock renders a compact, read-only git snapshot of dir: current
+// branch, the default branch, the first lines of the working-tree status,
+// and recent commits. Returns "" when dir is not inside a git repository or
+// git is unavailable — git context is a nicety, not a dependency.
+func GitStatusBlock(dir string) string {
+	const maxStatusLines = 20
+	branch := gitOutput(dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if branch == "" {
+		return ""
 	}
-	
-	// Check for global instructions
-	homeDir, _ := os.UserHomeDir()
-	if homeDir != "" {
-		globalAgents := filepath.Join(homeDir, ".config", "automergent", "AGENTS.md")
-		if content, err := os.ReadFile(globalAgents); err == nil {
-			parts = append(parts, "## Global Instructions\n"+string(content))
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("  Current branch: %s\n", branch))
+	if main := gitOutput(dir, "rev-parse", "--abbrev-ref", "origin/HEAD"); main != "" {
+		sb.WriteString(fmt.Sprintf("  Main branch: %s\n", strings.TrimPrefix(main, "origin/")))
+	}
+	if status := gitOutput(dir, "status", "--porcelain"); status != "" {
+		lines := strings.Split(strings.TrimRight(status, "\n"), "\n")
+		if len(lines) > maxStatusLines {
+			lines = append(lines[:maxStatusLines], fmt.Sprintf("... and %d more changed files", len(lines)-maxStatusLines))
+		}
+		sb.WriteString("  Status (git status --porcelain):\n")
+		for _, line := range lines {
+			sb.WriteString("    " + line + "\n")
 		}
 	}
-	
-	if len(parts) > 0 {
-		c.layers[shared.LayerInstructions] = parts
+	if log := gitOutput(dir, "log", "--oneline", "-5"); log != "" {
+		sb.WriteString("  Recent commits:\n")
+		for _, line := range strings.Split(strings.TrimRight(log, "\n"), "\n") {
+			sb.WriteString("    " + line + "\n")
+		}
 	}
+	return sb.String()
+}
+
+// gitOutput runs one read-only git query in dir and returns its trimmed
+// stdout, or "" on any failure. Never returns an error: git context is a
+// nicety, not a dependency.
+func gitOutput(dir string, args ...string) string {
+	if dir == "" {
+		return ""
+	}
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// buildInstructionsLayer is deliberately EMPTY: project instructions are
+// injected as a high-weight user message by the agent loop (see
+// agent/usercontext.go), following the reference agent's design — burying
+// them in the system prompt both lowers their instructional weight and puts
+// volatile content inside the cacheable prompt prefix.
+func (c *PromptComposer) buildInstructionsLayer() {}
+
+// instructionFileNames lists the instruction files honored by the platform,
+// in priority order. AUTOMERGENT.md is our native memory file; AGENTS.md and
+// CLAUDE.md are honored so existing tooling keeps working.
+var instructionFileNames = []string{"AUTOMERGENT.md", "AGENTS.md", "CLAUDE.md"}
+
+// ProjectInstructions walks up from dir collecting every instruction file
+// (AUTOMERGENT.md, AGENTS.md, CLAUDE.md) it finds, nearest first. Returns ""
+// when none exist.
+func ProjectInstructions(dir string) string {
+	return findAndReadInstructions(dir, instructionFileNames)
+}
+
+// GlobalInstructions returns the user-level instructions file, or "".
+func GlobalInstructions() string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil || homeDir == "" {
+		return ""
+	}
+	content, err := os.ReadFile(filepath.Join(homeDir, ".config", "automergent", "AGENTS.md"))
+	if err != nil {
+		return ""
+	}
+	return string(content)
 }
 
 // findAndReadInstructions walks up the directory tree looking for instruction files.
-func (c *PromptComposer) findAndReadInstructions(startDir string, filenames []string) string {
+func findAndReadInstructions(startDir string, filenames []string) string {
 	var parts []string
 	dir := startDir
 	for {
@@ -269,7 +346,7 @@ func (c *PromptComposer) buildSkillsLayer() {
 	sb.WriteString("Use the skill tool to load a skill when a task matches its description.\n\n")
 	
 	for _, skill := range c.skills {
-		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", skill.Name, skill.Description))
+		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", skill.Name(), skill.Description()))
 	}
 	
 	c.layers[shared.LayerSkills] = []string{sb.String()}
@@ -316,222 +393,49 @@ func (c *PromptComposer) buildPhaseLayer() {
 		return
 	}
 	
-	// Default phase prompts
-	defaultPhasePrompts := map[shared.AgentPhase]string{
-		shared.PhaseInit: `
-## Phase: INIT - Request Classification
-This is the FIRST message. Your job is to:
-1. Classify the user's request into: direct, explore, plan, build, verify, question, violation
-2. If DIRECT (simple Q&A, "what does X do", "hello"): Answer directly, no tools needed
-3. If EXPLORE (needs codebase search): Transition to explore phase
-4. If PLAN (needs design): Transition to plan phase  
-5. If BUILD (clear implementation): Transition to build phase
-6. If VIOLATION (hacking, illegal, harmful): Call violation_detected tool immediately
-7. If AMBIGUOUS: Ask clarifying questions
-
-Be concise. Use minimal tools. Prioritize the task.`,
-		shared.PhaseExplore: `
-## Phase: EXPLORE - Codebase Exploration
-You are in exploration mode. Your job is to:
-1. Search and read relevant files using glob, grep, read
-2. Understand the codebase structure and patterns
-3. Report findings with file paths and line numbers
-4. NEVER modify files - read only
-5. When exploration is complete, transition to plan or build phase`,
-		shared.PhasePlan: `
-## Phase: PLAN - Design & Planning
-You are in planning mode. Your job is to:
-1. Review exploration results
-2. Create a detailed implementation plan
-3. Identify specific files to modify
-4. Ask clarifying questions if requirements are ambiguous
-5. Define task dependencies and order
-6. When plan is complete, transition to build phase`,
-		shared.PhaseBuild: `
-## Phase: BUILD - Implementation
-You are in build mode. Your job is to:
-1. Implement the plan with minimal, focused changes
-2. Follow existing code style and patterns
-3. MANAGE TODO LIST: Create, update, complete todos for each task
-4. Run tests/lint/typecheck AFTER each change
-5. If bugs found, transition to explore phase
-6. When all todos complete and tests pass, task is DONE`,
-	}
-	
-	if prompt, ok := defaultPhasePrompts[c.phase]; ok {
-		c.layers[shared.LayerPhase] = []string{prompt}
+	// Default phase prompts live in phases/*.txt (Mission/Rules/Exit).
+	if prompt := PhasePrompt(c.phase); prompt != "" {
+		c.layers[shared.LayerPhase] = []string{"## Phase: " + string(c.phase) + "\n" + prompt}
 	}
 }
 
-// buildBehavioralLayer adds behavioral prompts.
+// buildBehavioralLayer adds behavioral prompts, grouped by dimension
+// (phase discipline / context hygiene / verification / safety). See
+// behavioral.go.
 func (c *PromptComposer) buildBehavioralLayer() {
-	behavioralPrompts := c.getBehavioralPrompts()
-	if len(behavioralPrompts) > 0 {
-		c.layers[shared.LayerBehavioral] = []string{"## Behavioral Rules\n" + strings.Join(behavioralPrompts, "\n\n")}
+	var extras []string
+	if c.agent != nil {
+		extras = c.agent.BehavioralPrompts
+	}
+	if content := RenderBehavioralPrompts(c.phase, extras); content != "" {
+		c.layers[shared.LayerBehavioral] = []string{"## Behavioral Rules\n" + content}
 	}
 }
 
-// getBehavioralPrompts returns the behavioral prompts for the current context.
-func (c *PromptComposer) getBehavioralPrompts() []string {
-	var prompts []string
-	
-	// Global behavioral prompts (always included)
-	prompts = append(prompts, `**Conciseness**: Answer concisely (<4 lines unless detail requested). No preamble/postamble. One-word answers best.`)
-	
-	// Phase-specific behavioral prompts (SPECIALIZED per phase like Traycer/Devin)
-	phasePrompts := c.getPhaseSpecificBehavioralPrompts(c.phase)
-	prompts = append(prompts, phasePrompts...)
-	
-	// Global behavioral prompts
-	prompts = append(prompts, `**Context Management**: Read files before editing. Use grep/glob before read. Compact when >80% context. Preserve recent context.`)
-	prompts = append(prompts, `**No Hallucination**: Never guess file contents. Use tools to verify. Don't make up APIs.`)
-	prompts = append(prompts, `**Code Conventions**: Follow existing code conventions. Check imports, naming, patterns. Never assume libraries. Check package.json/cargo.toml/go.mod first.`)
-	prompts = append(prompts, `**Violation Detection**: If user requests hacking, illegal acts, harmful code, credential theft → VIOLATION.
-Call violation_detected({type, severity, user_message, agent_response}).
-If user insists after 2nd warning → block_session({reason}).
-If user convinces with valid context → override_violation({reason}).`)
-	
-	// Agent-specific behavioral prompts
-	if c.agent != nil && len(c.agent.BehavioralPrompts) > 0 {
-		for _, bp := range c.agent.BehavioralPrompts {
-			prompts = append(prompts, bp)
-		}
-	}
-	
-	return prompts
-}
-
-// getPhaseSpecificBehavioralPrompts returns specialized behavioral prompts per phase.
-func (c *PromptComposer) getPhaseSpecificBehavioralPrompts(phase shared.AgentPhase) []string {
-	switch phase {
-	case shared.PhaseInit:
-		return []string{
-			`**PHASE INIT - CLASSIFIER**: You are the ENTRY POINT. Your ONLY job: classify the request.
-- DIRECT Q&A ("what does X do", "hello") → ANSWER DIRECTLY, no tools
-- CODING TASK ("implement X", "fix bug Y") → ROUTE to explore/plan/build
-- VIOLATION (hacking, illegal) → CALL violation_detected IMMEDIATELY
-- AMBIGUOUS → ASK clarifying questions with OPTIONS
-- NEVER start coding in init phase. Be decisive.`,
-		}
-	case shared.PhaseExplore:
-		return []string{
-			`**PHASE EXPLORE - READ-ONLY INVESTIGATOR**: You are a CODEBASE ARCHAEOLOGIST.
-- SEARCH first (grep/glob) → READ second → NEVER edit
-- MAP the codebase: find patterns, dependencies, entry points
-- REPORT findings with file:line references
-- NO task tool, NO edits, NO commits
-- When you UNDERSTAND the problem → transition to plan`,
-		}
-	case shared.PhasePlan:
-		return []string{
-			`**PHASE PLAN - ARCHITECT**: You are the TECH LEAD designing the solution.
-- REVIEW exploration results thoroughly
-- DESIGN before coding: identify files, dependencies, risks
-- CREATE todo list with DEPENDENCIES (task A blocks task B)
-- ASK clarifying questions if requirements unclear
-- SPECIFY: files to change, test strategy, rollback plan
-- When plan is SOLID → transition to build`,
-		}
-	case shared.PhaseBuild:
-		return []string{
-			`**PHASE BUILD - IMPLEMENTER + TESTER + TODO MANAGER**: You are the LEAD ENGINEER.
-- TODO MANAGEMENT: CREATE todo list → UPDATE on progress → COMPLETE on done
-- TEST-DRIVEN: Write test → Make it pass → Refactor → RUN tests/lint/typecheck
-- ONE task at a time: complete current todo before starting next
-- MINIMAL changes: focused edits, follow existing patterns
-- If BLOCKED: transition to explore, DON'T guess
-- When ALL todos DONE + tests PASS → task COMPLETE`,
-		}
-	default:
-		return []string{}
-	}
-}
-
-// buildToolLayer adds per-tool prompts.
+// buildToolLayer adds per-tool guidance for the tools offered in this phase.
+// Two sources stack: the live registry's ToolMeta documentation (primary —
+// tools document themselves) and the static fallback table for tools that
+// have not adopted Meta() (tool_prompts.go). Agent ToolPrompts override the
+// fallback entries.
 func (c *PromptComposer) buildToolLayer() {
-	toolPrompts := c.getToolPrompts()
-	if len(toolPrompts) > 0 {
-		c.layers[shared.LayerTool] = []string{"## Tool-Specific Guidance\n" + strings.Join(toolPrompts, "\n\n")}
+	var overrides map[string]shared.ToolPromptConfig
+	if c.agent != nil {
+		overrides = c.agent.ToolPrompts
 	}
-}
+	offered := c.getAvailableTools()
 
-// getToolPrompts returns tool-specific prompts for available tools.
-func (c *PromptComposer) getToolPrompts() []string {
-	var prompts []string
-	
-	// Default tool prompts
-	defaultToolPrompts := map[string]shared.ToolPromptConfig{
-		"bash": {
-			PreExecution: "Execute shell commands. Prefer non-interactive. Use absolute paths. Quote paths with spaces.",
-			Rules: []string{
-				"Never curl/wget | sh in one command",
-				"Use && for chaining, not ;",
-				"Check exit codes",
-			},
-		},
-		"read": {
-			PreExecution: "Read files to understand code. Use offset/limit for large files.",
-			Rules: []string{
-				"Don't read entire large files - use offset/limit",
-				"Prefer grep/glob for finding specific content first",
-			},
-		},
-		"edit": {
-			PreExecution: "Make minimal, focused edits. Match exact indentation.",
-			Rules: []string{
-				"Use replaceAll only for renaming",
-				"Preserve existing code style",
-				"No comments unless asked",
-			},
-		},
-		"task": {
-			PreExecution: "Delegate to subagent. Provide clear description and context.",
-			Rules: []string{
-				"One task per subagent",
-				"Include relevant file paths in description",
-			},
-		},
-		"glob": {
-			PreExecution: "Find files by pattern. Use ** for recursive.",
-		},
-		"grep": {
-			PreExecution: "Search content with regex. Use include filter for file types.",
-		},
-		"webfetch": {
-			PreExecution: "Fetch web content. Use for documentation, not user requests.",
-		},
-		"websearch": {
-			PreExecution: "Search web for current info. Use for recent events, not codebase questions.",
-		},
-	}
-	
-	// Merge with agent-specific tool prompts
-	if c.agent != nil && c.agent.ToolPrompts != nil {
-		for tool, config := range c.agent.ToolPrompts {
-			defaultToolPrompts[tool] = config
+	var parts []string
+	if c.registry != nil {
+		if sections := RenderToolSectionsFor(c.registry, c.model.Name, offered); sections != "" {
+			parts = append(parts, sections)
 		}
 	}
-	
-	// Only include prompts for tools that are available
-	availableTools := c.getAvailableTools()
-	for _, toolName := range availableTools {
-		if config, ok := defaultToolPrompts[toolName]; ok {
-			var sb strings.Builder
-			sb.WriteString(fmt.Sprintf("### %s\n", toolName))
-			if config.PreExecution != "" {
-				sb.WriteString(config.PreExecution + "\n")
-			}
-			if len(config.Rules) > 0 {
-				sb.WriteString("Rules:\n")
-				for _, rule := range config.Rules {
-					sb.WriteString(fmt.Sprintf("- %s\n", rule))
-				}
-			}
-			prompts = append(prompts, sb.String())
-		}
+	if fallback := RenderToolPromptsFromRegistry(c.registry, offered, overrides); fallback != "" {
+		parts = append(parts, "## Tool Guidance\n"+fallback)
 	}
-	
-	return prompts
+	if len(parts) > 0 {
+		c.layers[shared.LayerTool] = parts
+	}
 }
 
 // getAvailableTools returns the list of available tools for the current phase/agent.

@@ -88,6 +88,7 @@ type mockHost struct {
 	newSessionCalls        int
 	showSessionsCalls      int
 	resumeSessionCalls     []string
+	deleteSessionCalls     []string
 	clearConversationCalls int
 	resetHistoryCalls      int
 
@@ -190,6 +191,7 @@ func (m *mockHost) Reset() {
 	m.newSessionCalls = 0
 	m.showSessionsCalls = 0
 	m.resumeSessionCalls = nil
+	m.deleteSessionCalls = nil
 	m.clearConversationCalls = 0
 	m.resetHistoryCalls = 0
 	m.showStatsCalls = 0
@@ -550,6 +552,13 @@ func (m *mockHost) ResumeSession(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.resumeSessionCalls = append(m.resumeSessionCalls, id)
+	return nil
+}
+
+func (m *mockHost) DeleteSession(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.deleteSessionCalls = append(m.deleteSessionCalls, id)
 	return nil
 }
 

@@ -160,6 +160,9 @@ func (a *Agent) getEnvironmentPrompt() string {
 	// Check if git repo
 	if _, err := os.Stat(filepath.Join(a.workDir, ".git")); err == nil {
 		sb.WriteString("  Is directory a git repo: yes\n")
+		// Branch / status / recent commits — the same snapshot the prompt
+		// composer injects, so every prompt path sees identical context.
+		sb.WriteString(prompt.GitStatusBlock(a.workDir))
 	} else {
 		sb.WriteString("  Is directory a git repo: no\n")
 	}
@@ -171,28 +174,10 @@ func (a *Agent) getEnvironmentPrompt() string {
 	return sb.String()
 }
 
-// getInstructionsPrompt loads AGENTS.md and CLAUDE.md files.
+// getInstructionsPrompt is deliberately empty: project instructions are
+// injected as a high-weight user message by the agent loop (usercontext.go),
+// not duplicated into the system prompt.
 func (a *Agent) getInstructionsPrompt() string {
-	var parts []string
-	
-	// Check for AGENTS.md in working directory and parents
-	agentsContent := a.findAndReadInstructions(a.workDir, []string{"AGENTS.md", "CLAUDE.md"})
-	if agentsContent != "" {
-		parts = append(parts, "## Project Instructions (AGENTS.md/CLAUDE.md)\n"+agentsContent)
-	}
-	
-	// Check for global instructions
-	homeDir, _ := os.UserHomeDir()
-	if homeDir != "" {
-		globalAgents := filepath.Join(homeDir, ".config", "automergent", "AGENTS.md")
-		if content, err := os.ReadFile(globalAgents); err == nil {
-			parts = append(parts, "## Global Instructions\n"+string(content))
-		}
-	}
-	
-	if len(parts) > 0 {
-		return strings.Join(parts, "\n\n")
-	}
 	return ""
 }
 
@@ -256,58 +241,17 @@ func (a *Agent) getMCPPrompt() string {
 	return sb.String()
 }
 
-// getPhasePrompt returns the phase-specific prompt.
+// getPhasePrompt returns the phase-specific prompt. Defaults come from the
+// shared per-phase files (prompt/phases/*.txt); agent definitions may
+// override via PhasePrompts.
 func (a *Agent) getPhasePrompt(phase shared.AgentPhase) string {
 	if a.currentAgentDef != nil {
 		if phasePrompt, ok := a.currentAgentDef.PhasePrompts[phase]; ok && phasePrompt != "" {
 			return "## Phase: " + string(phase) + "\n" + phasePrompt
 		}
 	}
-	
-	// Default phase prompts
-	defaultPhasePrompts := map[shared.AgentPhase]string{
-		shared.PhaseInit: `
-## Phase: INIT - Request Classification
-This is the FIRST message. Your job is to:
-1. Classify the user's request into: direct, explore, plan, build, verify, question, violation
-2. If DIRECT (simple Q&A, "what does X do", "hello"): Answer directly, no tools needed
-3. If EXPLORE (needs codebase search): Transition to explore phase
-4. If PLAN (needs design): Transition to plan phase  
-5. If BUILD (clear implementation): Transition to build phase
-6. If VIOLATION (hacking, illegal, harmful): Call violation_detected tool immediately
-7. If AMBIGUOUS: Ask clarifying questions
-
-Be concise. Use minimal tools. Prioritize the task.`,
-		shared.PhaseExplore: `
-## Phase: EXPLORE - Codebase Exploration
-You are in exploration mode. Your job is to:
-1. Search and read relevant files using glob, grep, read
-2. Understand the codebase structure and patterns
-3. Report findings with file paths and line numbers
-4. NEVER modify files - read only
-5. When exploration is complete, transition to plan or build phase`,
-		shared.PhasePlan: `
-## Phase: PLAN - Design & Planning
-You are in planning mode. Your job is to:
-1. Review exploration results
-2. Create a detailed implementation plan
-3. Identify specific files to modify
-4. Ask clarifying questions if requirements are ambiguous
-5. Define task dependencies and order
-6. When plan is complete, transition to build phase`,
-		shared.PhaseBuild: `
-## Phase: BUILD - Implementation
-You are in build mode. Your job is to:
-1. Implement the plan with minimal, focused changes
-2. Follow existing code style and patterns
-3. MANAGE TODO LIST: Create, update, complete todos for each task
-4. Run tests/lint/typecheck AFTER each change
-5. If bugs found, transition to explore phase
-6. When all todos complete and tests pass, task is DONE`,
-	}
-
-	if prompt, ok := defaultPhasePrompts[phase]; ok {
-		return prompt
+	if p := prompt.PhasePrompt(phase); p != "" {
+		return "## Phase: " + string(phase) + "\n" + p
 	}
 	return ""
 }

@@ -204,6 +204,10 @@ func (a *App) showSessions() {
 		a.sessionBrowser.SetSessions([]*session.Session{a.sess})
 	}
 	a.sessionBrowser.SetCurrent(a.sess.ID)
+	if a.workDir != "" {
+		a.sessionBrowser.SetProjectLabel(filepath.Base(a.workDir))
+	}
+	a.sessionBrowser.SelectCurrent()
 	a.sessionBrowser.Show()
 	// The key event that triggered this command must not also be delivered to
 	// the freshly shown browser (it would be interpreted as "select" and the
@@ -212,7 +216,77 @@ func (a *App) showSessions() {
 	a.layout()
 }
 
+// resolveSessionID maps a user-supplied session reference to a stored ID:
+// exact ID, unambiguous ID prefix, or case-insensitive title match. Returns
+// ("", nil) when the reference matches nothing and an error when it is
+// ambiguous.
+func (a *App) resolveSessionID(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return "", nil
+	}
+	if a.storage == nil {
+		return "", fmt.Errorf("session storage unavailable")
+	}
+	sessions, err := a.storage.List()
+	if err != nil {
+		return "", err
+	}
+	sessions = a.projectSessions(sessions)
+
+	if ref[0] == '#' {
+		// #N selects the Nth most recently updated session (1 = newest).
+		n, err := strconv.Atoi(ref[1:])
+		if err != nil || n < 1 || n > len(sessions) {
+			return "", fmt.Errorf("session #%s out of range (1-%d)", strings.TrimPrefix(ref, "#"), len(sessions))
+		}
+		return sessions[n-1].ID, nil
+	}
+
+	// Exact ID.
+	for _, s := range sessions {
+		if s.ID == ref {
+			return s.ID, nil
+		}
+	}
+	// Unambiguous ID prefix.
+	var prefixMatches []string
+	for _, s := range sessions {
+		if strings.HasPrefix(s.ID, ref) {
+			prefixMatches = append(prefixMatches, s.ID)
+		}
+	}
+	if len(prefixMatches) == 1 {
+		return prefixMatches[0], nil
+	}
+	if len(prefixMatches) > 1 {
+		return "", fmt.Errorf("session id prefix %q is ambiguous (%d matches)", ref, len(prefixMatches))
+	}
+	// Case-insensitive title substring match.
+	var titleMatches []string
+	for _, s := range sessions {
+		if s.Title != "" && strings.Contains(strings.ToLower(s.Title), strings.ToLower(ref)) {
+			titleMatches = append(titleMatches, s.ID)
+		}
+	}
+	if len(titleMatches) == 1 {
+		return titleMatches[0], nil
+	}
+	if len(titleMatches) > 1 {
+		return "", fmt.Errorf("session title %q matches %d sessions", ref, len(titleMatches))
+	}
+	return "", nil
+}
+
 func (a *App) resumeSession(id string) error {
+	if a.thinking {
+		return fmt.Errorf("agent is running — /cancel it before resuming another session")
+	}
+	if resolved, err := a.resolveSessionID(id); err != nil {
+		return err
+	} else if resolved != "" {
+		id = resolved
+	}
 	if a.storage == nil {
 		return fmt.Errorf("session storage unavailable")
 	}
@@ -260,6 +334,44 @@ func (a *App) newSession() {
 	a.statusBar.SetStatus("New session started")
 }
 
+// deleteSession removes a stored session from disk. The active session is
+// refused — deleting the session the app is writing to would corrupt state.
+func (a *App) deleteSession(id string) error {
+	if a.storage == nil {
+		return fmt.Errorf("session storage unavailable")
+	}
+	if a.sess != nil && a.sess.ID == id {
+		return fmt.Errorf("cannot delete the active session")
+	}
+	if err := a.storage.Delete(id); err != nil {
+		return err
+	}
+	a.sessionBrowser.RemoveByID(id)
+	a.statusBar.SetStatus("Session deleted: " + id)
+	return nil
+}
+
+// renameStoredSession renames a session picked from the browser. When it is
+// the active session the live copy is retitled too (the browser holds its own
+// object loaded from storage, so both must be written).
+func (a *App) renameStoredSession(s *session.Session, title string) error {
+	title = strings.TrimSpace(title)
+	if s == nil || title == "" {
+		return fmt.Errorf("title must not be empty")
+	}
+	s.Title = title
+	if a.sess != nil && a.sess.ID == s.ID {
+		a.sess.Title = title
+	}
+	if a.storage != nil {
+		if err := a.storage.Save(s); err != nil {
+			return err
+		}
+	}
+	a.statusBar.SetStatus("Session renamed: " + title)
+	return nil
+}
+
 // clearConversationView clears only the rendered conversation.
 func (a *App) clearConversationView() {
 	a.conversation.Clear()
@@ -267,9 +379,18 @@ func (a *App) clearConversationView() {
 }
 
 // resetSessionHistory clears both the view and the persisted message history.
+// The wiped conversation is captured as a final rewind checkpoint first, so an
+// accidental /reset stays recoverable via /rewind until the checkpoints are
+// replaced by later turns. The emptied session is persisted immediately — a
+// stale on-disk copy would otherwise resurrect the history on the next resume.
 func (a *App) resetSessionHistory() {
+	a.captureCheckpoint("before /reset")
 	a.conversation.Clear()
 	a.sess.SetMessages(nil)
+	if a.storage != nil {
+		_ = a.storage.Save(a.sess)
+	}
+	a.updateActiveTokens()
 	a.statusBar.SetStatus("History reset")
 }
 

@@ -91,8 +91,8 @@ func TestDetectPhaseIgnoresToolCallIDStringHeuristics(t *testing.T) {
 		toolResult("read_like_id", nil),
 	}
 
-	if got := DetectPhase(messages); got != PhaseResearch {
-		t.Fatalf("expected %q, got %q", PhaseResearch, got)
+	if got := DetectPhase(messages); got != PhaseVerify {
+		t.Fatalf("expected %q, got %q", PhaseVerify, got)
 	}
 }
 
@@ -132,8 +132,8 @@ func TestDetectPhaseExecuteRequiresPlanFile(t *testing.T) {
 		t.Fatalf("write plan file: %v", err)
 	}
 
-	if got := DetectPhase(messages); got != PhaseExecute {
-		t.Fatalf("expected %q with plan file, got %q", PhaseExecute, got)
+	if got := DetectPhase(messages); got != PhaseBuild {
+		t.Fatalf("expected %q with plan file, got %q", PhaseBuild, got)
 	}
 }
 

@@ -207,6 +207,9 @@ func (a *App) restoreSession(s *session.Session) error {
 	if s == nil {
 		return fmt.Errorf("session is nil")
 	}
+	if a.thinking {
+		return fmt.Errorf("agent is running — /cancel it before switching sessions")
+	}
 	a.sess = s
 	if a.sess.WorkDir == "" {
 		a.sess.WorkDir = a.workDir
@@ -229,7 +232,7 @@ func (a *App) restoreSession(s *session.Session) error {
 	var providerErr error
 	if s.Provider != "" {
 		if err := a.switchProvider(s.Provider, s.Model); err != nil {
-			providerErr = err
+			providerErr = fmt.Errorf("session loaded, but provider switch failed: %w", err)
 		}
 	}
 	a.statusBar.SetStatus("Session resumed: " + s.ID)

@@ -35,42 +35,10 @@ Guidelines:
 		Source:      agentdef.SourceBuiltin,
 		MemoryScope: agentdef.MemoryScopeProject,
 		Timeout:     0,
-		PhasePrompts: map[shared.AgentPhase]string{
-			shared.PhaseInit: `
-## Phase: INIT - Request Classification
-Classify the user's request:
-- If direct Q&A ("what does X do", "hello"): Answer directly, no tools needed
-- If exploration needed (find files, search code): Transition to explore phase
-- If plan needed (design, architecture): Transition to plan phase
-- If clear implementation: Transition to build phase
-- If violation detected: Call violation_detected tool immediately
-- If ambiguous: Ask clarifying questions
-
-Be concise. Use minimal tools. Prioritize the task.`,
-			shared.PhasePlan: `
-## Phase: PLAN - Design & Planning
-You are in planning mode. Your job is to:
-1. Review exploration results
-2. Create a detailed implementation plan
-3. Identify specific files to modify
-4. Ask clarifying questions if requirements are ambiguous
-5. Define task dependencies and order
-6. Create todo list for implementation
-7. When plan is complete, transition to build phase
-
-Be structured and analytical.`,
-			shared.PhaseBuild: `
-## Phase: BUILD - Implementation + Testing + Todo Management
-You are in build mode. Your job is to:
-1. Implement the plan with minimal, focused changes
-2. Follow existing code style and patterns
-3. MANAGE TODO LIST: Create, update, complete todos for each task
-4. Run tests/lint/typecheck AFTER each change
-5. If bugs found, transition to explore phase
-6. When all todos complete and tests pass, task is DONE
-
-Be focused, pragmatic, and test-driven.`,
-		},
+		// PhasePrompts intentionally unset: the shared per-phase files
+		// (prompt/phases/*.txt) are the platform defaults and are richer than
+		// the per-agent overrides that used to live here.
+		
 		PhaseTools: map[shared.AgentPhase][]string{
 			shared.PhaseInit:    {"bash", "read", "glob", "grep", "task"},
 			shared.PhasePlan:    {"read", "write", "bash", "task"},

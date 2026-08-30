@@ -172,7 +172,7 @@ const (
 )
 
 func renderIdentity() string {
-	return fmt.Sprintf("# Identity\nYou are Automergent %s, a senior lead software engineer and autonomous agent. You take full responsibility for the technical integrity, security, and maintainability of the workspace. You operate with precision, focusing on solving problems rather than just completing tickets.\n\n", version.Version)
+	return fmt.Sprintf("# Identity\nYou are the model identified in your environment context, running as a senior lead software engineer and autonomous agent on the Automergent platform (v%s). You take full responsibility for the technical integrity, security, and maintainability of the workspace. You operate with precision, focusing on solving problems rather than just completing tickets.\n\n", version.Version)
 }
 
 func renderTaskProtocol() string {
@@ -249,11 +249,9 @@ func renderProjectContext(cfg *config.Config, messages []ai.Message, cm *context
 		sb.WriteString("\n[Trajectory Note: The conversation history is long. Focus on the most recent state and your established plan.]\n")
 	}
 
-	// Load AUTOMERGENT.md if present
-	if data, err := os.ReadFile(filepath.Join(cwd, "AUTOMERGENT.md")); err == nil {
-		sb.WriteString("\n## Project Mandates (AUTOMERGENT.md)\n")
-		sb.WriteString(string(data))
-	}
+	// AUTOMERGENT.md and other instruction files are injected as a
+	// high-weight user message by the agent loop (usercontext.go), not
+	// duplicated into the system prompt.
 	renderManagedContextSelection(&sb, cfg, messages, cwd, cm)
 
 	return sb.String()
@@ -499,6 +497,12 @@ func (a *Agent) GhostLargeOutputs(messages []ai.Message) []ai.Message {
 
 // CompactSessionMessages provides intelligent context compaction with LLM-based summarization.
 // This should be called by the Agent loop when context usage is high.
+//
+// The compacted history keeps our multi-phase arc intact: the original user
+// request and the compact boundary marker (with the active todo/phase state
+// folded into the summary), followed by the verbatim recent suffix. The
+// split point is adjusted so an assistant tool-call is never separated from
+// its tool-result message — strict providers reject such sequences.
 func (a *Agent) CompactSessionMessages(ctx context.Context, messages []ai.Message) []ai.Message {
 	// 0. Pre-process large tool outputs
 	messages = a.GhostLargeOutputs(messages)
@@ -513,14 +517,19 @@ func (a *Agent) CompactSessionMessages(ctx context.Context, messages []ai.Messag
 		return messages
 	}
 
-	compacted := make([]ai.Message, 0)
+	compacted := make([]ai.Message, 0, len(messages)/2)
 	// Keep the first message (Original Intent / System Prompt)
 	compacted = append(compacted, messages[0])
 
-	// Determine the range to compact
+	// Determine the range to compact, adjusting so tool-call/result pairs
+	// stay on the same side of the boundary.
 	startIdx := len(messages) - keepRecent
 	if startIdx < 1 {
 		startIdx = 1
+	}
+	startIdx = adjustIndexToPreservePairs(messages, startIdx)
+	if startIdx <= 1 {
+		return messages // nothing safe to summarize
 	}
 
 	// Extract messages to be compacted (middle section)
@@ -540,33 +549,44 @@ func (a *Agent) CompactSessionMessages(ctx context.Context, messages []ai.Messag
 	// Generate LLM-based summary if there are messages to summarize
 	var summaryText string
 	if len(messagesToSummarize) > 0 {
-		prompt := `Summarize this segment of the coding session history. 
+		prompt := `Summarize this segment of the coding session history.
 Focus on:
 1. The specific problem being addressed.
 2. Key files investigated or modified.
 3. Decisions made and rationale provided.
 4. Any constraints or requirements identified.
 5. Successful vs. failed attempts.
+6. The current phase of work (exploration / planning / implementation) and what remains.
 
 Keep the summary technical and concise (max 800 words).`
+
+		prompt += a.compactionStateBlock()
 
 		summaryText = a.summarizeWithLLM(ctx, messagesToSummarize, prompt)
 	} else {
 		summaryText = "[No additional messages required summarization]"
 	}
 
-	// Add the LLM-generated summary as a system message with a "Neural" header
+	// Add the LLM-generated summary as a system message with a "Neural" header.
+	// The metadata marks the compaction boundary: a later compaction must not
+	// summarize content that is itself already a summary.
 	summaryMsg := ai.Message{
 		Role: ai.RoleSystem,
 		Content: []ai.ContentPart{{
 			Type: ai.ContentTypeText,
 			Text: fmt.Sprintf("# Neural Context Summary\n\n> This is a compressed representation of the earlier conversation to maintain context efficiency.\n\n%s\n\n---", summaryText),
 		}},
+		Metadata: map[string]any{compactionBoundaryKey: true},
 	}
 	compacted = append(compacted, summaryMsg)
 
-	// Add important messages (Preserved context)
-	if len(importantMessages) > 0 {
+	// Add important messages (Preserved context), sanitized so the preserved
+	// block cannot break API sequence invariants: consecutive same-role
+	// messages are merged, assistant tool-call parts are dropped (their
+	// results are usually not preserved, which would dangle), and tool
+	// messages are rendered as text (an orphaned tool_result is rejected by
+	// strict providers).
+	if sanitized := sanitizePreservedMessages(importantMessages); len(sanitized) > 0 {
 		compacted = append(compacted, ai.Message{
 			Role: ai.RoleSystem,
 			Content: []ai.ContentPart{{
@@ -574,11 +594,147 @@ Keep the summary technical and concise (max 800 words).`
 				Text: "## Preserved Key Context\nThe following high-signal messages from the compacted history have been preserved for reference:",
 			}},
 		})
-		compacted = append(compacted, importantMessages...)
+		compacted = append(compacted, sanitized...)
+	}
+
+	// Re-attach recently read files so the model can keep working across the
+	// boundary without re-reading them (bounded; see autocompact.go).
+	if attachments := a.buildPostCompactAttachments(); attachments != "" {
+		compacted = append(compacted, ai.Message{
+			Role: ai.RoleSystem,
+			Content: []ai.ContentPart{{
+				Type: ai.ContentTypeText,
+				Text: attachments,
+			}},
+		})
 	}
 
 	// Keep the most recent messages
 	compacted = append(compacted, messages[startIdx:]...)
 
-	return compacted
+	// Final normalization: the assembled blocks (preserved messages followed
+	// by the verbatim suffix) can produce adjacent same-role messages, which
+	// strict providers reject. Merging them is lossless — only the message
+	// boundary disappears, never content. Tool messages never merge (their
+	// pairing with the preceding assistant's calls is an API invariant).
+	return mergeAdjacentRoles(compacted)
+}
+
+// mergeAdjacentRoles merges consecutive non-tool messages of the same role
+// into a single message by concatenating their content parts. Returns the
+// input unchanged when no merging is needed.
+func mergeAdjacentRoles(messages []ai.Message) []ai.Message {
+	out := make([]ai.Message, 0, len(messages))
+	for _, msg := range messages {
+		if n := len(out); n > 0 && out[n-1].Role == msg.Role && msg.Role != ai.RoleTool {
+			out[n-1].Content = append(out[n-1].Content, msg.Content...)
+			continue
+		}
+		out = append(out, msg)
+	}
+	return out
+}
+
+// sanitizePreservedMessages renders the important-message block sequence-
+// safe. The compacted history must satisfy ai.ValidateMessageSequence even
+// though the preserved messages were selected by importance, not by
+// adjacency: consecutive same-role messages are merged into one, assistant
+// tool-call parts are stripped (their results are typically not preserved,
+// which would dangle), and tool-result messages are flattened into plain
+// text (an orphaned tool_result with no pending call is rejected by strict
+// providers).
+func sanitizePreservedMessages(messages []ai.Message) []ai.Message {
+	if len(messages) == 0 {
+		return nil
+	}
+
+	var out []ai.Message
+	for _, msg := range messages {
+		var rendered ai.Message
+		switch msg.Role {
+		case ai.RoleTool:
+			// Flatten results into a user message: role tool without a
+			// pending assistant call is invalid.
+			var parts []ai.ContentPart
+			for _, p := range msg.Content {
+				if p.Type == ai.ContentTypeToolResult && p.ToolResult != nil {
+					parts = append(parts, ai.ContentPart{
+						Type: ai.ContentTypeText,
+						Text: fmt.Sprintf("[preserved tool result] %s", p.ToolResult.Content),
+					})
+				}
+			}
+			if len(parts) == 0 {
+				continue
+			}
+			rendered = ai.Message{Role: ai.RoleUser, Content: parts}
+		case ai.RoleAssistant:
+			// Keep text/thought only; tool calls without their results dangle.
+			var parts []ai.ContentPart
+			for _, p := range msg.Content {
+				switch p.Type {
+				case ai.ContentTypeText, ai.ContentTypeThought:
+					parts = append(parts, p)
+				}
+			}
+			if len(parts) == 0 {
+				continue
+			}
+			rendered = ai.Message{Role: ai.RoleAssistant, Content: parts}
+		default:
+			rendered = msg
+		}
+
+		// Merge with the previous message when the roles now match.
+		if n := len(out); n > 0 && out[n-1].Role == rendered.Role &&
+			(rendered.Role == ai.RoleAssistant || rendered.Role == ai.RoleUser || rendered.Role == ai.RoleSystem) {
+			out[n-1].Content = append(out[n-1].Content, rendered.Content...)
+			continue
+		}
+		out = append(out, rendered)
+	}
+	return out
+}
+
+// compactionStateBlock renders the live phase-arc state (active todos and
+// goal) into the summarization prompt so continuity survives compaction.
+func (a *Agent) compactionStateBlock() string {
+	var sb strings.Builder
+	if a.promptSystem != nil {
+		if turnCtx := a.promptSystem.GetTurnContext(); turnCtx != nil {
+			var open, done int
+			for _, todo := range turnCtx.TodoItems {
+				if todo.Status == "completed" {
+					done++
+				} else {
+					open++
+				}
+			}
+			if open+done > 0 {
+				sb.WriteString(fmt.Sprintf("\n\nCurrent task list (%d open / %d completed):", open, done))
+				for _, todo := range turnCtx.TodoItems {
+					sb.WriteString(fmt.Sprintf("\n- [%s] %s", todo.Status, todo.Description))
+				}
+			}
+		}
+	}
+	if goal := a.Goal(); goal != "" {
+		sb.WriteString("\n\nActive long-run goal: " + goal)
+	}
+	return sb.String()
+}
+
+// adjustIndexToPreservePairs moves a candidate split index so the suffix
+// never starts with a tool result whose generating assistant message would
+// stay in the summarized prefix — that orphaned result is rejected by strict
+// providers (see ai.ValidateMessageSequence). Walking back over the run of
+// tool results (and the assistant that issued them) keeps every call/result
+// pair on one side of the boundary; a split that already starts on a
+// non-tool message is untouched, because a pair can only be broken by the
+// suffix starting mid-pair.
+func adjustIndexToPreservePairs(messages []ai.Message, idx int) int {
+	for idx > 1 && messages[idx].Role == ai.RoleTool {
+		idx--
+	}
+	return idx
 }

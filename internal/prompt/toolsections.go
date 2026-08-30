@@ -13,12 +13,26 @@ import (
 // inferred defaults otherwise), grouped by category. This replaces the old
 // hand-written seven-line contract: new tools document themselves.
 func RenderToolSections(reg *tools.Registry, model string) string {
+	return RenderToolSectionsFor(reg, model, nil)
+}
+
+// RenderToolSectionsFor is RenderToolSections restricted to the offered tool
+// names. A nil/empty offered list means "all registered tools" (legacy
+// behavior); otherwise only tools the current phase can call are documented,
+// so the layer stays bounded to the phase's tool profile.
+func RenderToolSectionsFor(reg *tools.Registry, model string, offered []string) string {
 	if reg == nil {
 		return ""
 	}
 	all := reg.All()
 	if len(all) == 0 {
 		return ""
+	}
+
+	allowed := map[string]bool{}
+	restricted := len(offered) > 0
+	for _, name := range offered {
+		allowed[name] = true
 	}
 
 	family := tools.ModelFamily(model)
@@ -30,6 +44,9 @@ func RenderToolSections(reg *tools.Registry, model string) string {
 
 	currentCat := ""
 	for _, t := range sorted {
+		if restricted && !allowed[t.Name()] {
+			continue
+		}
 		meta := tools.MetaOf(t)
 		if meta.Category != currentCat {
 			currentCat = meta.Category

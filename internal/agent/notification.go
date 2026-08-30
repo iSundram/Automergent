@@ -5,6 +5,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	subagent "github.com/iSundram/Automergent/internal/tools/agent"
 )
 
 // TaskNotification represents a notification about a subagent's lifecycle.
@@ -174,4 +176,44 @@ func NewKilledNotification(agentID, reason string) TaskNotification {
 		Status:  "killed",
 		Summary: fmt.Sprintf("Agent %s was killed: %s", agentID, reason),
 	}
+}
+
+// maxNotificationResultChars bounds the result text carried inside a
+// notification: the model can call read_agent for the full output, so the
+// injected message only needs enough to act on.
+const maxNotificationResultChars = 2000
+
+// EnableSubagentNotifications connects the subagent manager's completion
+// hook to this agent's steering channel. A background subagent finishing
+// then reaches the model as a <task-notification> user message at the next
+// tool boundary (or the start of the next run when the agent is idle),
+// instead of the model having to poll read_agent. Call once on the ROOT
+// agent: children share the global manager and would double-deliver.
+func (a *Agent) EnableSubagentNotifications() {
+	subagent.GetAgentManager().RegisterCompletionHook(func(n subagent.AgentNotification) {
+		var notification TaskNotification
+		switch n.Status {
+		case subagent.AgentStatusCompleted:
+			notification = NewCompletionNotification(n.AgentID, clipNotificationResult(n.Result), n.Duration, 0)
+		case subagent.AgentStatusFailed:
+			notification = NewFailureNotification(n.AgentID, fmt.Errorf("%s", n.ErrMessage), n.Duration)
+		case subagent.AgentStatusCancelled:
+			notification = NewKilledNotification(n.AgentID, "cancelled by user")
+		default:
+			return
+		}
+		if n.Name != "" {
+			notification.Summary = fmt.Sprintf("Agent %s (%s): %s", n.Name, n.Type, notification.Summary)
+		}
+		a.Steer(FormatNotificationMessage(notification))
+	})
+}
+
+// clipNotificationResult bounds a notification's embedded result text.
+func clipNotificationResult(result string) string {
+	result = strings.TrimSpace(result)
+	if len(result) <= maxNotificationResultChars {
+		return result
+	}
+	return result[:maxNotificationResultChars] + "\n... [truncated — use read_agent for the full result]"
 }

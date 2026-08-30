@@ -121,9 +121,12 @@ func TestCompactSessionMessagesNeural(t *testing.T) {
 		t.Errorf("Important message (constraint) not preserved in compacted history")
 	}
 
-	// Check recent messages are preserved at the end
+	// Check recent messages are preserved at the end. Adjacent same-role
+	// messages are merged during compaction (sequence normalization), so the
+	// final message may carry the merged text — it must still end with the
+	// most recent content.
 	lastMsg := compacted[len(compacted)-1].TextContent()
-	if lastMsg != "Most recent message" {
+	if !strings.HasSuffix(lastMsg, "Most recent message") {
 		t.Errorf("expected most recent message to be at the end, got %q", lastMsg)
 	}
 }

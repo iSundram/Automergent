@@ -488,6 +488,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.modelHub, cmd = a.modelHub.Update(m)
 			return a, cmd
 		}
+		// The session browser owns the keyboard while visible: typing filters
+		// its list, so printable keys must not leak into the prompt input.
+		// (A confirmation prompt still outranks it.)
+		if a.sessionBrowser.Visible() && !a.confirm.Visible() {
+			sb, cmd := a.sessionBrowser.Update(m)
+			a.sessionBrowser = sb
+			if !a.sessionBrowser.Visible() {
+				a.layout()
+			}
+			return a, cmd
+		}
 		// Queue-strip actions (drop, pull back, highlight move) work while the
 		// input is focused, so they are claimed before the textarea sees them.
 		if a.focus == "input" && !a.browsing {
@@ -649,7 +660,21 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case components.SessionSelectedMsg:
 		if m.Session != nil {
 			if err := a.restoreSession(m.Session); err != nil {
-				a.statusBar.SetStatus("Session loaded (provider switch failed: " + err.Error() + ")")
+				a.statusBar.SetStatus("Session resume failed: " + err.Error())
+			}
+		}
+	case components.SessionDeletedMsg:
+		if m.Session != nil {
+			if err := a.deleteSession(m.Session.ID); err != nil {
+				a.statusBar.SetStatus("Delete failed: " + err.Error())
+			}
+		}
+	case sessionTitledMsg:
+		a.applySessionTitle(m)
+	case components.SessionRenamedMsg:
+		if m.Session != nil && strings.TrimSpace(m.Title) != "" {
+			if err := a.renameStoredSession(m.Session, m.Title); err != nil {
+				a.statusBar.SetStatus("Rename failed: " + err.Error())
 			}
 		}
 	case components.SelectorSelectedMsg:

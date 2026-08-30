@@ -211,8 +211,15 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		// A message queued during this run is delivered now that the turn is
 		// over. One per turn: the reply to the first may change whether the
 		// rest still make sense.
+		var cmds []tea.Cmd
+		if cmd := a.maybeGenerateSessionTitle(); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 		if cmd := a.drainQueue(); cmd != nil {
-			return cmd
+			cmds = append(cmds, cmd)
+		}
+		if len(cmds) > 0 {
+			return tea.Batch(cmds...)
 		}
 		return nil
 	case agent.EventCompacted:

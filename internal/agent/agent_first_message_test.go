@@ -151,9 +151,12 @@ func TestToolCategoryIsEphemeral(t *testing.T) {
 	if ag.toolProfile != nil {
 		t.Fatal("tool category/profile survived the request")
 	}
-	// With new intent-based system: intent identification + task planning + main call
-	if len(provider.toolCounts) != 3 || provider.toolCounts[0] != 0 || provider.toolCounts[1] != 0 || provider.toolCounts[2] != 1 {
-		t.Fatalf("expected intent+planning calls then personalized main call, tool counts=%v", provider.toolCounts)
+	// With the decomposer-based system: init decomposition + intent
+	// identification + task planning + main call. The mock returns "ok" for
+	// the decomposer (unparseable JSON), so it degrades to keyword routing
+	// but still consumes one provider call.
+	if len(provider.toolCounts) != 4 || provider.toolCounts[0] != 0 || provider.toolCounts[1] != 0 || provider.toolCounts[2] != 0 || provider.toolCounts[3] != 1 {
+		t.Fatalf("expected decompose+intent+planning calls then personalized main call, tool counts=%v", provider.toolCounts)
 	}
 	for _, message := range ag.sess.Messages {
 		if strings.Contains(message.TextContent(), "bug_fix") {
@@ -161,7 +164,7 @@ func TestToolCategoryIsEphemeral(t *testing.T) {
 		}
 	}
 	// No router system prompt should be present
-	if len(provider.systems) != 3 || strings.Contains(provider.systems[2], "tool personalization") {
+	if len(provider.systems) != 4 || strings.Contains(provider.systems[3], "tool personalization") {
 		t.Fatalf("old router system prompt leaked: %v", provider.systems)
 	}
 }
