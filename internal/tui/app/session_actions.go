@@ -236,11 +236,15 @@ func (a *App) resumeSession(id string) error {
 }
 
 // newSession saves the current conversation and swaps in a fresh session.
+// Session-scoped state (rewind checkpoints, API error history, usage stats)
+// is reset too — none of it may leak across sessions.
 func (a *App) newSession() {
 	if a.storage != nil && a.sess != nil && len(a.sess.Messages) > 0 {
 		_ = a.storage.Save(a.sess)
 	}
 	a.conversation.Clear()
+	a.checkpoints = nil
+	a.apiErrors = nil
 	a.sess = session.New()
 	a.sess.Provider, a.sess.Model = a.cfg.Provider, a.cfg.Model
 	a.sess.WorkDir = a.workDir
@@ -250,6 +254,9 @@ func (a *App) newSession() {
 	}
 	a.updateActiveTokens()
 	a.stats.TotalCost = 0
+	a.stats.InputTokens = 0
+	a.stats.OutputTokens = 0
+	a.header.SetTokens(0)
 	a.statusBar.SetStatus("New session started")
 }
 

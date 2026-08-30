@@ -122,6 +122,27 @@ func TestNewSessionSavesCurrentHistory(t *testing.T) {
 	}
 }
 
+func TestNewSessionResetsSessionScopedState(t *testing.T) {
+	app := newTestApp(t)
+	app.sess.AddMessage(ai.NewTextMessage(ai.RoleUser, "old turn"))
+	app.captureCheckpoint("old turn")
+	app.recordAPIError(apiErrorRecord{Message: "old failure"})
+	app.stats.InputTokens = 100
+	app.stats.OutputTokens = 50
+
+	app.handleSlashCommand("/new")
+
+	if len(app.checkpoints) != 0 {
+		t.Fatalf("expected checkpoints cleared, got %d", len(app.checkpoints))
+	}
+	if len(app.APIErrors()) != 0 {
+		t.Fatalf("expected API error history cleared, got %d", len(app.APIErrors()))
+	}
+	if app.stats.InputTokens != 0 || app.stats.OutputTokens != 0 {
+		t.Fatalf("expected usage stats reset, got in=%d out=%d", app.stats.InputTokens, app.stats.OutputTokens)
+	}
+}
+
 func TestProjectSessionsFiltersByWorkDir(t *testing.T) {
 	app := newTestApp(t)
 	app.workDir = "/projects/alpha"

@@ -74,6 +74,20 @@ func (a *App) showContextDetail() {
 	var b strings.Builder
 	b.WriteString("# Context Telemetry\n\n")
 
+	// Live context-window engine state (thresholds, usage, compaction health)
+	if stats := a.ag.ContextWindowStats(a.ag.Provider()); stats.EffectiveWindow > 0 {
+		b.WriteString(fmt.Sprintf("## Context Window\n- Raw limit: %d tokens\n- Effective window (summary reserved): %d\n- Auto-compact threshold: %d\n- Blocking limit: %d\n- Estimated usage: %d tokens (%d%%)\n",
+			stats.RawLimit, stats.EffectiveWindow, stats.AutoCompactThreshold, stats.BlockingLimit,
+			stats.EstimatedTokens, stats.EstimatedTokens*100/stats.EffectiveWindow))
+		if !stats.LastCompactedAt.IsZero() {
+			b.WriteString(fmt.Sprintf("- Last compaction: %s ago\n", time.Since(stats.LastCompactedAt).Round(time.Second)))
+		}
+		if stats.CircuitBreakerTripped {
+			b.WriteString(fmt.Sprintf("- ⚠ Compaction circuit breaker tripped (%d consecutive failures)\n", stats.CompactionFailures))
+		}
+		b.WriteString("\n")
+	}
+
 	// Adaptive token weight
 	if calc := a.ag.AdaptiveCalculator(); calc != nil {
 		b.WriteString(fmt.Sprintf("## Adaptive Token Estimation\n- Model: %s\n- Learned Weight: %.2f\n- Samples: %d\n\n",
@@ -138,6 +152,9 @@ func (a *App) compactContext() tea.Cmd {
 		}
 		compacted := a.ag.CompactSessionMessages(ctx, a.sess.Messages)
 		a.sess.SetMessages(compacted)
+		// The usage anchor described the pre-compaction prefix; drop it so
+		// token estimates are recomputed from the compacted history.
+		a.ag.InvalidateUsageAnchor()
 		// Update transcript with compacted messages
 		if mgr := a.ag.ContextManager(); mgr != nil {
 			if tm := mgr.TranscriptManager(); tm != nil {
