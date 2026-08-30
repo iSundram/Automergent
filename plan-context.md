@@ -2,11 +2,11 @@
 
 ## Executive Summary & Architecture Overview
 
-Automergent's context management system (`internal/context/`) is an advanced, production-grade architecture inspired by state-of-the-art coding agents (Claude Code, Codex, OpenCode). It spans **12 core subsystems**:
+Automergent's context management system (`internal/context/`) is an advanced, production-grade architecture inspired by state-of-the-art coding agents (the studied reference agents). It spans **12 core subsystems**:
 1. **Central Manager (`manager.go`)**: Coordinates budget, ranker, selector, staleness detector, dependency graph/analyzer, summarizer, transcript, adaptive calculator, and telemetry.
 2. **Context Assembler (`assembly.go`)**: Phase-aware window builder allocating budgets across system prompts, messages, tools, files, and working sets.
 3. **Compaction Pipeline (`compaction.go`, `pipeline.go`)**: 6-tier progressive degradation ladder (`ghost` → `truncate_middle` → `distill` → `snapshot` → `microcompact` → `full_compact` with probe verification).
-4. **JIT Memory Loader (`jit.go`)**: Tiered loading across Global (`~/.automergent/*.md`), Project (`AUTOMERGENT.md`, `.claude/CLAUDE.md`), and Subdirectory (`.automergent.md`) scopes.
+4. **JIT Memory Loader (`jit.go`)**: Tiered loading across Global (`~/.automergent/*.md`), Project (`AUTOMERGENT.md`, `CLAUDE.md`), and Subdirectory (`.automergent.md`) scopes.
 5. **Memory Store (`memory.go`)**: Persistent KV store with intent-based keyword relevance scoring.
 6. **Adaptive Token Calculator (`adaptive.go`)**: Char-count heuristic refined via EMA gradient descent against live API ground truth token counts.
 7. **Token Budget (`budget.go`)**: Dynamic allocation percentages across model context limits and safety margins.

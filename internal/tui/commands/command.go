@@ -2,6 +2,8 @@ package commands
 
 import (
 	"fmt"
+	"path"
+	"path/filepath"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -66,6 +68,17 @@ type Command struct {
 	// PromptTemplate is injected into the agent conversation when Type == CmdPrompt.
 	// Supports $ARGUMENTS and $1..$9 placeholder expansion.
 	PromptTemplate string
+	// Fork runs a prompt command as a background subagent with its own
+	// context instead of expanding it inline — the main conversation stays
+	// clean, and the result lands as a system message when the fork returns.
+	// Only meaningful with Type == CmdPrompt.
+	Fork bool
+	// Paths gates palette visibility on workspace activity: the command is
+	// only offered after a recently touched file matches one of these globs
+	// (e.g. ["*.go", "go.mod"] for Go-specific commands). Empty = always
+	// visible. Matching is path.Match semantics against both the full path
+	// and the base name.
+	Paths []string
 	// FullPageTitle is the title shown in the full-page overlay when Type == CmdFullPage.
 	FullPageTitle string
 	// Page builds the structured full-page view for this command when
@@ -132,6 +145,10 @@ type Handler func(Host, []string) Result
 type Result struct {
 	Cmd  tea.Cmd
 	Text string
+	// ShouldQuery sends Text to the agent as the next prompt after the
+	// command completes — for commands that gather state the model should
+	// act on.
+	ShouldQuery bool
 }
 
 func TextResult(text string) Result { return Result{Text: text} }
@@ -213,7 +230,9 @@ func (r *Registry) RegisterCustom(cmd Command, handler Handler) error {
 		Tier: cmd.Tier, Type: cmd.Type, Immediate: cmd.Immediate,
 		SubPalette: cmd.SubPalette, SubCommands: cmd.SubCommands,
 		PromptTemplate: cmd.PromptTemplate, FullPageTitle: cmd.FullPageTitle,
-		Page:       cmd.Page,
+		Fork:  cmd.Fork,
+		Paths: cmd.Paths,
+		Page:  cmd.Page,
 		Completion: cmd.Completion,
 		Source:     cmd.Source,
 		Hidden:     cmd.Hidden, Sensitive: cmd.Sensitive,
@@ -365,9 +384,22 @@ func (r *Registry) Dispatch(host Host, name string, args []string) (Result, erro
 
 func (r *Registry) PaletteItems(host Host) []components.PaletteItem {
 	items := make([]components.PaletteItem, 0, len(r.commands))
+	var recent []string
 	for _, cmd := range r.commands {
 		if cmd.Hidden {
 			continue
+		}
+		// Path-gated commands stay out of the palette until a recently
+		// touched file matches one of their globs. A nil host carries no
+		// workspace signal (offline palette construction, tests), so gating
+		// is skipped there.
+		if len(cmd.Paths) > 0 && host != nil {
+			if recent == nil {
+				recent = host.RecentFilePaths()
+			}
+			if !pathSetMatches(cmd.Paths, recent) {
+				continue
+			}
 		}
 		description := cmd.Description
 		if description == "" {
@@ -401,6 +433,26 @@ func (r *Registry) PaletteItems(host Host) []components.PaletteItem {
 		items = append(items, item)
 	}
 	return items
+}
+
+// pathSetMatches reports whether any file path matches any glob. Matching
+// runs against both the full (slash-normalized) path and the base name, so
+// "*.go" matches "internal/agent/agent.go" as well as "agent.go". Malformed
+// globs are skipped rather than failing the match.
+func pathSetMatches(globs, paths []string) bool {
+	for _, p := range paths {
+		full := filepath.ToSlash(p)
+		base := path.Base(full)
+		for _, g := range globs {
+			if ok, err := path.Match(g, full); err == nil && ok {
+				return true
+			}
+			if ok, err := path.Match(g, base); err == nil && ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // SubCommandPaletteItems returns sub-commands as PaletteItems for the palette.

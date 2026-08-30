@@ -140,7 +140,7 @@ func (a *App) detectRunCommands() []components.PaletteItem {
 func (a *App) fuzzyFilter(items []components.PaletteItem, filter string) []components.PaletteItem {
 	if filter == "" {
 		// Surface suggested/tier-prominent items first when unfiltered.
-		// Primary tier floats top, matching Claude's recently-used pinning.
+		// Primary tier floats top, matching the recently-used pinning pattern.
 		if len(items) <= 1 {
 			return items
 		}
@@ -298,6 +298,15 @@ func (a *App) handlePromptCommand(cmd commands.Command, args []string) tea.Cmd {
 		// Fall back to handler if no template.
 		return a.handleHandlerCommand(cmd, args)
 	}
+	// Fork commands run in a background subagent with their own context;
+	// the expansion is recorded in the conversation for provenance and the
+	// result arrives as a system message.
+	if cmd.Fork {
+		a.AddUserCommandMessage(cmd.Name, prompt)
+		a.StartForkedAgent(cmd.Name, prompt)
+		a.statusBar.SetStatus("❯ /" + cmd.Name + " running in background agent")
+		return nil
+	}
 	agentPrompt := fmt.Sprintf("<command-message>/%s</command-message>\n%s", cmd.Name, prompt)
 	// startAgentCommand renders the "/command" chip bubble in the
 	// conversation; a plain startAgent here would echo the template a second
@@ -369,6 +378,10 @@ func (a *App) handleHandlerCommand(cmd commands.Command, args []string) tea.Cmd 
 func (a *App) deliverCommandResult(result commands.Result) tea.Cmd {
 	if result.Text != "" {
 		a.conversation.AddMessage("system", result.Text, false)
+	}
+	// ShouldQuery: the gathered state becomes the agent's next prompt.
+	if result.ShouldQuery && result.Text != "" {
+		return tea.Batch(result.Cmd, a.startAgent(result.Text))
 	}
 	return result.Cmd
 }

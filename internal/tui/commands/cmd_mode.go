@@ -8,22 +8,26 @@ import (
 )
 
 // /mode — change the agent mode (manual, accept-edits, auto, plan).
+// "edit" stays accepted as a legacy input alias for "manual" (agent.IsValid
+// and CanonicalMode handle it) but is never offered as a choice.
 
 func modeCommand() Command {
+	modes := agent.AllModes()
+	subs := make([]SubCommand, 0, len(modes))
+	for _, m := range modes {
+		subs = append(subs, SubCommand{Name: m, Description: agent.ModeDescription(m), Handler: handleMode})
+	}
 	return Command{
 		Name:        "mode",
 		Description: "Change agent mode",
 		Category:    "AI & Model",
 		Icon:        "󰒓",
-		ArgsHint:    "<edit|plan>",
+		ArgsHint:    "<manual|accept-edits|auto|plan>",
 		Tier:        TierSecondary,
 		SubPalette:  "mode",
-		SubCommands: []SubCommand{
-			{Name: "edit", Description: "Edit mode (manual approval)", Handler: handleMode},
-			{Name: "plan", Description: "Plan mode (read-only)", Handler: handleMode},
-		},
+		SubCommands: subs,
 		Completion: func(h Host, partial string) []string {
-			return prefixFilter([]string{"edit", "plan"}, partial)
+			return prefixFilter(modes, partial)
 		},
 		SupportsHeadless: true,
 	}
@@ -54,8 +58,13 @@ func handleMode(host Host, args []string) Result {
 
 	mode = agent.CanonicalMode(mode)
 	host.SetMode(mode)
-	host.AddSystemMessage(fmt.Sprintf("Mode switched to %s — %s", mode, agent.ModeDescription(mode)))
-	host.PersistProjectConfig()
+	msg := fmt.Sprintf("Mode switched to %s — %s", mode, agent.ModeDescription(mode))
+	// A mode that fails to persist silently reverts on restart — say so,
+	// matching the shift+tab cycle's "(not saved: ...)" notice.
+	if err := host.PersistProjectConfig(); err != nil {
+		msg += " (not saved: " + err.Error() + ")"
+	}
+	host.AddSystemMessage(msg)
 	host.SetStatus("Mode updated")
 	return Done(nil)
 }

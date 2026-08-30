@@ -17,8 +17,6 @@ func TestSessionLifecycleDelegation(t *testing.T) {
 	}{
 		{"new", handleNew, func(m *mockHost) bool { return m.newSessionCalls == 1 }, "NewSession called"},
 		{"sessions", handleSessions, func(m *mockHost) bool { return m.showSessionsCalls == 1 }, "ShowSessions called"},
-		{"clear", handleClear, func(m *mockHost) bool { return m.clearConversationCalls == 1 }, "ClearConversationView called"},
-		{"reset", handleReset, func(m *mockHost) bool { return m.resetHistoryCalls == 1 }, "ResetSessionHistory called"},
 	}
 	for _, tc := range cases {
 		m := NewMockHost()
@@ -26,29 +24,6 @@ func TestSessionLifecycleDelegation(t *testing.T) {
 		if !tc.assert(m) {
 			t.Errorf("/%s: %s", tc.name, tc.message)
 		}
-	}
-}
-
-func TestResetRefusedWhileAgentRunning(t *testing.T) {
-	m := NewMockHost()
-	m.thinking = true
-	handleReset(m, nil)
-	if m.resetHistoryCalls != 0 {
-		t.Fatal("/reset must not wipe history while the agent is running")
-	}
-	if len(m.commandErrors) == 0 {
-		t.Fatal("/reset while running should report an error")
-	}
-}
-
-func TestClearKeepsHistorySemanticsVisible(t *testing.T) {
-	m := NewMockHost()
-	handleClear(m, nil)
-	if m.clearConversationCalls != 1 {
-		t.Fatal("ClearConversationView not called")
-	}
-	if len(m.systemMessages) == 0 {
-		t.Fatal("/clear should leave in-view feedback that history is retained")
 	}
 }
 

@@ -180,6 +180,18 @@ func (d *Diff) TabCount() int {
 	return n
 }
 
+// FilePaths lists the paths of all file tabs in strip order (most recently
+// touched first). Backs path-gated command visibility: the recent-file set.
+func (d *Diff) FilePaths() []string {
+	out := make([]string, 0, len(d.tabs))
+	for _, idx := range d.visualOrder() {
+		if name := d.tabs[idx].Filename; name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
 // ActiveLabel returns the display path of the selected tab.
 func (d *Diff) ActiveLabel() string {
 	if c := d.current(); c != nil {
@@ -447,7 +459,10 @@ func (d Diff) View() string {
 		return ""
 	}
 	c := d.current()
-	fileMode := c != nil && c.Filename != ""
+	if c == nil {
+		return d.viewEmpty()
+	}
+	fileMode := c.Filename != ""
 
 	bg := d.styles.T.Background
 
@@ -555,6 +570,33 @@ func (d Diff) View() string {
 	// Fullscreen with solid background
 	return lipgloss.NewStyle().
 		Background(bg).
+		Foreground(d.styles.T.Text).
+		Width(d.width).
+		Height(d.height).
+		Padding(1, 2).
+		Render(view)
+}
+
+// viewEmpty renders the no-edits-yet state. View must stay nil-safe: /diff
+// and ctrl+w can open the pane before the agent has touched any file.
+func (d Diff) viewEmpty() string {
+	headerW := d.width - 4
+	if headerW < 1 {
+		headerW = 1
+	}
+	icon := lipgloss.NewStyle().Foreground(d.styles.T.Accent).Render("▸ ")
+	title := lipgloss.NewStyle().Bold(true).Foreground(d.styles.T.Text).Render("Workspace diff")
+	sep := lipgloss.NewStyle().Foreground(d.styles.T.BorderNormal).Render(strings.Repeat("─", headerW))
+	hint := d.styles.Dim.Render("No modified files yet — files the agent edits appear here as tabs.")
+
+	view := lipgloss.JoinVertical(lipgloss.Left,
+		icon+title,
+		sep,
+		"",
+		hint,
+	)
+	return lipgloss.NewStyle().
+		Background(d.styles.T.Background).
 		Foreground(d.styles.T.Text).
 		Width(d.width).
 		Height(d.height).

@@ -21,7 +21,7 @@ const (
 )
 
 // maxPaletteRows caps how many rows the palette shows regardless of terminal
-// height — Claude Code keeps the picker compact instead of swallowing the
+// height — the picker stays compact instead of swallowing the
 // conversation on tall terminals.
 const maxPaletteRows = 15
 

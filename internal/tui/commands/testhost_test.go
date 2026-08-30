@@ -11,6 +11,18 @@ import (
 	"github.com/iSundram/Automergent/internal/config"
 )
 
+// goalCall records one /goal SetGoal invocation.
+type goalCall struct {
+	objective   string
+	tokenBudget int
+}
+
+// forkedAgentCall records one StartForkedAgent invocation.
+type forkedAgentCall struct {
+	command string
+	prompt  string
+}
+
 // mockHost implements Host for testing command handlers.
 type mockHost struct {
 	mu sync.Mutex
@@ -65,8 +77,19 @@ type mockHost struct {
 	ensureProviderConfigCalls []string
 	providerConfigs           map[string]config.ProviderConfig
 	persistProjectConfigCalls int
+	// persistProjectConfigErr, when non-nil, makes PersistProjectConfig fail
+	// so tests can pin failure-path handling.
+	persistProjectConfigErr error
 
 	setModeCalls []string
+
+	// Goal tracking
+	setGoalCalls []goalCall
+	goalActions  []string
+
+	// Forked agents + recent files
+	forkedAgentCalls []forkedAgentCall
+	recentFilePaths  []string
 
 	refreshModelsCalls int
 	testProviderCalls  []string
@@ -87,10 +110,9 @@ type mockHost struct {
 
 	newSessionCalls        int
 	showSessionsCalls      int
+	showArtifactCalls      int
 	resumeSessionCalls     []string
 	deleteSessionCalls     []string
-	clearConversationCalls int
-	resetHistoryCalls      int
 
 	reviewMode      bool
 	showingFileTree bool
@@ -180,6 +202,9 @@ func (m *mockHost) Reset() {
 	m.ensureProviderConfigCalls = nil
 	m.persistProjectConfigCalls = 0
 	m.setModeCalls = nil
+	m.setGoalCalls = nil
+	m.goalActions = nil
+	m.forkedAgentCalls = nil
 	m.apiErrors = nil
 	m.clearAPIErrorCalls = 0
 	m.toggleFileTreeCalls = 0
@@ -192,8 +217,6 @@ func (m *mockHost) Reset() {
 	m.showSessionsCalls = 0
 	m.resumeSessionCalls = nil
 	m.deleteSessionCalls = nil
-	m.clearConversationCalls = 0
-	m.resetHistoryCalls = 0
 	m.showStatsCalls = 0
 	m.showHelpCalls = 0
 	m.setThemeCalls = nil
@@ -495,7 +518,7 @@ func (m *mockHost) PersistProjectConfig() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.persistProjectConfigCalls++
-	return nil
+	return m.persistProjectConfigErr
 }
 
 func (m *mockHost) Mode() string {
@@ -548,6 +571,12 @@ func (m *mockHost) ShowSessions() {
 	m.showSessionsCalls++
 }
 
+func (m *mockHost) ShowArtifacts() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.showArtifactCalls++
+}
+
 func (m *mockHost) ResumeSession(id string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -560,18 +589,6 @@ func (m *mockHost) DeleteSession(id string) error {
 	defer m.mu.Unlock()
 	m.deleteSessionCalls = append(m.deleteSessionCalls, id)
 	return nil
-}
-
-func (m *mockHost) ClearConversationView() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.clearConversationCalls++
-}
-
-func (m *mockHost) ResetSessionHistory() {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.resetHistoryCalls++
 }
 
 func (m *mockHost) ShowingFileTree() bool {
@@ -655,6 +672,57 @@ func (m *mockHost) RecapSnapshot() RecapInfo {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.recap
+}
+
+func (m *mockHost) SetGoal(objective string, tokenBudget int) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.setGoalCalls = append(m.setGoalCalls, goalCall{objective, tokenBudget})
+}
+
+func (m *mockHost) GoalSnapshot() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.setGoalCalls) == 0 {
+		return "No goal set. Use /goal <objective> to set one."
+	}
+	last := m.setGoalCalls[len(m.setGoalCalls)-1]
+	return "Goal (active): " + last.objective
+}
+
+func (m *mockHost) GoalAction(action string) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if len(m.setGoalCalls) == 0 {
+		return "No goal set."
+	}
+	m.goalActions = append(m.goalActions, action)
+	switch action {
+	case "clear":
+		m.setGoalCalls = nil
+		return "Goal cleared."
+	case "pause":
+		return "Goal paused — continuation loop stopped. Use /goal resume to restart."
+	case "resume":
+		return "Goal resumed — continuation loop restarts after the next turn."
+	case "continue":
+		return "Goal continuation counter reset. Continuing..."
+	}
+	return ""
+}
+
+func (m *mockHost) RecentFilePaths() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]string, len(m.recentFilePaths))
+	copy(out, m.recentFilePaths)
+	return out
+}
+
+func (m *mockHost) StartForkedAgent(command, prompt string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.forkedAgentCalls = append(m.forkedAgentCalls, forkedAgentCall{command, prompt})
 }
 
 func (m *mockHost) SearchWorkspace(query string) string {

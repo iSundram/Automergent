@@ -116,6 +116,13 @@ func (a *App) handleEscape() tea.Cmd {
 		a.layout()
 		return nil
 
+	// 6b. Inline artifact review browser.
+	case a.artifactBrowser.Visible():
+		a.artifactBrowser.Hide()
+		a.disarmEscape()
+		a.layout()
+		return nil
+
 	// 7. Completion palette. Typed text is deliberately kept: ESC here means
 	//    "stop suggesting", not "throw away what I wrote".
 	case a.palette.Visible():

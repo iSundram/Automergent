@@ -339,6 +339,14 @@ func (t *TaskTool) Schema() map[string]any {
 				"type":        "string",
 				"description": "Optional model override.",
 			},
+			"inherit_context": map[string]any{
+				"type":        "boolean",
+				"description": "Fork: the agent starts with a copy of this conversation as context instead of a clean slate. Use when the task depends on the discussion so far. The copy is large — prefer a self-contained prompt when possible.",
+			},
+			"resume_agent_id": map[string]any{
+				"type":        "string",
+				"description": "Resume: continue a previously spawned agent's conversation (agent_id from an earlier task call) instead of starting a new one. The agent keeps its session history and memory.",
+			},
 		},
 		"required": []string{"agent_type", "prompt"},
 	}
@@ -358,6 +366,8 @@ func (t *TaskTool) Execute(ctx context.Context, args map[string]any) (tools.Resu
 	name, _ := tools.StringArg(args, "name")
 	description, _ := tools.StringArg(args, "description")
 	model, _ := tools.StringArg(args, "model")
+	resumeID, _ := tools.StringArg(args, "resume_agent_id")
+	fork, _ := tools.ArgBool(args, "inherit_context")
 
 	mode := "sync"
 	if m, ok := tools.StringArg(args, "mode"); ok {
@@ -369,7 +379,19 @@ func (t *TaskTool) Execute(ctx context.Context, args map[string]any) (tools.Resu
 		return tools.Result{IsError: true, Content: fmt.Sprintf("invalid agent_type: %s", agentTypeStr)}, nil
 	}
 
-	agentID := GetAgentManager().NextID(name)
+	// Resume keeps the original agent's ID so its sidechain transcript,
+	// memory, and history continue; a fresh spawn gets a new one.
+	agentID := resumeID
+	if agentID == "" {
+		agentID = GetAgentManager().NextID(name)
+	} else if inst, ok := GetAgentManager().Get(agentID); ok {
+		inst.mu.Lock()
+		inst.Status = AgentStatusRunning
+		inst.Prompt = prompt
+		inst.mu.Unlock()
+	} else {
+		return tools.Result{IsError: true, Content: fmt.Sprintf("unknown resume_agent_id: %s (spawned agents only stay resumable in this session)", agentID)}, nil
+	}
 
 	agent := &AgentInstance{
 		ID:        agentID,
@@ -388,8 +410,15 @@ func (t *TaskTool) Execute(ctx context.Context, args map[string]any) (tools.Resu
 	GetAgentManager().NoteSpawn(agentID, AgentIDFrom(ctx))
 
 	// Every turn this instance runs is tagged with its own ID, which is how the
-	// executor knows which instance's progress it is reporting.
+	// executor knows which instance's progress it is reporting. Fork and
+	// resume ride the same context.
 	ctx = WithAgentID(ctx, agentID)
+	if resumeID != "" {
+		ctx = WithResumeAgentID(ctx, resumeID)
+	}
+	if fork {
+		ctx = WithForkContext(ctx)
+	}
 
 	finish := func(result string, err error, status AgentStatus) {
 		if err != nil {

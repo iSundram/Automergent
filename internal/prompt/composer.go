@@ -447,10 +447,10 @@ func (c *PromptComposer) getAvailableTools() []string {
 	}
 	
 	phaseTools := map[shared.AgentPhase][]string{
-		shared.PhaseInit:     {"bash", "read", "glob", "grep"},           // classify only, no task
-		shared.PhaseExplore:  {"glob", "grep", "read", "bash"},           // read-only exploration, NO task
-		shared.PhasePlan:     {"read", "write", "bash", "task"},          // planning + can delegate research
-		shared.PhaseBuild:    {"edit", "bash", "write", "read", "task", "glob", "grep"}, // full + todo
+		shared.PhaseInit:    {"bash", "read_file", "glob", "grep"},                              // classify only, no task
+		shared.PhaseExplore: {"glob", "grep", "read_file", "bash"},                              // read-only exploration, NO task
+		shared.PhasePlan:    {"read_file", "write_file", "bash", "task"},                        // planning + can delegate research
+		shared.PhaseBuild:   {"edit_file", "bash", "write_file", "read_file", "task", "glob", "grep"}, // full + todo
 	}
 	
 	if tools, ok := phaseTools[c.phase]; ok {

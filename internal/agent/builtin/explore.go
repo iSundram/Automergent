@@ -30,7 +30,7 @@ Rules:
 - Summarize large code sections rather than dumping raw content
 - If you encounter errors, investigate before reporting failure`,
 		Model:       "",
-		Tools:       []string{"read", "grep", "glob", "bash"},
+		Tools:       []string{"read_file", "grep", "glob", "bash"},
 		Color:       "blue",
 		Effort:      agentdef.EffortMedium,
 		Source:      agentdef.SourceBuiltin,
@@ -41,9 +41,9 @@ Rules:
 		// the per-agent overrides that used to live here.
 		
 		PhaseTools: map[shared.AgentPhase][]string{
-			shared.PhaseInit:     {"bash", "read", "glob", "grep"},
-			shared.PhaseExplore:  {"glob", "grep", "read", "bash"},
-			shared.PhasePlan:     {"read", "write"},
+			shared.PhaseInit:     {"bash", "read_file", "glob", "grep"},
+			shared.PhaseExplore:  {"glob", "grep", "read_file", "bash"},
+			shared.PhasePlan:     {"read_file", "grep", "glob"},
 		},
 		PhaseMaxSteps: map[shared.AgentPhase]int{
 			shared.PhaseInit:     3,

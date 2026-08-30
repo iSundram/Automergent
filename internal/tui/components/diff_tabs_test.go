@@ -112,6 +112,20 @@ func TestPlainSetContentStillWorks(t *testing.T) {
 	}
 }
 
+func TestViewWithNoTabsRendersEmptyState(t *testing.T) {
+	// /diff can open the pane before any file was edited; View must not
+	// dereference a nil tab in that case.
+	d := visibleDiff()
+	d.Show()
+	view := stripANSI(d.View())
+	if !strings.Contains(view, "No modified files yet") {
+		t.Fatalf("empty pane should render the no-edits hint, got: %q", view)
+	}
+	if strings.Contains(view, "+0") {
+		t.Fatalf("empty pane must not render add/del counters, got: %q", view)
+	}
+}
+
 func TestMinimapSmallFileFitsScreen(t *testing.T) {
 	// File smaller than the viewport: slider must span the whole track and
 	// change ticks must sit at their proportional position — no row should be

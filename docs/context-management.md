@@ -1,10 +1,8 @@
 # Context Window Management (Agent Loop)
 
 This describes the context engine that runs inside the agent's phase loop
-(`internal/agent/autocompact.go`). It is a port of the Claude Code
-auto-compact design, adapted to Automergent's multi-phase arc
-(init → explore → plan → build). The design analysis it follows lives in
-`refs/claude-code-context-management.md`.
+(`internal/agent/autocompact.go`), adapted to Automergent's multi-phase arc
+(init → explore → plan → build).
 
 ## Where it runs
 
@@ -73,7 +71,7 @@ EARLIER, never later than the buffered threshold.
 `tokenCountWithEstimation` anchors on the last provider-reported usage
 (input + output + cache hits) for the message prefix it covered, plus a
 rough chars/4 estimate for everything appended since — the same
-anchor-plus-estimate scheme Claude Code uses. The anchor is invalidated
+anchor-plus-estimate scheme the reference agent uses. The anchor is invalidated
 whenever messages are rewritten in place (compaction, ghosting, manual
 compact via `InvalidateUsageAnchor`).
 

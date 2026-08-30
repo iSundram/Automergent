@@ -101,7 +101,7 @@ func TestRunFirstMessagePreservesOriginalPrompt(t *testing.T) {
 	}
 }
 
-// Claude-style: there is NO rule-based bypass. Even greetings reach the
+// There is NO rule-based bypass. Even greetings reach the
 // model so context, memory and tone stay coherent.
 func TestGreetingGoesThroughProvider(t *testing.T) {
 	provider := &firstMessageRecordingProvider{}

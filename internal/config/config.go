@@ -31,6 +31,12 @@ type Config struct {
 	AutoCompressAt        float64 `mapstructure:"autoCompressAt" yaml:"autoCompressAt"`
 	CompressionKeepRecent int     `mapstructure:"compressionKeepRecent" yaml:"compressionKeepRecent"`
 
+	// FastModel is the cheap/fast model read-only subagents (explore,
+	// review) run on when their definition does not pin a model — the
+	// reference agent's Explore→haiku routing. Empty means "use the main
+	// model".
+	FastModel string `mapstructure:"fastModel" yaml:"fastModel,omitempty"`
+
 	MaxAutoReadFileSize int      `mapstructure:"maxAutoReadFileSize" yaml:"maxAutoReadFileSize"`
 	MaxTreeFiles        int      `mapstructure:"maxTreeFiles" yaml:"maxTreeFiles"`
 	MaxTreeDepth        int      `mapstructure:"maxTreeDepth" yaml:"maxTreeDepth"`

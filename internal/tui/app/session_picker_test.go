@@ -150,8 +150,10 @@ func TestSessionPickerScrollAndTheme(t *testing.T) {
 		s := session.New()
 		s.Title = "Session " + string(rune('A'+i))
 		s.WorkDir = "/root/OweCode"
-		s.UpdatedAt = time.Now().Add(-time.Duration(i) * time.Hour)
 		s.AddMessage(ai.NewTextMessage(ai.RoleUser, "hi"))
+		// AddMessage bumps UpdatedAt to now, so age it afterwards — otherwise
+		// every session ties on UpdatedAt and the list order is arbitrary.
+		s.UpdatedAt = time.Now().Add(-time.Duration(i) * time.Hour)
 		if err := storage.Save(s); err != nil {
 			t.Fatal(err)
 		}

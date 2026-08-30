@@ -90,7 +90,7 @@ func (c *Conversation) renderAssistant(m ConversationMsg, isLast bool, prevTool 
 	case m.IsError:
 		content = c.styles.Error.MaxWidth(bodyW).Render(strings.TrimSpace(m.Content))
 	case liveStreaming:
-		content = c.streamingBody(m.Content, bodyW)
+		content = c.streamingBody(m.Content, bodyW, liveStreaming)
 	default:
 		// MarkdownStream, not MarkdownWithWidth: a finished answer must occupy
 		// exactly the lines it occupied a tick earlier, while it was still
@@ -107,7 +107,9 @@ func (c *Conversation) renderAssistant(m ConversationMsg, isLast bool, prevTool 
 // streamingBody renders partial assistant text through the incremental
 // streamer: finalized blocks come from cache, the open block costs one render,
 // and the partial line is styled inline so markers never show as literals.
-func (c *Conversation) streamingBody(content string, width int) string {
+// showCursor controls whether the block-cursor glyph is appended; pass false
+// once the stream has ended so the ▌ does not linger on the final frame.
+func (c *Conversation) streamingBody(content string, width int, showCursor bool) string {
 	if strings.TrimSpace(content) == "" {
 		return ""
 	}
@@ -121,7 +123,7 @@ func (c *Conversation) streamingBody(content string, width int) string {
 		s.SetWidth(width)
 		s.Write(content)
 	}
-	return s.View(true)
+	return s.View(showCursor)
 }
 
 func wrapPlain(s string, width int) string {

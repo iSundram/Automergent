@@ -251,9 +251,21 @@ func (a *App) ToggleFileTree() {
 	a.layout()
 }
 
+// ToggleDiffPane backs /diff. It mirrors the ctrl+w keybinding semantics:
+// an empty pane is never opened — with no edits there is nothing to review —
+// and opening reports how many modified files are queued.
 func (a *App) ToggleDiffPane() {
+	if !a.diffPane.Visible() && a.diffPane.TabCount() == 0 {
+		a.statusBar.SetStatus("No modified files yet")
+		return
+	}
 	a.diffPane.Toggle()
 	a.layout()
+	if a.diffPane.Visible() {
+		a.statusBar.SetStatus(fmt.Sprintf("%d modified file(s)", a.diffPane.TabCount()))
+	} else {
+		a.statusBar.SetStatus("Diff pane closed")
+	}
 }
 
 func (a *App) ToggleReviewMode() {
@@ -276,20 +288,16 @@ func (a *App) ShowSessions() {
 	a.showSessions()
 }
 
+func (a *App) ShowArtifacts() {
+	a.showArtifacts()
+}
+
 func (a *App) ResumeSession(id string) error {
 	return a.resumeSession(id)
 }
 
 func (a *App) DeleteSession(id string) error {
 	return a.deleteSession(id)
-}
-
-func (a *App) ClearConversationView() {
-	a.clearConversationView()
-}
-
-func (a *App) ResetSessionHistory() {
-	a.resetSessionHistory()
 }
 
 func (a *App) ExportConversation(path string) error {
@@ -460,6 +468,87 @@ func (a *App) StorageHealth() error {
 		return err
 	}
 	return nil
+}
+
+// SetGoal installs a new autonomy objective (backs /goal <objective>).
+func (a *App) SetGoal(objective string, tokenBudget int) {
+	a.setGoal(objective, tokenBudget)
+}
+
+// GoalSnapshot renders the current goal state for /goal status output.
+func (a *App) GoalSnapshot() string {
+	return a.goalSnapshot()
+}
+
+// GoalAction applies a goal lifecycle action and returns the message to
+// show the user. Unknown actions return "" (the command reports usage).
+func (a *App) GoalAction(action string) string {
+	g := a.goal
+	switch action {
+	case "pause":
+		if g == nil {
+			return "No goal set."
+		}
+		g.paused = true
+		return "Goal paused — continuation loop stopped. Use /goal resume to restart."
+	case "resume":
+		if g == nil {
+			return "No goal set."
+		}
+		g.paused = false
+		return "Goal resumed — continuation loop restarts after the next turn."
+	case "continue":
+		if g == nil {
+			return "No goal set."
+		}
+		g.paused = false
+		g.turns = 0
+		g.blocked = 0
+		return "Goal continuation counter reset. Continuing..."
+	case "clear":
+		if g == nil {
+			return "No goal set."
+		}
+		a.goal = nil
+		return "Goal cleared."
+	}
+	return ""
+}
+
+// RecentFilePaths surfaces the files tracked by the diff pane — the
+// workspace's recently touched set — for path-gated command visibility.
+func (a *App) RecentFilePaths() []string {
+	return a.diffPane.FilePaths()
+}
+
+// StartForkedAgent runs a Fork prompt-command in a background subagent.
+// The result is delivered asynchronously and rendered as a system message
+// with the command's provenance.
+func (a *App) StartForkedAgent(command, prompt string) {
+	go func() {
+		out, err := a.ag.Execute(a.ctx, toolsagent.AgentTypeGeneralPurpose, prompt, "")
+		if a.sendToProgram != nil {
+			a.sendToProgram(forkedAgentDoneMsg{command: command, output: out, err: err})
+		}
+	}()
+}
+
+// forkedAgentDoneMsg carries a forked command's result back to the main loop.
+type forkedAgentDoneMsg struct {
+	command string
+	output  string
+	err     error
+}
+
+// handleForkedAgentDone renders a forked command's outcome in the main view.
+func (a *App) handleForkedAgentDone(m forkedAgentDoneMsg) {
+	if m.err != nil {
+		a.conversation.AddMessage("system", fmt.Sprintf("❯ /%s fork failed: %v", m.command, m.err), false)
+		a.statusBar.SetStatus("Forked command failed")
+		return
+	}
+	a.conversation.AddMessage("system", "❯ /"+m.command+" (forked agent):\n"+m.output, false)
+	a.statusBar.SetStatus("Forked command done")
 }
 
 // RecapSnapshot builds the deterministic recap digest from session internals.

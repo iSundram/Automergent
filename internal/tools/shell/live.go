@@ -14,6 +14,7 @@ package shell
 // the dock reads a string.
 
 import (
+	"bytes"
 	"strings"
 	"sync/atomic"
 )
@@ -48,27 +49,56 @@ func tailLines(s string, n int) (lines []string, hidden int) {
 	return all[len(all)-n:], len(all) - n
 }
 
-// noteStdout appends p to the session's stdout buffer and refreshes the cached
-// tail. Callers must NOT hold the session lock.
+// noteStdout appends p to the session's stdout view and refreshes the cached
+// tail. The write goes to the durable output file first, then the bounded
+// RAM buffer (see trimBufferLocked). Callers must NOT hold the session lock.
 func (s *AsyncSession) noteStdout(p []byte) {
+	s.noteFileOutput(p)
 	s.mu.Lock()
 	s.Stdout.Write(p)
+	s.trimBufferLocked(s.Stdout, &s.stdoutReadPos)
 	if line := lastNonEmptyLine(string(p)); line != "" {
 		s.lastLine.Store(&line)
 	}
 	s.mu.Unlock()
+	s.noteGrowth()
 }
 
-// noteStderr appends p to the session's stderr buffer, refreshes the cached
+// noteStderr appends p to the session's stderr view, refreshes the cached
 // tail and raises the stderr flag. Callers must NOT hold the session lock.
 func (s *AsyncSession) noteStderr(p []byte) {
+	s.noteFileOutput(p)
 	s.mu.Lock()
 	s.Stderr.Write(p)
+	s.trimBufferLocked(s.Stderr, &s.stderrReadPos)
 	s.sawStderr.Store(true)
 	if line := lastNonEmptyLine(string(p)); line != "" {
 		s.lastLine.Store(&line)
 	}
 	s.mu.Unlock()
+	s.noteGrowth()
+}
+
+// trimBufferLocked bounds ONE RAM output buffer: when it exceeds
+// maxSessionBufferBytes the front is dropped down to half the cap and the
+// stream's read position is adjusted (clamped at zero — the reader is told
+// about the truncation and pointed at the output file). The durable copy in
+// the file is untouched. Caller must hold the session lock.
+func (s *AsyncSession) trimBufferLocked(buf *bytes.Buffer, readPos *int) {
+	if buf.Len() <= maxSessionBufferBytes {
+		return
+	}
+	drop := buf.Len() - maxSessionBufferBytes/2
+	rest := append([]byte(nil), buf.Bytes()[drop:]...)
+	buf.Reset()
+	buf.Write(rest)
+	s.truncated = true
+	if *readPos > 0 {
+		*readPos -= drop
+		if *readPos < 0 {
+			*readPos = 0
+		}
+	}
 }
 
 // LastLine returns the newest non-empty output line seen on either stream, or

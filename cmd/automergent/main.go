@@ -403,6 +403,16 @@ func run(cmd *cobra.Command, args []string) error {
 	// messages instead of waiting for a read_agent poll.
 	ag.EnableSubagentNotifications()
 
+	// Shell watchdog events (interactive-prompt stalls, output-cap kills)
+	// reach the model the same way, and the shell's persistent working
+	// directory starts from the launch directory.
+	if wd, err := os.Getwd(); err == nil {
+		toolsShell.SetOriginalCwd(wd)
+	}
+	toolsShell.RegisterModelNotification(func(message string) {
+		ag.Steer(message)
+	})
+
 	// Wire MCP bridge to agent for event emission
 	if mcpBr != nil {
 		mcpBr.SetAgent(ag)

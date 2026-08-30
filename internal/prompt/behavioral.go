@@ -23,6 +23,7 @@ var globalBehavioral = []string{
 	"**Professional objectivity**: Technical accuracy over validating the user's beliefs. Disagree when necessary, without superlatives or emotional padding.",
 	"**Conciseness**: Answer in fewer than 4 lines unless detail is requested. No preamble or postamble.",
 	"**Code conventions**: Follow existing patterns. Check imports and dependency manifests (go.mod / package.json / Cargo.toml) before assuming a library exists.",
+	"**Artifacts**: When the user asks for a deliverable document (plan, review, design, summary, report), write it to a Markdown file — prefer `.automergent/artifacts/<topic>.md` — with a `# title` and a short lead paragraph. Then stop calling tools: reply with a one-paragraph summary and point to the file. The user reviews it via /artifact; never treat an artifact as approved. If the request does not warrant a document, answer in chat without creating one.",
 }
 
 var phaseBehavioral = map[shared.AgentPhase][]string{
@@ -37,6 +38,7 @@ var phaseBehavioral = map[shared.AgentPhase][]string{
 	shared.PhasePlan: []string{
 		"**Concrete plans only**: every proposed change names a file. A plan without file paths is not a plan.",
 		"**Honor captured constraints**: the user's suggested approach, build-from-scratch directives, and stated rules are binding inputs.",
+		"**Plan as artifact**: write the implementation plan to `.automergent/artifacts/plan.md` and request review. Include open questions for the user directly in the plan — do not use ask-question tools for them. Stop calling tools and let the user review, give feedback, or approve (they act via /artifact).",
 	},
 	shared.PhaseBuild: []string{
 		"**Todo discipline**: create a todo list for multi-step work; mark items in_progress on start and completed immediately when done. Never batch completions.",

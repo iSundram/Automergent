@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"fmt"
 	"testing"
 
+	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/ai"
 )
 
@@ -121,8 +123,37 @@ func TestHandleProvider(t *testing.T) {
 	}
 }
 
-func TestHandleMode(t *testing.T) {
-	tests := []struct {
+// The /mode sub-palette must offer every user-selectable mode — it once
+// listed only "edit" (a deprecated alias) and "plan", hiding the other half.
+func TestModeSubCommandsCoverAllModes(t *testing.T) {
+	cmd := modeCommand()
+	want := agent.AllModes()
+	if len(cmd.SubCommands) != len(want) {
+		t.Fatalf("sub-palette has %d modes, want %d", len(cmd.SubCommands), len(want))
+	}
+	have := map[string]bool{}
+	for _, sub := range cmd.SubCommands {
+		have[sub.Name] = true
+		if sub.Description == "" {
+			t.Fatalf("sub-command %q has no description", sub.Name)
+		}
+	}
+	for _, m := range want {
+		if !have[m] {
+			t.Fatalf("sub-palette is missing mode %q", m)
+		}
+	}
+	if have["edit"] {
+		t.Fatal("sub-palette must not offer the deprecated \"edit\" alias")
+	}
+	for _, hint := range []string{cmd.ArgsHint} {
+		if !contains(hint, "accept-edits") || !contains(hint, "auto") {
+			t.Fatalf("ArgsHint must list all modes, got %q", cmd.ArgsHint)
+		}
+	}
+}
+
+func TestHandleMode(t *testing.T) {	tests := []struct {
 		name   string
 		args   []string
 		setup  func(*mockHost)
@@ -158,6 +189,21 @@ func TestHandleMode(t *testing.T) {
 			verify: func(m *mockHost, t *testing.T) {
 				if len(m.errorMessages) != 1 || !contains(m.errorMessages[0], "auto|plan") {
 					t.Fatalf("expected error for invalid mode, got: %v", m.errorMessages)
+				}
+			},
+		},
+		{
+			name: "persist failure is surfaced, not swallowed",
+			args: []string{"auto"},
+			setup: func(m *mockHost) {
+				m.persistProjectConfigErr = fmt.Errorf("disk full")
+			},
+			verify: func(m *mockHost, t *testing.T) {
+				if len(m.setModeCalls) != 1 || m.setModeCalls[0] != "auto" {
+					t.Fatalf("mode should still switch in-memory, got: %v", m.setModeCalls)
+				}
+				if len(m.systemMessages) != 1 || !contains(m.systemMessages[0], "not saved") {
+					t.Fatalf("persist failure must be reported, got: %v", m.systemMessages)
 				}
 			},
 		},

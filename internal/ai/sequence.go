@@ -5,6 +5,28 @@ import (
 	"slices"
 )
 
+// MergeConsecutiveAssistantMessages merges back-to-back assistant messages into
+// one. Consecutive assistant turns are illegal for all providers but can appear
+// after an interrupted agentic turn (partial assistant message saved, then
+// another assistant message appended on retry) or after autocompact rewrites.
+// Merging their content parts is safe because providers treat them as a single
+// turn regardless.
+func MergeConsecutiveAssistantMessages(messages []Message) []Message {
+	if len(messages) == 0 {
+		return messages
+	}
+	out := make([]Message, 0, len(messages))
+	for _, m := range messages {
+		if len(out) > 0 && out[len(out)-1].Role == RoleAssistant && m.Role == RoleAssistant {
+			// Merge content parts into the previous assistant message.
+			out[len(out)-1].Content = append(out[len(out)-1].Content, m.Content...)
+		} else {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 // RepairMissingToolResults inserts explicit error results for dangling tool
 // calls. This repairs sessions interrupted before the tool-result message was
 // persisted, allowing strict providers such as Google to accept the next turn.

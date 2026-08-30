@@ -32,7 +32,7 @@ Output format:
 - Suggest specific fixes when possible
 - End with a summary of overall code quality`,
 		Model:       "",
-		Tools:       []string{"read", "grep", "glob", "bash"},
+		Tools:       []string{"read_file", "grep", "glob", "bash"},
 		Color:       "yellow",
 		Effort:      agentdef.EffortHigh,
 		Source:      agentdef.SourceBuiltin,

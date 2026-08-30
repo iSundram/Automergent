@@ -82,6 +82,11 @@ type App struct {
 	spin              components.Spinner
 	confirm           components.Confirm
 	sessionBrowser    components.SessionBrowser
+	artifactBrowser   components.ArtifactBrowser
+
+	// artifacts are agent-produced deliverables (plans, reviews, docs)
+	// awaiting or carrying user review decisions; /artifact browses them.
+	artifacts []artifactRecord
 	selector          components.SelectorOverlay
 	selectorAction    func(index int)
 	stats             components.Stats
@@ -122,6 +127,16 @@ type App struct {
 	// read-only search roots added via /add-dir.
 	checkpoints     []conversationCheckpoint
 	extraSearchDirs []string
+
+	// fileWriteSnapshots captures a file's pre-write content at EventToolCall
+	// so EventToolDone can diff before→after and open a diff-pane tab —
+	// including writes that never asked for confirmation (accept-edits/auto
+	// mode, always-allow grants) and newly created files. Keyed by tool ID.
+	fileWriteSnapshots map[string]fileWriteSnapshot
+
+	// goal is the active autonomy objective driving the continuation loop
+	// (see goal.go). nil when no goal is set.
+	goal *goalState
 
 	// settledAgentRows records subagent live rows that reached a terminal
 	// state, so the tick stops rewriting them (see agent_rows.go).
@@ -224,11 +239,13 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		inspector:          components.NewInspector(styles),
 		passthroughCards:   make(map[string]bool),
 		settledAgentRows:   make(map[string]bool),
+		fileWriteSnapshots: make(map[string]fileWriteSnapshot),
 		queueStrip:         components.NewQueueStrip(styles),
 		taskBoard:          components.NewTaskBoard(styles),
 		spin:               components.NewSpinner(styles),
 		confirm:            components.NewConfirm(styles),
 		sessionBrowser:     components.NewSessionBrowser(styles),
+		artifactBrowser:    components.NewArtifactBrowser(styles),
 		selector:           components.NewSelectorOverlay(styles),
 		stats:              components.NewStats(styles),
 		helpOverlay:        components.NewHelpOverlay(styles),
@@ -253,6 +270,9 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	if wd, err := os.Getwd(); err == nil {
 		app.workDir = wd
 	}
+	// Pick up artifacts left in .automergent/artifacts/ by earlier sessions so
+	// /artifact works before the agent writes anything new.
+	app.seedArtifactsFromDisk()
 	// Load markdown custom commands (project + user roots) before help rows
 	// are derived, so they appear in the palette and help overlay.
 	if n, warnings := commands.LoadProjectAndUserCommands(app.commands, app.workDir); n > 0 || len(warnings) > 0 {
@@ -317,6 +337,9 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	// Initialize active token estimate
 	app.updateActiveTokens()
 	app.refreshChrome()
+	// Set the welcome empty state. Width/height are 0 at construction time;
+	// the state will be refreshed on the first WindowSizeMsg (resize event).
+	app.conversation.SetEmptyState(components.WelcomeView(app.styles, 0, 0))
 	return app
 }
 
@@ -499,6 +522,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return a, cmd
 		}
+		// The artifact review browser owns the keyboard the same way.
+		if a.artifactBrowser.Visible() && !a.confirm.Visible() {
+			ab, cmd := a.artifactBrowser.Update(m)
+			a.artifactBrowser = ab
+			if !a.artifactBrowser.Visible() {
+				a.layout()
+			}
+			return a, cmd
+		}
 		// Queue-strip actions (drop, pull back, highlight move) work while the
 		// input is focused, so they are claimed before the textarea sees them.
 		if a.focus == "input" && !a.browsing {
@@ -669,6 +701,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.statusBar.SetStatus("Delete failed: " + err.Error())
 			}
 		}
+	case components.ArtifactDecisionMsg:
+		a.applyArtifactDecision(m.Path, m.Approved)
+	case components.ArtifactApproveAllMsg:
+		a.applyArtifactApproveAll()
+	case components.ArtifactOpenMsg:
+		if cmd := a.openArtifactEditor(m.Path); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
+	case artifactEditorDoneMsg:
+		a.handleArtifactEditorDone(m)
 	case sessionTitledMsg:
 		a.applySessionTitle(m)
 	case components.SessionRenamedMsg:
@@ -750,6 +792,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.diffPane.Toggle()
 			a.layout()
 		}
+	case forkedAgentDoneMsg:
+		a.handleForkedAgentDone(m)
 	case mcpEventMsg:
 		a.handleMCPEvent(m.ev)
 	case mcpConfigChangeMsg:

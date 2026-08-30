@@ -519,6 +519,16 @@ func buildContents(messages []ai.Message) []*genai.Content {
 			}
 		}
 	}
+
+	// Gemini requires the last content to be from the user role.
+	// Strip any trailing model-role entries to avoid a 400 error:
+	// "Requests ending with a model turn are not supported."
+	// Only strip when a user-role content remains so we don't produce an
+	// empty slice for single-assistant-message edge cases.
+	for len(out) > 1 && out[len(out)-1].Role == string(genai.RoleModel) {
+		out = out[:len(out)-1]
+	}
+
 	return out
 }
 
@@ -726,6 +736,10 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 			WithResource(c.baseURL).
 			WithSuggestion("Check the provider API key and base URL (/api-key, /base-url)")
 	}
+	// Repair consecutive assistant messages that can appear after an
+	// interrupted agentic turn or autocompact rewrite. Must run before
+	// Validate() which rejects them as a hard error.
+	req.Messages = ai.MergeConsecutiveAssistantMessages(req.Messages)
 	if err := req.Validate(); err != nil {
 		return nil, automergentErrors.Wrap(err, automergentErrors.CodeInvalidInput,
 			"google: invalid message sequence")

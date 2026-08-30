@@ -7,8 +7,8 @@ import (
 )
 
 func TestProfileRasterize(t *testing.T) {
-	os.MkdirAll("/tmp/opencode", 0o755)
-	f, err := os.Create("/tmp/opencode/cpu.prof")
+	os.MkdirAll("/tmp/automergent", 0o755)
+	f, err := os.Create("/tmp/automergent/cpu.prof")
 	if err != nil {
 		t.Skip(err)
 	}

@@ -25,28 +25,8 @@ func (a *App) layout() {
 	a.providerStudio.SetSize(a.width, a.height)
 	a.modelHub.SetSize(a.width, a.height)
 
-	// Logo mode replaces the header: the wordmark is shown left-aligned
-	// on a fresh conversation (or while a project trust warning is
-	// visible) instead of the usual HUD bar.
-	logoH := 0
-	if a.showLogo() {
-		// 75% of the available width keeps the mark crisp without
-		// dominating the screen.
-		logoW := (a.width - 6) * 3 / 4
-		if logoW > 75 {
-			logoW = 75
-		}
-		if logoW < 15 {
-			logoW = 15
-		}
-		a.logo.SetWidth(logoW)
-		logoH = lipgloss.Height(a.logoView())
-	}
-
-	headerH := 0
-	if !a.showLogo() {
-		headerH = lipgloss.Height(a.header.View())
-	}
+	// Header is always shown (even on welcome/empty screen).
+	headerH := lipgloss.Height(a.header.View())
 	statusH := lipgloss.Height(a.statusBar.View())
 	footerH := 0
 	if !a.browsing {
@@ -76,6 +56,10 @@ func (a *App) layout() {
 	if a.sessionBrowser.Visible() && !a.confirm.Visible() && !a.browsing {
 		footerH += a.sessionBrowser.Height()
 	}
+	// Artifact review browser renders inline below the input.
+	if a.artifactBrowser.Visible() && !a.confirm.Visible() && !a.browsing {
+		footerH += a.artifactBrowser.Height()
+	}
 	// Bottom dock (background shells/agents) renders under the input.
 	// refreshDock runs before HasContent is consulted: the old order asked
 	// "is there anything to show" before asking "what is there to show", so the
@@ -102,14 +86,6 @@ func (a *App) layout() {
 	if mainH < 1 {
 		mainH = 1
 	}
-	// In logo mode the wordmark consumes part of the main area before
-	// the (empty) conversation begins.
-	if a.showLogo() {
-		mainH -= logoH
-		if mainH < 1 {
-			mainH = 1
-		}
-	}
 
 	// Diff is now fullscreen overlay - always set to full dimensions
 	a.diffPane.SetSize(a.width, a.height)
@@ -129,6 +105,7 @@ func (a *App) layout() {
 	}
 	a.conversation.SetSize(mainW, mainH)
 	a.sessionBrowser.SetSize(a.width, a.height*3/4)
+	a.artifactBrowser.SetSize(a.width, a.height*3/4)
 }
 
 // infoLineVisible reports whether the `└─` hint line should be rendered. It is
@@ -189,8 +166,6 @@ func (a *App) View() tea.View {
 	headerView := ""
 	if a.zenMode {
 		headerView = "" // zen mode hides chrome
-	} else if a.showLogo() {
-		headerView = a.logoView()
 	} else {
 		headerView = a.header.View()
 	}
@@ -262,6 +237,10 @@ func (a *App) View() tea.View {
 	// large empty area where the conversation used to be.
 	if a.sessionBrowser.Visible() && !a.confirm.Visible() && !a.browsing {
 		footer = append(footer, a.sessionBrowser.View())
+	}
+	// Artifact review browser renders inline as well.
+	if a.artifactBrowser.Visible() && !a.confirm.Visible() && !a.browsing {
+		footer = append(footer, a.artifactBrowser.View())
 	}
 	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, footer...))
 

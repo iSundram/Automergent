@@ -14,15 +14,15 @@ import (
 
 // Context-window management for the phase loop.
 //
-// This is our port of the Claude Code auto-compact design, adapted to the
+// This is our production-grade auto-compact design, adapted to the
 // multi-phase arc: every phase loop iteration passes through
 // manageContextWindow before building the provider request, which runs the
-// same ladder Claude Code runs — tool-result budgeting (ghost + micro
-// compact), auto-compact with a summary and a boundary marker, warning and
-// blocking states — and the loop additionally reacts to provider
+// same ladder leading terminal agents run — tool-result budgeting (ghost +
+// micro compact), auto-compact with a summary and a boundary marker, warning
+// and blocking states — and the loop additionally reacts to provider
 // CONTEXT_TOO_LONG errors with an emergency compaction retry.
 //
-// The knobs mirror the reference constants:
+// The knobs mirror proven production values:
 //   - the effective window reserves tokens for the compaction summary itself,
 //   - the auto-compact trigger fires early enough to leave room for one more
 //     turn of tool output (predictive growth),

@@ -40,9 +40,9 @@ Guidelines:
 		// the per-agent overrides that used to live here.
 		
 		PhaseTools: map[shared.AgentPhase][]string{
-			shared.PhaseInit:    {"bash", "read", "glob", "grep", "task"},
-			shared.PhasePlan:    {"read", "write", "bash", "task"},
-			shared.PhaseBuild:   {"edit", "bash", "write", "read", "task", "glob", "grep"},
+			shared.PhaseInit:    {"bash", "read_file", "glob", "grep"},
+			shared.PhasePlan:    {"read_file", "write_file", "bash", "task"},
+			shared.PhaseBuild:   {"edit_file", "bash", "write_file", "read_file", "task", "glob", "grep"},
 		},
 		PhaseMaxSteps: map[shared.AgentPhase]int{
 			shared.PhaseInit:    3,

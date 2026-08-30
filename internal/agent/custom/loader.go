@@ -19,7 +19,8 @@ type AgentFile struct {
 }
 
 // LoadAgentFiles loads agent definitions from a directory.
-// Supports both project (.agents/) and user (~/.config/opencode/agents/) directories.
+// Supports both project (.agents/) and user (~/.config/automergent/agents/)
+// directories.
 func LoadAgentFiles(dir string) ([]*AgentFile, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -179,9 +180,9 @@ func LoadAndRegister(registry interface {
 		}
 	}
 
-	// User agents: ~/.config/opencode/agents/
+	// User agents: ~/.config/automergent/agents/
 	if home, err := os.UserHomeDir(); err == nil {
-		userDir := filepath.Join(home, ".config", "opencode", "agents")
+		userDir := filepath.Join(home, ".config", "automergent", "agents")
 		if files, err := LoadAgentFiles(userDir); err == nil {
 			for _, af := range files {
 				if af.IsValid && af.Def != nil {

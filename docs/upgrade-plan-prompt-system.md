@@ -6,9 +6,8 @@ Scope: phase arc, prompt layering, agent fleet, per-tool/behavioral prompts, con
 
 Sources studied:
 - Our system: `internal/prompt/*`, `internal/agent/*`, `internal/context/*`, `internal/tools/agent/*`
-- `/tmp/opencode/system-prompts-and-models-of-ai-tools` (Claude Code 2.0, Sonnet 5, Cursor 2.0, Devin, Windsurf, VSCode Agent)
-- `/tmp/opencode/claude-code` source (context pipeline, subagents, prompt assembly)
-- `refs/*-agent-architecture.md`, `refs/*-system-prompts.md` (Codex, OpenCode)
+- The studied system-prompt corpus of leading terminal coding agents
+- `the reference agent source (context pipeline, subagents, prompt assembly)
 
 ---
 
@@ -280,7 +279,7 @@ Additions:
   "main"` and the task is parallelizable, the loop offers the `task` tool
   with that agent type preselected in the prompt (the model stays free to
   spawn directly).
-- **Agent descriptions in the main prompt** (Claude Code pattern): the
+- **Agent descriptions in the main prompt** (the reference agent pattern): the
   system prompt lists each subagent with name + WhenToUse so the model
   knows when to delegate — currently missing entirely.
 - **Per-agent phase prompts** already supported via `PhasePrompts`; give
@@ -344,7 +343,7 @@ Additions for this plan:
 
 For the record — these shipped before this plan was written and are NOT
 part of the remaining work:
-- Claude-Code-grade context ladder (`agent/autocompact.go` + tests)
+- reference-agent-grade context ladder (`agent/autocompact.go` + tests)
 - Boundary-marker compaction with pair preservation (`agent/context.go`)
 - User-context injection as meta user messages (`agent/usercontext.go`)
 - Platform-identity base prompts (all `bases/*.txt`)

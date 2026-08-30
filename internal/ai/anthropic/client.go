@@ -122,8 +122,6 @@ func (c *Client) Models(ctx context.Context) ([]ai.Model, error) {
 }
 
 func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.CompletionResponse, error) {
-	c.model = string(req.Messages[len(req.Messages)-1].Role)
-
 	messages := convertMessages(req.Messages)
 	body := map[string]any{
 		"model":       c.model,
@@ -195,6 +193,18 @@ func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.Com
 }
 
 func convertMessages(messages []ai.Message) []map[string]any {
+	// Anthropic requires the last message to be from the user.
+	// Strip any trailing assistant or tool messages so we never send a
+	// conversation that ends on a model turn (which causes a 400 error).
+	for len(messages) > 0 {
+		last := messages[len(messages)-1]
+		if last.Role == ai.RoleAssistant || last.Role == ai.RoleTool {
+			messages = messages[:len(messages)-1]
+		} else {
+			break
+		}
+	}
+
 	var result []map[string]any
 	for _, m := range messages {
 		role := "user"

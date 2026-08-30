@@ -32,7 +32,10 @@ import (
 func (a *Agent) userContext() map[string]string {
 	a.userCtxOnce.Do(func() {
 		ctx := map[string]string{}
-		if a.workDir != "" {
+		if a.workDir != "" && !a.omitProjectContext {
+			// Read-only subagents omit the project instructions and git
+			// snapshot: dead weight for them (they run git status themselves
+			// when needed), and dropping it is a large fleet-wide token save.
 			if instr := promptpkg.ProjectInstructions(a.workDir); instr != "" {
 				ctx["projectInstructions"] = instr
 			}
@@ -47,6 +50,12 @@ func (a *Agent) userContext() map[string]string {
 		}
 		if global := promptpkg.GlobalInstructions(); global != "" {
 			ctx["globalInstructions"] = global
+		}
+		// Persistent agent memory (subagents with a MemoryScope).
+		if a.agentMemory != nil {
+			if mem := a.agentMemory.Prompt(); mem != "" {
+				ctx["agentMemory"] = mem
+			}
 		}
 		a.userCtx = ctx
 	})
@@ -67,6 +76,7 @@ func prependUserContext(messages []ai.Message, context map[string]string) []ai.M
 	instr := context["projectInstructions"]
 	global := context["globalInstructions"]
 	rules := context["userRules"]
+	memory := context["agentMemory"]
 	git := context["gitStatus"]
 
 	var prefix []ai.Message
@@ -87,6 +97,9 @@ func prependUserContext(messages []ai.Message, context map[string]string) []ai.M
 			sb.WriteString("\n## User Rules (stated in conversation; binding)\n- ")
 			sb.WriteString(rules)
 			sb.WriteString("\n")
+		}
+		if memory != "" {
+			sb.WriteString("\n" + memory + "\n")
 		}
 		sb.WriteString("</project-instructions>\n")
 		prefix = append(prefix, ai.Message{

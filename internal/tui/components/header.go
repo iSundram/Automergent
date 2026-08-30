@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -22,6 +23,7 @@ type Header struct {
 	maxTokens      int
 	adaptiveWeight float64 // learned token estimation weight (1.0 = perfect)
 	cost           float64 // session cost in USD
+	workDir        string  // current working directory
 }
 
 // NewHeader creates a new Header component.
@@ -42,6 +44,7 @@ func (h *Header) SetActiveTokens(n int)       { h.activeTokens = n }
 func (h *Header) SetMaxTokens(n int)          { h.maxTokens = n }
 func (h *Header) SetAdaptiveWeight(w float64) { h.adaptiveWeight = w }
 func (h *Header) SetCost(usd float64)         { h.cost = usd }
+func (h *Header) SetWorkDir(dir string)       { h.workDir = dir }
 
 func (h *Header) getPhaseStyle() lipgloss.Style {
 	base := lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(h.styles.T.Background)
@@ -148,16 +151,22 @@ func (h Header) View() string {
 	// 3. Right Section: Cost, Tokens, Adaptive Weight & Bar
 	tokenStr := fmt.Sprintf("%s/%s", formatTokens(h.activeTokens), formatTokens(h.totalTokens))
 	usageInfo := lipgloss.NewStyle().Foreground(h.styles.T.Subtext).Render(tokenStr)
-	if h.cost > 0 {
-		costStyle := lipgloss.NewStyle().Foreground(h.styles.T.Green)
-		usageInfo = costStyle.Render(fmt.Sprintf("$%.4f", h.cost)) + " │ " + usageInfo
-	}
+	// Always show cost — even $0.00 — so the user has immediate context.
+	costStyle := lipgloss.NewStyle().Foreground(h.styles.T.Green)
+	usageInfo = costStyle.Render(fmt.Sprintf("$%.2f", h.cost)) + " │ " + usageInfo
 	if h.adaptiveWeight > 0 {
 		weightStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)
 		if h.adaptiveWeight < 0.8 || h.adaptiveWeight > 1.2 {
 			weightStyle = lipgloss.NewStyle().Foreground(h.styles.T.Yellow)
 		}
 		usageInfo += " " + weightStyle.Render(fmt.Sprintf("w:%.2f", h.adaptiveWeight))
+	}
+
+	// Working directory — shown when there's enough horizontal space.
+	if h.width >= 100 && h.workDir != "" {
+		dirName := filepath.Base(h.workDir)
+		dirStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)
+		usageInfo += "  " + dirStyle.Render("⌂ "+dirName)
 	}
 
 	barWidth := 0

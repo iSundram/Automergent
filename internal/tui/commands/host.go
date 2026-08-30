@@ -152,12 +152,13 @@ type Host interface {
 	// Session lifecycle
 	NewSession()
 	ShowSessions()
+	// ShowArtifacts opens the /artifact review browser for artifacts the
+	// agent produced this session.
+	ShowArtifacts()
 	ResumeSession(id string) error
 	// DeleteSession removes a stored session. Implementations must refuse
 	// the active session.
 	DeleteSession(id string) error
-	ClearConversationView()
-	ResetSessionHistory()
 	ExportConversation(path string) error
 	HandleApprovalsCommand(args []string)
 
@@ -180,6 +181,22 @@ type Host interface {
 	// Recap is a deterministic digest of the current conversation, computed by
 	// the host so session internals stay out of this package.
 	RecapSnapshot() RecapInfo
+
+	// Goal autonomy (backs /goal): SetGoal installs an objective with an
+	// optional token budget (0 = none); GoalSnapshot renders current state;
+	// GoalAction applies pause/resume/continue/clear and returns a
+	// user-facing result message.
+	SetGoal(objective string, tokenBudget int)
+	GoalSnapshot() string
+	GoalAction(action string) string
+
+	// RecentFilePaths lists workspace files touched recently (diff-pane
+	// tabs), backing path-gated command visibility (Command.Paths).
+	RecentFilePaths() []string
+	// StartForkedAgent runs a prompt in a background subagent with its own
+	// context; the result arrives asynchronously as a system message
+	// (backs Fork prompt-commands).
+	StartForkedAgent(command, prompt string)
 
 	// Conversation history: rewind points and branching
 	Checkpoints() []CheckpointInfo

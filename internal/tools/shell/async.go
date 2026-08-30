@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/iSundram/Automergent/internal/tools"
@@ -29,12 +30,29 @@ type AsyncSession struct {
 	Error     error
 	mu        sync.Mutex
 
+	// OutputPath is the session's durable output file (see output.go); the
+	// RAM buffers hold only a bounded tail of it. outputFile is the append
+	// handle, closed when the session completes.
+	OutputPath string
+	outputFile *os.File
+
+	// done closes when the process is reaped; the watchdogs exit on it.
+	done chan struct{}
+
+	// lastGrowth is the Unix-nano timestamp of the last output arrival,
+	// read by the stall watchdog without the lock.
+	lastGrowth atomicInt64
+
 	// Protect concurrent writes to Stdin
 	stdinMu sync.Mutex
 
 	// Track read positions to avoid returning duplicate output
 	stdoutReadPos int
 	stderrReadPos int
+
+	// truncated records that the RAM buffers were trimmed; read_shell then
+	// points at the output file for the full history.
+	truncated bool
 
 	// Cancel function for context-based cancellation
 	cancel context.CancelFunc
@@ -68,14 +86,6 @@ func (s *AsyncSession) Cancel() {
 	}
 }
 
-// Kill terminates the process.
-func (s *AsyncSession) Kill() error {
-	if s.Cmd.Process == nil {
-		return nil
-	}
-	return s.Cmd.Process.Kill()
-}
-
 // SessionManager manages async shell sessions.
 type SessionManager struct {
 	mu       sync.RWMutex
@@ -105,6 +115,9 @@ type SessionRecord struct {
 	ExitCode    int
 	Detached    bool
 	ErrMessage  string
+	// OutputPath is the session's durable output file; the record outlives
+	// the session, so post-completion reads go through it.
+	OutputPath string
 }
 
 // SessionNotification captures completion/failure updates.
@@ -263,6 +276,16 @@ func (m *SessionManager) UpdateStatus(id string, status SessionStatus, exitCode 
 	previousStatus := rec.Status
 	rec.Status = status
 	rec.ExitCode = exitCode
+	if session := m.sessions[id]; session != nil {
+		// OutputPath is immutable once attached; the session lock keeps the
+		// race detector satisfied without nesting risk (s.mu never acquires
+		// m.mu).
+		session.mu.Lock()
+		if session.OutputPath != "" {
+			rec.OutputPath = session.OutputPath
+		}
+		session.mu.Unlock()
+	}
 	if isTerminalSessionStatus(status) {
 		rec.CompletedAt = time.Now()
 	}
@@ -550,11 +573,13 @@ func (t *AsyncRunnerTool) executeSync(ctx context.Context, command, cwd string, 
 
 	// If no initial_wait requested, keep original blocking behavior.
 	if initialWait <= 0 {
-		cmd := exec.CommandContext(ctx, "bash", "-c", command)
-		if cwd != "" {
-			cmd.Dir = cwd
+		wrapped, cwdFile := wrapWithCwdCapture(command)
+		cmd := exec.CommandContext(ctx, shellBin(), "-c", wrapped)
+		if dir := resolveCwd(cwd); dir != "" {
+			cmd.Dir = dir
 		}
 		cmd.Env = env
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -565,6 +590,9 @@ func (t *AsyncRunnerTool) executeSync(ctx context.Context, command, cwd string, 
 		}
 
 		err := cmd.Run()
+		if captured := readCapturedCwd(cwdFile); captured != "" {
+			updateCwd(captured)
+		}
 
 		output := stdout.String()
 		if stderr.Len() > 0 {
@@ -588,11 +616,13 @@ func (t *AsyncRunnerTool) executeSync(ctx context.Context, command, cwd string, 
 	}
 
 	// initialWait > 0: start the process, collect initial output, then background if still running
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	if cwd != "" {
-		cmd.Dir = cwd
+	wrapped, cwdFile := wrapWithCwdCapture(command)
+	cmd := exec.CommandContext(ctx, shellBin(), "-c", wrapped)
+	if dir := resolveCwd(cwd); dir != "" {
+		cmd.Dir = dir
 	}
 	cmd.Env = env
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
@@ -627,9 +657,13 @@ func (t *AsyncRunnerTool) executeSync(ctx context.Context, command, cwd string, 
 		Stderr:  &stderrBuf,
 		Started: time.Now(),
 		cancel:  cancel,
+		done:    make(chan struct{}),
 	}
+	session.attachOutputFile()
+	session.noteGrowth()
 
 	GetManager().Create(shellID, session)
+	GetManager().startWatchdogs(session)
 
 	// send initial stdin and close to avoid hangs
 	if stdinInput != "" {
@@ -686,13 +720,21 @@ func (t *AsyncRunnerTool) executeSync(ctx context.Context, command, cwd string, 
 			session.ExitCode = cmd.ProcessState.ExitCode()
 		}
 		exitCode := session.ExitCode
+		if session.outputFile != nil {
+			_ = session.outputFile.Close()
+			session.outputFile = nil
+		}
 		session.mu.Unlock()
+		if captured := readCapturedCwd(cwdFile); captured != "" {
+			updateCwd(captured)
+		}
 		status := SessionStatusCompleted
 		if err != nil {
 			status = SessionStatusFailed
 		}
 		_ = GetManager().UpdateStatus(shellID, status, exitCode, err)
 		close(done)
+		close(session.done)
 	}()
 
 	select {
@@ -744,11 +786,21 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 		ctx, cancel = context.WithCancel(context.Background())
 	}
 
-	cmd := exec.CommandContext(ctx, "bash", "-c", command)
-	if cwd != "" {
-		cmd.Dir = cwd
+	// Persistent working directory: wrap the command with a pwd -P capture
+	// so the next command resumes where this one left off, and resolve the
+	// directory this command runs in (explicit cwd > tracked shell cwd >
+	// original dir, with recovery when the tracked dir vanished).
+	wrapped, cwdFile := wrapWithCwdCapture(command)
+	runDir := resolveCwd(cwd)
+
+	cmd := exec.CommandContext(ctx, shellBin(), "-c", wrapped)
+	if runDir != "" {
+		cmd.Dir = runDir
 	}
 	cmd.Env = env
+	// Own process group: Kill() signals the negative PID and takes the
+	// whole tree (pipelines, `&` children), not just the shell.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
@@ -788,10 +840,14 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 		Stderr:  &stderrBuf,
 		Started: time.Now(),
 		cancel:  cancel,
+		done:    make(chan struct{}),
 	}
+	session.attachOutputFile()
+	session.noteGrowth()
 
 	GetManager().Create(shellID, session)
 	GetManager().MarkBackground(shellID, true, detach)
+	GetManager().startWatchdogs(session)
 
 	// Send initial stdin if provided
 	if stdinInput != "" {
@@ -847,20 +903,32 @@ func (t *AsyncRunnerTool) executeAsync(command, cwd string, env []string, shellI
 			session.ExitCode = cmd.ProcessState.ExitCode()
 		}
 		exitCode := session.ExitCode
+		outputPath := session.OutputPath
+		if session.outputFile != nil {
+			_ = session.outputFile.Close()
+			session.outputFile = nil
+		}
 		session.mu.Unlock()
+		// Adopt the shell's new working directory for subsequent commands.
+		if captured := readCapturedCwd(cwdFile); captured != "" {
+			updateCwd(captured)
+		}
 		status := SessionStatusCompleted
 		if err != nil {
 			status = SessionStatusFailed
 		}
 		_ = GetManager().UpdateStatus(shellID, status, exitCode, err)
+		close(session.done)
+		_ = outputPath
 	}()
 
 	return tools.Result{
 		Content: fmt.Sprintf("started async command (shell_id: %s)\nUse read_shell to get output, write_shell to send input", shellID),
 		Metadata: map[string]any{
-			"shell_id": shellID,
-			"pid":      cmd.Process.Pid,
-			"detached": detach,
+			"shell_id":    shellID,
+			"pid":         cmd.Process.Pid,
+			"detached":    detach,
+			"output_file": session.OutputPath,
 		},
 	}, nil
 }
@@ -919,13 +987,19 @@ func (t *ReadShellTool) Execute(_ context.Context, args map[string]any) (tools.R
 			if rec.Status == SessionStatusCompleted && rec.ExitCode == 0 {
 				status = "completed successfully"
 			}
+			// The session is gone but its durable output file may remain —
+			// the tail is the useful part after completion.
 			content := fmt.Sprintf("(session output unavailable)\n\n[%s]", status)
+			if tail, terr := tailOutputFile(rec.OutputPath, 200); terr == nil && tail != "" {
+				content = tail + "\n\n[" + status + "]"
+			}
 			return tools.Result{
 				Content: content,
 				Metadata: map[string]any{
-					"shell_id":  shellID,
-					"completed": isTerminalSessionStatus(rec.Status),
-					"exit_code": rec.ExitCode,
+					"shell_id":    shellID,
+					"completed":  isTerminalSessionStatus(rec.Status),
+					"exit_code":  rec.ExitCode,
+					"output_file": rec.OutputPath,
 				},
 			}, nil
 		}
@@ -960,6 +1034,11 @@ func (t *ReadShellTool) Execute(_ context.Context, args map[string]any) (tools.R
 		output = "(no new output)"
 	}
 
+	// When the RAM view was trimmed, say so and point at the durable file.
+	if session.truncated && session.OutputPath != "" {
+		output += fmt.Sprintf("\n\n[older output was truncated in the live view; full output: %s]", session.OutputPath)
+	}
+
 	if session.Completed {
 		status := "completed successfully"
 		if session.ExitCode != 0 {
@@ -973,9 +1052,10 @@ func (t *ReadShellTool) Execute(_ context.Context, args map[string]any) (tools.R
 	return tools.Result{
 		Content: output,
 		Metadata: map[string]any{
-			"shell_id":  shellID,
-			"completed": session.Completed,
-			"exit_code": session.ExitCode,
+			"shell_id":    shellID,
+			"completed":  session.Completed,
+			"exit_code":  session.ExitCode,
+			"output_file": session.OutputPath,
 		},
 	}, nil
 }

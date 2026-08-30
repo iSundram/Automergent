@@ -72,6 +72,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.stats.ToolCallCount++
 			a.activeTool = te.Name
 			a.statusBar.SetStatus(fmt.Sprintf("▸ %s…", te.Name))
+			a.snapshotFileWrite(te.ID, te.Name, te.Args)
 		} else if tc, ok := ev.Payload.(ai.ToolCall); ok {
 			argText := ""
 			if len(tc.Args) > 0 {
@@ -84,6 +85,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.stats.ToolCallCount++
 			a.activeTool = tc.Name
 			a.statusBar.SetStatus(fmt.Sprintf("▸ %s…", tc.Name))
+			a.snapshotFileWrite(tc.ID, tc.Name, tc.Args)
 		}
 		return a.waitForAgentEvent()
 	case agent.EventToolDone:
@@ -92,6 +94,8 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		a.runToolCount++
 		if td, ok := ev.Payload.(agent.ToolDoneEvent); ok {
 			a.conversation.AddToolLifecycleDone(td.ID, td.Name, td.Context, td.Result.Summary, td.Duration, td.Result, a.conversation.ReviewMode())
+			a.openDiffTabForCompletedWrite(td.ID, td.Name, td.Result.IsError)
+			a.maybeRegisterArtifact(td)
 		} else if r, ok := ev.Payload.(tools.Result); ok {
 			if r.IsError {
 				a.conversation.AddMessage("assistant", "Tool error: "+r.Content, true)
@@ -217,6 +221,12 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		}
 		if cmd := a.drainQueue(); cmd != nil {
 			cmds = append(cmds, cmd)
+		} else if a.lastOutcome == outcomeNone {
+			// Idle with no queued user message: an active goal drives the
+			// next turn itself (goal.go).
+			if cmd := a.maybeContinueGoal(text); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
 		if len(cmds) > 0 {
 			return tea.Batch(cmds...)

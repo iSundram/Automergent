@@ -82,6 +82,22 @@ type Agent struct {
 	// rules persists user-stated rules captured by the INIT decomposer.
 	rules *RuleStore
 
+	// omitProjectContext drops project instructions + git snapshot from the
+	// user context — read-only subagents don't need them (see subagents.go).
+	omitProjectContext bool
+
+	// agentMemory is this agent's persistent memory (subagents with a
+	// MemoryScope; see agentmemory.go).
+	agentMemory *AgentMemory
+
+	// childHandles keeps spawned child agents addressable for resume
+	// (continue a completed/stopped agent's conversation). Keyed by the
+	// tracked subagent instance ID.
+	childHandles map[string]*Agent
+
+	// boundary is the working-directory path scope (see pathboundary.go).
+	boundary *tools.PathScope
+
 	// New prompt system for staged prompt delivery
 	promptSystem     *promptpkg.PromptSystem
 	promptSystemOnce sync.Once
@@ -99,16 +115,50 @@ type Agent struct {
 
 // Execute implements the AgentExecutor interface for sub-agents.
 func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, prompt string, model string) (string, error) {
-	// 1. Create a child configuration and provider if a specific model is requested.
-	childCfg := *a.cfg
-	if model != "" {
-		childCfg.Model = model
+	trackedID := subagent.AgentIDFrom(ctx)
+
+	// Resume path: the caller asked to continue an existing agent's
+	// conversation rather than spawn a fresh one. The stored child's event
+	// channel is closed after its first run, so rebuild a live agent around
+	// its persisted session (sidechain transcript reloads from disk).
+	if resumeID := resumeAgentIDFrom(ctx); resumeID != "" {
+		if child, ok := a.resumeChild(resumeID); ok {
+			resumed := New(child.cfg, a.provider, child.Session(), child.tools)
+			resumed.sessionGrants = a.sessionGrants
+			if child.currentAgentDef != nil {
+				resumed.SetDefinition(child.currentAgentDef)
+			}
+			a.prepareChild(resumed, child.currentAgentDef, resumeID)
+			return a.runChild(ctx, resumed, prompt, trackedID, string(agentType))
+		}
+		// Unknown handle: fall through and spawn fresh (the model gets a new
+		// agent rather than an error it cannot act on).
 	}
 
-	// 2. Create a clean child session.
+	// 0. Resolve the agent definition first: it drives model routing and
+	// the read-only context slimming.
+	var def *agentdef.AgentDefinition
+	if d, ok := GlobalRegistry().Get(AgentType(agentType)); ok {
+		def = d
+	}
+
+	// 1. Create a child configuration. Read-only agents (explore/review)
+	// run on the configured FastModel when neither the call nor the
+	// definition pins one — the reference agent's Explore→haiku routing.
+	childCfg := *a.cfg
+	if resolved := a.resolveChildModel(model, def); resolved != "" {
+		childCfg.Model = resolved
+	}
+
+	// 2. Create a clean child session. A fork child inherits the parent's
+	// conversation (repaired so no tool call dangles) instead of starting
+	// cold.
 	childSess := session.New()
 	childSess.Metadata["parent_id"] = a.sess.ID
 	childSess.Metadata["agent_type"] = string(agentType)
+	if forkContextFrom(ctx) {
+		childSess.SetMessages(a.forkContextMessages())
+	}
 
 	// 3. Create a child agent. The child runs on a CLONE of the tool registry
 	// with the task-state tools re-registered against the child's own prompt
@@ -130,11 +180,21 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 	// Apply the agent-type definition: system prompt, phase config, and the
 	// per-type tool allowlist (explore is read-only; general-purpose's empty
 	// Tools means the full registry, bash included).
-	if def, ok := GlobalRegistry().Get(AgentType(agentType)); ok && def != nil {
+	if def != nil {
 		childAgent.SetDefinition(def)
 	}
 
-	// 4. Run the child agent with proper cancellation handling.
+	// Parity behaviors: read-only context slimming, sidechain transcript,
+	// agent memory, resume handle.
+	a.prepareChild(childAgent, def, trackedID)
+
+	return a.runChild(ctx, childAgent, prompt, trackedID, string(agentType))
+}
+
+// runChild drives a built child agent to completion and formats the result.
+// Shared by the fresh-spawn and resume paths.
+func (a *Agent) runChild(ctx context.Context, childAgent *Agent, prompt string, trackedID, agentType string) (string, error) {
+	childSess := childAgent.Session()
 	var finalResponse string
 	var finalErr error
 	done := make(chan struct{})
@@ -154,15 +214,14 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 	// events while it sits blocked inside the task tool. Without this, a
 	// subagent's permission ask disappeared into the drain and expired after
 	// the ten-minute timeout, silently denied.
-	trackedID := subagent.AgentIDFrom(ctx)
 	go func() {
 		for ev := range childAgent.Events() {
 			switch ev.Type {
 			case EventConfirm, EventAskUser:
 				if p, ok := ev.Payload.(map[string]any); ok {
-					p["agent_type"] = string(agentType)
+					p["agent_type"] = agentType
 					p["agent_id"] = trackedID
-					p["agent_name"] = subagentDisplayName(trackedID, agentType)
+					p["agent_name"] = subagentDisplayName(trackedID, subagent.AgentType(agentType))
 					a.Emit(ev.Type, p)
 				}
 				continue
@@ -421,9 +480,15 @@ func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *t
 	})
 
 	// Seed always-allow approvals persisted in the session so resumed runs
-	// do not re-prompt for tools the user already approved.
+	// do not re-prompt for tools the user already approved. Directory grants
+	// (path-boundary always-allows) also re-seed the boundary scope.
 	if sess != nil {
 		agent.sessionGrants.Reset(sess.ApprovalScopes())
+		for _, scope := range sess.ApprovalScopes() {
+			if dir, ok := tools.IsDirGrant(scope); ok {
+				agent.pathScope().AddGrantedDir(stripProjectPrefix(scope, dir))
+			}
+		}
 	}
 
 	return agent
@@ -461,7 +526,7 @@ func (a *Agent) checkAndMarkFirstMessage() bool {
 }
 
 // getThinkingBudget returns the Gemini thinking token budget.
-// Claude-style: this is USER configuration (effort level / explicit budget),
+// This is USER configuration (effort level / explicit budget),
 // never inferred from keyword analysis of the prompt.
 func (a *Agent) getThinkingBudget() int {
 	budget := 10000
@@ -1179,6 +1244,31 @@ func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, 
 	allowed := a.sessionGrants.Has(approvalScope) || a.sessionGrants.Has(legacyScope)
 	if !allowed {
 		allowed = a.shellGrantMatches(approvalScope)
+	}
+
+	// Working-directory boundary: paths outside the project (or protected
+	// locations inside it) need their own approval, whatever the mode-based
+	// policy says. "Always allow" answers grant the path's DIRECTORY, not
+	// the whole tool.
+	if !allowed {
+		if decision := a.checkPathBoundary(tc, t); !decision.Allowed {
+			res := a.requestPathConfirmation(tc, decision)
+			if !res.Allow {
+				msg := "user declined: " + decision.Reason
+				if res.Feedback != "" {
+					msg = fmt.Sprintf("user declined: %s", res.Feedback)
+				}
+				return tools.Result{IsError: true, Content: msg}, nil
+			}
+			if res.Always {
+				if grant := a.pathGrantFor(tc, t, decision); grant != "" {
+					a.sessionGrants.Add(grant)
+					if dir, ok := tools.IsDirGrant(grant); ok {
+						a.pathScope().AddGrantedDir(dir)
+					}
+				}
+			}
+		}
 	}
 
 	if !allowed && a.needsConfirmation(tc, t) {

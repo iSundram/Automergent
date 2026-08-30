@@ -332,6 +332,9 @@ func (sb SessionBrowser) Update(msg tea.Msg) (SessionBrowser, tea.Cmd) {
 					sb.draft = string(r[:len(r)-1])
 				}
 				return sb, nil
+			case "ctrl+u":
+				sb.draft = ""
+				return sb, nil
 			}
 			if text := keyText(m); text != "" {
 				sb.draft += text
@@ -521,9 +524,20 @@ func (sb SessionBrowser) View() string {
 	header := ruleStyle.Render(strings.Repeat("─", ruleWidth)) + title +
 		ruleStyle.Render(strings.Repeat("─", max(0, w-ruleWidth-len(titleText))))
 
-	// Search line with match count.
+	// Search line with position count: cursor position among matches over
+	// match total ("6/12"), so a query narrows it ("3/5") meaningfully.
 	filtered := sb.filteredItems()
-	count := fmt.Sprintf("%d/%d", len(filtered), len(sb.items))
+	pos := 0
+	for n, idx := range filtered {
+		if idx == sb.cursor {
+			pos = n + 1
+			break
+		}
+	}
+	count := fmt.Sprintf("%d/%d", pos, len(filtered))
+	if len(filtered) == 0 {
+		count = fmt.Sprintf("0/%d", len(sb.items))
+	}
 	searchText := " Search…"
 	if sb.query != "" {
 		searchText = " " + sb.query
@@ -637,7 +651,9 @@ func (sb SessionBrowser) addScrollbar(lines []string, viewportItems, rowCount in
 		if i >= thumbTop && i < thumbTop+thumbSize {
 			bar = "█"
 		}
-		lines[i] = lipgloss.NewStyle().Width(sb.width-2).MaxWidth(sb.width-2).Render(line) +
+		// MaxWidth truncates (never wraps): full-width rules and headers just
+		// lose their last two cells to the scrollbar instead of breaking lines.
+		lines[i] = lipgloss.NewStyle().MaxWidth(sb.width - 2).Render(line) +
 			lipgloss.NewStyle().Foreground(sb.styles.T.BorderNormal).Render(bar) + " "
 	}
 	return lines
@@ -668,5 +684,3 @@ func (sb SessionBrowser) Height() int {
 	return visible*2 + 8
 }
 
-// debugCursor exposes the cursor index for tests.
-func (sb SessionBrowser) debugCursor() int { return sb.cursor }

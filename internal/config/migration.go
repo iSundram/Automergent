@@ -395,7 +395,7 @@ func Import(format ImportFormat, sourcePath string) (*Config, error) {
 func importClaudeCode(content []byte, cfg *Config) (*Config, error) {
 	var data map[string]any
 
-	// Try JSON first (Claude Code uses JSON)
+	// Try JSON first (the source format is JSON)
 	if err := json.Unmarshal(content, &data); err != nil {
 		// Try YAML
 		if err := yaml.Unmarshal(content, &data); err != nil {
@@ -403,7 +403,7 @@ func importClaudeCode(content []byte, cfg *Config) (*Config, error) {
 		}
 	}
 
-	// Map Claude Code fields to Automergent
+	// Map source fields to Automergent
 	if model, ok := data["model"].(string); ok {
 		cfg.Model = model
 	}
@@ -412,7 +412,7 @@ func importClaudeCode(content []byte, cfg *Config) (*Config, error) {
 		cfg.Theme = theme
 	}
 
-	// Map Claude Code's allowed_tools to Automergent's tools config
+	// Map allowed_tools to Automergent's tools config
 	if allowedTools, ok := data["allowed_tools"].([]any); ok {
 		for _, t := range allowedTools {
 			if tool, ok := t.(string); ok {
@@ -421,7 +421,7 @@ func importClaudeCode(content []byte, cfg *Config) (*Config, error) {
 		}
 	}
 
-	// Map Claude Code's environment config
+	// Map the environment config
 	if env, ok := data["environment"].(map[string]any); ok {
 		if timeout, ok := env["command_timeout"].(string); ok {
 			cfg.Tools["shell"] = ToolConfig{
@@ -587,7 +587,7 @@ func DetectImportFormat(path string) ImportFormat {
 		return ImportGeneric
 	}
 
-	// Check for Claude Code markers
+	// Check for source-format markers
 	if matched, _ := regexp.Match(`"allowed_tools"`, content); matched {
 		return ImportClaudeCode
 	}

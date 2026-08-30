@@ -324,7 +324,7 @@ func TestPaletteVisibilityResizesConversation(t *testing.T) {
 
 	app.palette.Show([]components.PaletteItem{
 		{Label: "/help", Description: "Show help", Value: "help"},
-		{Label: "/clear", Description: "Clear conversation", Value: "clear"},
+		{Label: "/new", Description: "Start a fresh session", Value: "new"},
 	}, "")
 	app.layout()
 	withPaletteView := app.conversation.View()

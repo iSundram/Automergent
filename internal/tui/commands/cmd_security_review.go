@@ -15,6 +15,10 @@ func securityReviewCommand() Command {
 		ArgsHint:         "[focus]",
 		Tier:             TierSecondary,
 		Type:             CmdPrompt,
+		// A security review reads a lot of code and produces a long report;
+		// forking keeps that work out of the main conversation's context —
+		// only the findings summary lands back here.
+		Fork:             true,
 		Immediate:        true,
 		SupportsHeadless: true,
 		PromptTemplate:   "Perform a security-focused code review of the current changes. Check for: injection vulnerabilities, authentication/authorization issues, data exposure, insecure defaults, dependency vulnerabilities, and OWASP top 10. Report findings with severity levels.$ARGUMENTS",

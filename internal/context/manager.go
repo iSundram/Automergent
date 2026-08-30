@@ -480,6 +480,17 @@ func (m *Manager) TranscriptManager() *TranscriptManager {
 	return m.transcript
 }
 
+// SetTranscriptManager replaces the transcript manager. Used to give a
+// subagent its own sidechain transcript file instead of the shared one.
+func (m *Manager) SetTranscriptManager(tm *TranscriptManager) {
+	if tm == nil {
+		return
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.transcript = tm
+}
+
 // AdaptiveCalculator returns the adaptive token calculator.
 func (m *Manager) AdaptiveCalculator() *AdaptiveTokenCalculator {
 	m.mu.RLock()

@@ -21,7 +21,7 @@ type ToolMeta struct {
 	DisplayName string
 
 	// Usage holds multi-line operational guidance appended verbatim under
-	// the tool's heading (the long Claude-Code-style block).
+	// the tool's heading (the long operational-guidance block).
 	Usage string
 
 	// WhenToUse gives routing guidance versus sibling tools.

@@ -45,7 +45,7 @@ Rules:
 - Keep a summary of compacted content so it can be reconstructed
 - Report what was compacted and what was preserved`,
 		Model:       "",
-		Tools:       []string{"read", "grep", "glob", "bash", "todo_write", "todo_list", "context_bucket_get", "context_bucket_set", "context_bucket_delete", "context_get"},
+		Tools:       []string{"read_file", "grep", "glob", "bash", "todo_write", "todo_list", "context_bucket_get", "context_bucket_set", "context_bucket_delete", "context_get", "agent_memory"},
 		Color:       "cyan",
 		Effort:      agentdef.EffortMedium,
 		Source:      agentdef.SourceBuiltin,

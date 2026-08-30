@@ -319,6 +319,7 @@ func (a *App) newSession() {
 	a.conversation.Clear()
 	a.checkpoints = nil
 	a.apiErrors = nil
+	a.fileWriteSnapshots = make(map[string]fileWriteSnapshot)
 	a.sess = session.New()
 	a.sess.Provider, a.sess.Model = a.cfg.Provider, a.cfg.Model
 	a.sess.WorkDir = a.workDir
@@ -370,28 +371,6 @@ func (a *App) renameStoredSession(s *session.Session, title string) error {
 	}
 	a.statusBar.SetStatus("Session renamed: " + title)
 	return nil
-}
-
-// clearConversationView clears only the rendered conversation.
-func (a *App) clearConversationView() {
-	a.conversation.Clear()
-	a.statusBar.SetStatus("Conversation cleared")
-}
-
-// resetSessionHistory clears both the view and the persisted message history.
-// The wiped conversation is captured as a final rewind checkpoint first, so an
-// accidental /reset stays recoverable via /rewind until the checkpoints are
-// replaced by later turns. The emptied session is persisted immediately — a
-// stale on-disk copy would otherwise resurrect the history on the next resume.
-func (a *App) resetSessionHistory() {
-	a.captureCheckpoint("before /reset")
-	a.conversation.Clear()
-	a.sess.SetMessages(nil)
-	if a.storage != nil {
-		_ = a.storage.Save(a.sess)
-	}
-	a.updateActiveTokens()
-	a.statusBar.SetStatus("History reset")
 }
 
 // --- Conversation history: checkpoints, branching, context files ---

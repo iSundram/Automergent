@@ -646,6 +646,8 @@ func setTopLevelField(cfg *Config, key string, value any) error {
 		cfg.AutoCompressAt = toFloat(value)
 	case "compressionKeepRecent":
 		cfg.CompressionKeepRecent = toInt(value)
+	case "fastModel":
+		cfg.FastModel = toString(value)
 	case "maxAutoReadFileSize":
 		cfg.MaxAutoReadFileSize = toInt(value)
 	case "maxTreeFiles":

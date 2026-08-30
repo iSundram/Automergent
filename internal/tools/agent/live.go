@@ -51,6 +51,45 @@ func AgentIDFrom(ctx context.Context) string {
 	return id
 }
 
+// resumeAgentKey tags a request to continue an existing agent's conversation.
+type resumeAgentKey struct{}
+
+// WithResumeAgentID tags ctx so the executor resumes the stored child agent
+// (same session, history, and memory) instead of spawning a fresh one.
+func WithResumeAgentID(ctx context.Context, id string) context.Context {
+	if id == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, resumeAgentKey{}, id)
+}
+
+// ResumeAgentIDFrom returns the tagged resume ID, or "".
+func ResumeAgentIDFrom(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	id, _ := ctx.Value(resumeAgentKey{}).(string)
+	return id
+}
+
+// forkContextKey tags a request to inherit the parent's conversation.
+type forkContextKey struct{}
+
+// WithForkContext tags ctx so the executor seeds the child agent with the
+// parent's conversation (fork semantics: warm start, no clean slate).
+func WithForkContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, forkContextKey{}, true)
+}
+
+// ForkContextFrom reports whether ctx requested fork semantics.
+func ForkContextFrom(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v, _ := ctx.Value(forkContextKey{}).(bool)
+	return v
+}
+
 // NoteSpawn records a parent/child relationship. Called when a subagent's own
 // tool loop spawns another subagent, so the dock can indent the child under the
 // agent that asked for it instead of showing a flat row of siblings whose

@@ -45,6 +45,7 @@ type StatusBar struct {
 	pendingEdits int     // edits awaiting review
 	branch       string  // git branch (+ahead/behind suffix)
 	problems     int     // diagnostics introduced this session
+	artifacts    int     // artifacts awaiting /artifact review
 	showSegments bool
 }
 
@@ -100,6 +101,9 @@ func (s *StatusBar) SetGitBranch(b string) { s.branch = b }
 
 // SetProblems records the number of session-introduced diagnostics.
 func (s *StatusBar) SetProblems(n int) { s.problems = n }
+
+// SetArtifacts records how many artifacts await review in /artifact.
+func (s *StatusBar) SetArtifacts(n int) { s.artifacts = n }
 
 // SetSegmentsVisible toggles the IDE HUD segments (zen mode hides them).
 func (s *StatusBar) SetSegmentsVisible(v bool) { s.showSegments = v }
@@ -346,6 +350,18 @@ func (s StatusBar) rightSegments() []segment {
 	if s.problems > 0 {
 		segs = append(segs, segment{
 			text:     errStyle.Render(fmt.Sprintf("%d problems", s.problems)),
+			priority: 3,
+		})
+	}
+
+	// Artifacts awaiting review; names the command that opens the review.
+	if s.artifacts > 0 {
+		label := "artifact"
+		if s.artifacts > 1 {
+			label += "s"
+		}
+		segs = append(segs, segment{
+			text:     warnStyle.Render(fmt.Sprintf("%d %s · /artifact to review", s.artifacts, label)),
 			priority: 3,
 		})
 	}

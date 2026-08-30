@@ -16,6 +16,12 @@ func lspCommand() Command {
 		Immediate:        true,
 		SupportsHeadless: true,
 		WhenToUse:        "To check a file for compile errors before committing or after edits",
+		// Only offered once code files have actually been touched — LSP is
+		// noise in a fresh session with nothing to diagnose.
+		Paths: []string{
+			"*.go", "*.rs", "*.ts", "*.tsx", "*.js", "*.jsx", "*.py",
+			"*.java", "*.c", "*.cc", "*.cpp", "*.h", "*.rb", "*.zig",
+		},
 		PromptTemplate:   "Run diagnostics on the workspace using the lsp_diagnostics tool (and the shell tool for other languages if needed).$ARGUMENTS\nReport each finding as file:line, the message, and severity. If there are no findings, say so plainly. Do not modify any files.",
 	}
 }

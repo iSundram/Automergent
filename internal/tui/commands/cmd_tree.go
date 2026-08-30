@@ -38,7 +38,8 @@ func diffCommand() Command {
 }
 
 func handleDiff(host Host, args []string) Result {
+	// Status feedback comes from the host: it knows whether the pane opened
+	// (with a file count) or was refused because nothing was edited yet.
 	host.ToggleDiffPane()
-	host.SetStatus("Diff pane toggled")
 	return Done(nil)
 }

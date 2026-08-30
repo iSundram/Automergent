@@ -22,8 +22,6 @@ func Default() *Registry {
 	r.MustRegister(newCommand(), handleNew)
 	r.MustRegister(sessionsCommand(), handleSessions)
 	r.MustRegister(resumeCommand(), handleResume)
-	r.MustRegister(clearCommand(), handleClear)
-	r.MustRegister(resetCommand(), handleReset)
 	r.MustRegister(exportCommand(), handleExport)
 	r.MustRegister(permissionsCommand(), handlePermissions)
 	r.MustRegister(rewindCommand(), handleRewind)
@@ -56,6 +54,7 @@ func Default() *Registry {
 	r.MustRegister(reviewModeCommand(), handleReviewMode)
 	r.MustRegister(cancelCommand(), handleCancel)
 	r.MustRegister(planCommand(), handlePlan)
+	r.MustRegister(artifactCommand(), handleArtifact)
 
 	// --- Configuration ---
 	r.MustRegister(apiKeyCommand(), handleAPIKey)
