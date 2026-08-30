@@ -7,6 +7,7 @@ import (
 
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
+	"github.com/iSundram/Automergent/internal/shared"
 	"github.com/iSundram/Automergent/internal/tools"
 )
 
@@ -108,5 +109,40 @@ func TestBoundaryGrantsAllowSubsequentAccess(t *testing.T) {
 	readTool := &pathBoundaryTool{name: "read_file", write: false}
 	if d := ag.checkPathBoundary(ai.ToolCall{Name: "read_file", Args: map[string]any{"path": filepath.Join(outside, "data.json")}}, readTool); !d.Allowed {
 		t.Fatalf("granted dir still flagged: %+v", d)
+	}
+}
+
+func TestPlanPhaseWriteRestriction(t *testing.T) {
+	dir := t.TempDir()
+	ag := &Agent{cfg: testCfg(), workDir: dir}
+
+	// Not in plan phase: ordinary writes pass the boundary (mode policy
+	// still applies separately).
+	writeTool := &pathBoundaryTool{name: "edit_file", write: true}
+	if d := ag.checkPathBoundary(ai.ToolCall{Name: "edit_file", Args: map[string]any{"path": filepath.Join(dir, "src", "main.go")}}, writeTool); !d.Allowed {
+		t.Fatalf("non-plan write blocked: %+v", d)
+	}
+
+	// Enter the plan phase via the real machinery.
+	ag.ensurePhaseComponents()
+	if err := ag.phaseManager.Transition(shared.PhasePlan, "test", "test"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Writes outside the artifacts dir are blocked during plan.
+	if d := ag.checkPathBoundary(ai.ToolCall{Name: "edit_file", Args: map[string]any{"path": filepath.Join(dir, "src", "main.go")}}, writeTool); d.Allowed {
+		t.Fatal("plan-phase write outside artifacts must be blocked")
+	}
+
+	// Writes to the plan artifact pass.
+	artifact := filepath.Join(dir, ".automergent", "artifacts", "plan.md")
+	if d := ag.checkPathBoundary(ai.ToolCall{Name: "write_file", Args: map[string]any{"path": artifact}}, &pathBoundaryTool{name: "write_file", write: true}); !d.Allowed {
+		t.Fatalf("plan artifact write blocked: %+v", d)
+	}
+
+	// Reads are unaffected by the plan restriction.
+	readTool := &pathBoundaryTool{name: "read_file", write: false}
+	if d := ag.checkPathBoundary(ai.ToolCall{Name: "read_file", Args: map[string]any{"path": filepath.Join(dir, "src", "main.go")}}, readTool); !d.Allowed {
+		t.Fatalf("plan-phase read blocked: %+v", d)
 	}
 }

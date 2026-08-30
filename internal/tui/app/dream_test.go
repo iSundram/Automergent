@@ -67,6 +67,9 @@ func TestDreamStaleLockIsBroken(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(lock), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(lock, []byte("12345\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// A lock older than the max age is a dead holder — breakable.
 	old := time.Now().Add(-2 * dreamLockMaxAge)
 	if err := os.Chtimes(lock, old, old); err != nil {
