@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 
 	tea "charm.land/bubbletea/v2"
@@ -21,6 +22,13 @@ type goalCall struct {
 type forkedAgentCall struct {
 	command string
 	prompt  string
+}
+
+// runWorkflowCall records one RunWorkflow invocation.
+type runWorkflowCall struct {
+	path   string
+	args   string
+	resume bool
 }
 
 // mockHost implements Host for testing command handlers.
@@ -90,6 +98,14 @@ type mockHost struct {
 	// Forked agents + recent files
 	forkedAgentCalls []forkedAgentCall
 	recentFilePaths  []string
+
+	// Workflow engine state
+	workflowSpecs    []WorkflowSpecInfo
+	runWorkflowCalls []runWorkflowCall
+	runWorkflowErr   error
+	workflowRuns     []WorkflowRunInfo
+
+	consolidateMemoryCalls int
 
 	refreshModelsCalls int
 	testProviderCalls  []string
@@ -723,6 +739,35 @@ func (m *mockHost) StartForkedAgent(command, prompt string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.forkedAgentCalls = append(m.forkedAgentCalls, forkedAgentCall{command, prompt})
+}
+
+func (m *mockHost) WorkflowSpecs() []WorkflowSpecInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]WorkflowSpecInfo, len(m.workflowSpecs))
+	copy(out, m.workflowSpecs)
+	return out
+}
+
+func (m *mockHost) RunWorkflow(path string, args []string, resume bool) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.runWorkflowCalls = append(m.runWorkflowCalls, runWorkflowCall{path, strings.Join(args, " "), resume})
+	return m.runWorkflowErr
+}
+
+func (m *mockHost) WorkflowRunHistory() []WorkflowRunInfo {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]WorkflowRunInfo, len(m.workflowRuns))
+	copy(out, m.workflowRuns)
+	return out
+}
+
+func (m *mockHost) ConsolidateMemory() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.consolidateMemoryCalls++
 }
 
 func (m *mockHost) SearchWorkspace(query string) string {

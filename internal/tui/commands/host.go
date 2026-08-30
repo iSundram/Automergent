@@ -72,6 +72,22 @@ type AgentRow struct {
 	Terminal  bool
 }
 
+// WorkflowSpecInfo describes one discoverable workflow definition.
+type WorkflowSpecInfo struct {
+	Name        string
+	Description string
+	Path        string
+}
+
+// WorkflowRunInfo is one workflow run's identity and terminal status.
+type WorkflowRunInfo struct {
+	RunID  string
+	Name   string
+	Status string
+	Steps  int
+	Detail string
+}
+
 // Host is the interface that the App must implement to work with the command package.
 // This avoids import cycles: command package depends on this interface, App implements it.
 type Host interface {
@@ -197,6 +213,20 @@ type Host interface {
 	// context; the result arrives asynchronously as a system message
 	// (backs Fork prompt-commands).
 	StartForkedAgent(command, prompt string)
+
+	// Workflow engine (backs /workflow).
+	// WorkflowSpecs lists available workflow definitions (name, path).
+	WorkflowSpecs() []WorkflowSpecInfo
+	// RunWorkflow executes a workflow spec by path with the given
+	// arguments; resume re-plays a journaled run. The outcome arrives
+	// asynchronously as system messages.
+	RunWorkflow(path string, args []string, resume bool) error
+	// WorkflowRunHistory lists recent runs and their terminal status.
+	WorkflowRunHistory() []WorkflowRunInfo
+
+	// ConsolidateMemory runs a memory consolidation pass now (backs
+	// /dream); the outcome arrives asynchronously as a system message.
+	ConsolidateMemory()
 
 	// Conversation history: rewind points and branching
 	Checkpoints() []CheckpointInfo

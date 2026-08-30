@@ -2,9 +2,11 @@ package agent
 
 import (
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/iSundram/Automergent/internal/ai"
+	"github.com/iSundram/Automergent/internal/shared"
 	"github.com/iSundram/Automergent/internal/tools"
 	toolsshell "github.com/iSundram/Automergent/internal/tools/shell"
 )
@@ -41,6 +43,16 @@ func (a *Agent) checkPathBoundary(tc ai.ToolCall, t tools.Tool) tools.PathDecisi
 	scope := a.pathScope()
 	write := !t.IsReadOnly(tc.Args)
 
+	// Plan-phase write restriction: during the PLAN phase the only writable
+	// location is the artifacts directory (plans, review documents). All
+	// other writes wait for the BUILD phase — the plan itself says so, and
+	// this makes it a fact about the runtime rather than a suggestion.
+	if write && a.currentPhaseIsPlan() {
+		if decision := a.checkPlanArtifactWrite(tc); !decision.Allowed {
+			return decision
+		}
+	}
+
 	// The shell tool gets command-level analysis: cd targets resolved
 	// against the shell's persistent working directory, absolute path
 	// arguments, and the compound cd+write guard.
@@ -52,6 +64,55 @@ func (a *Agent) checkPathBoundary(tc ai.ToolCall, t tools.Tool) tools.PathDecisi
 	}
 
 	return scope.CheckToolArgs(tc.Name, tc.Args, write)
+}
+
+// artifactsDir is the only writable location during the plan phase.
+const artifactsDirName = ".automergent/artifacts"
+
+// currentPhaseIsPlan reports whether the phase machinery is in the plan
+// phase (nil-safe: no phase manager means no restriction).
+func (a *Agent) currentPhaseIsPlan() bool {
+	a.mu.RLock()
+	pm := a.phaseManager
+	a.mu.RUnlock()
+	return pm != nil && pm.CurrentPhase() == shared.PhasePlan
+}
+
+// checkPlanArtifactWrite enforces the plan-phase write allowlist: writes
+// must land under the artifacts directory.
+func (a *Agent) checkPlanArtifactWrite(tc ai.ToolCall) tools.PathDecision {
+	for _, key := range []string{"path", "file_path", "dir"} {
+		path, ok := tc.Args[key].(string)
+		if !ok || path == "" {
+			continue
+		}
+		if isPlanArtifactPath(path, a.workDir) {
+			continue
+		}
+		return tools.PathDecision{
+			Allowed: false,
+			Reason:  "the PLAN phase writes only plan artifacts under " + artifactsDirName + "; implementation edits happen in the BUILD phase",
+		}
+	}
+	// Bash writes during plan (redirections) cannot be resolved statically —
+	// the compound cd+write guard already asks for those.
+	return tools.PathDecision{Allowed: true}
+}
+
+// isPlanArtifactPath reports whether a path targets the artifacts dir.
+func isPlanArtifactPath(path, workDir string) bool {
+	clean := filepath.Clean(path)
+	if strings.Contains(clean, "/"+artifactsDirName+"/") || strings.HasPrefix(clean, artifactsDirName+"/") {
+		return true
+	}
+	// Absolute paths into the project's artifacts dir also qualify.
+	if workDir != "" {
+		abs := filepath.Join(workDir, artifactsDirName)
+		if strings.HasPrefix(clean, abs+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 // requestPathConfirmation asks the user about an out-of-bounds access,

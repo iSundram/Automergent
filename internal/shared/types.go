@@ -284,6 +284,7 @@ type PromptLayer int
 
 const (
 	LayerBaseModel      PromptLayer = iota // Model-specific base (gpt.txt, claude.txt, gemini.txt)
+	LayerPlatform                           // Shared platform core: system rules, task discipline, action care, communication style
 	LayerEnvironment                        // Working dir, git, platform, date, model info
 	LayerInstructions                       // AGENTS.md, CLAUDE.md, custom instructions
 	LayerSkills                             // Available skills with descriptions

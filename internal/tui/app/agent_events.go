@@ -223,9 +223,12 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			cmds = append(cmds, cmd)
 		} else if a.lastOutcome == outcomeNone {
 			// Idle with no queued user message: an active goal drives the
-			// next turn itself (goal.go).
+			// next turn itself (goal.go); otherwise an idle consolidation
+			// pass may fire (dream.go).
 			if cmd := a.maybeContinueGoal(text); cmd != nil {
 				cmds = append(cmds, cmd)
+			} else {
+				a.maybeConsolidateMemory()
 			}
 		}
 		if len(cmds) > 0 {

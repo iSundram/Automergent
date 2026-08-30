@@ -55,6 +55,8 @@ func Default() *Registry {
 	r.MustRegister(cancelCommand(), handleCancel)
 	r.MustRegister(planCommand(), handlePlan)
 	r.MustRegister(artifactCommand(), handleArtifact)
+	r.MustRegister(workflowCommand(), handleWorkflow)
+	r.MustRegister(dreamCommand(), handleDream)
 
 	// --- Configuration ---
 	r.MustRegister(apiKeyCommand(), handleAPIKey)

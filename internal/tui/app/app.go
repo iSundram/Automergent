@@ -77,7 +77,6 @@ type App struct {
 	diffPane          components.Diff
 	input             components.Input
 	header            components.Header
-	logo              components.Logo
 	statusBar         components.StatusBar
 	spin              components.Spinner
 	confirm           components.Confirm
@@ -137,6 +136,15 @@ type App struct {
 	// goal is the active autonomy objective driving the continuation loop
 	// (see goal.go). nil when no goal is set.
 	goal *goalState
+
+	// Memory consolidation state (see dream.go): last pass time, the
+	// message count baseline it covered, and the in-flight flag.
+	dreamLastAt      time.Time
+	dreamMsgBaseline int
+	dreamRunning     bool
+
+	// workflowRuns is the recent pipeline run history (see workflow.go).
+	workflowRuns []workflowRun
 
 	// settledAgentRows records subagent live rows that reached a terminal
 	// state, so the tick stops rewriting them (see agent_rows.go).
@@ -230,7 +238,6 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		diffPane:           components.NewDiff(styles),
 		input:              components.NewInput(styles),
 		header:             components.NewHeader(styles),
-		logo:               components.NewLogo(styles),
 		statusBar:          components.NewStatusBar(styles),
 		infoLine:           components.NewInfoLine(styles),
 		toasts:             components.NewToasts(styles),
@@ -455,6 +462,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.queueStrip != nil {
 			a.queueStrip.SetWidth(m.Width)
 		}
+		// Refresh the welcome screen so it is correctly centered for the new size.
+		a.conversation.SetEmptyState(components.WelcomeView(a.styles, m.Width, m.Height))
 		return a, nil
 	case tea.KeyMsg:
 		// The inspector is a fullscreen modal: it outranks every other key
@@ -794,6 +803,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case forkedAgentDoneMsg:
 		a.handleForkedAgentDone(m)
+	case workflowProgressMsg:
+		a.conversation.AddMessage("system", m.text, false)
+		a.statusBar.SetStatus("Workflow")
+	case dreamDoneMsg:
+		a.conversation.AddMessage("system", m.text, false)
+		a.statusBar.SetStatus("Memory consolidated")
 	case mcpEventMsg:
 		a.handleMCPEvent(m.ev)
 	case mcpConfigChangeMsg:

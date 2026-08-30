@@ -37,7 +37,7 @@ type Input struct {
 // NewInput creates a new Input component.
 func NewInput(styles *themes.Styles) Input {
 	ta := textarea.New()
-	ta.Placeholder = "Message Automergent... (Enter to send, / for commands, @ for files, ? for help)"
+	ta.Placeholder = "What do you want to build today? (/ commands · @ files · ? help)"
 	ta.ShowLineNumbers = false
 	ta.SetHeight(1)
 	ta.MaxHeight = 16
@@ -632,6 +632,8 @@ func (i *Input) View() string {
 		return ""
 	}
 
+	sep := lipgloss.NewStyle().Foreground(i.styles.T.BorderNormal).Render(strings.Repeat("─", i.width))
+
 	rawView := i.ta.View()
 	lines := strings.Split(rawView, "\n")
 
@@ -660,10 +662,13 @@ func (i *Input) View() string {
 	}
 	content := strings.Join(renderedLines, "\n")
 
+	var body string
 	if i.focused {
-		return i.styles.InputFocused.Width(i.width).Render(content)
+		body = i.styles.InputFocused.Width(i.width).Render(content)
+	} else {
+		body = i.styles.Input.Width(i.width).Render(content)
 	}
-	return i.styles.Input.Width(i.width).Render(content)
+	return sep + "\n" + body
 }
 
 // Focused reports whether the input has focus.

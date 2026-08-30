@@ -121,28 +121,6 @@ func (a *App) infoLineVisible() bool {
 	return a.infoLine.View() != ""
 }
 
-// showLogo reports whether the terminal logo should replace the header:
-// on a brand new conversation (no messages yet) or while a project trust
-// (untrusted folder) warning is visible.
-func (a *App) showLogo() bool {
-	if a.confirm.Visible() && a.confirm.IsTrust() {
-		return true
-	}
-	return a.conversation.MessageCount() == 0
-}
-
-// logoView renders the ASCII logo left-aligned with a small gap from the top
-// edge, replacing the header bar in logo mode.
-func (a *App) logoView() string {
-	art := a.logo.View()
-	if art == "" {
-		return ""
-	}
-	return lipgloss.NewStyle().
-		MarginLeft(2).
-		MarginTop(2).
-		Render(art)
-}
 
 func (a *App) View() tea.View {
 	// Helper to ensure all views have consistent settings

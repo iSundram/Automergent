@@ -101,6 +101,7 @@ func NewPromptComposer(
 		layers:      make(map[shared.PromptLayer][]string),
 		layerOrder: []shared.PromptLayer{
 			shared.LayerBaseModel,
+			shared.LayerPlatform,
 			shared.LayerEnvironment,
 			shared.LayerInstructions,
 			shared.LayerSkills,
@@ -119,6 +120,7 @@ func NewPromptComposer(
 // buildAllLayers constructs all prompt layers.
 func (c *PromptComposer) buildAllLayers() {
 	c.buildBaseModelLayer()
+	c.buildPlatformLayer()
 	c.buildEnvironmentLayer()
 	c.buildInstructionsLayer()
 	c.buildSkillsLayer()
@@ -199,6 +201,18 @@ func GetBasePrompt(modelName, provider string) string {
 	result = strings.ReplaceAll(result, "{{PROVIDER}}", provider)
 	
 	return result
+}
+
+//go:embed bases/platform.txt
+var basePlatform string
+
+// buildPlatformLayer adds the shared platform core — system rules, task
+// discipline, action care, and communication style. This content is
+// model-agnostic and identical for every agent and phase, which keeps it
+// inside the cacheable prompt prefix; the model bases carry only identity
+// and tone.
+func (c *PromptComposer) buildPlatformLayer() {
+	c.layers[shared.LayerPlatform] = []string{basePlatform}
 }
 
 // buildEnvironmentLayer adds dynamic environment context.

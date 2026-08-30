@@ -1,8 +1,10 @@
 package app
 
 import (
-	tea "charm.land/bubbletea/v2"
 	"fmt"
+
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/mcp"
@@ -11,6 +13,7 @@ import (
 
 // Run is the Bubble Tea program entry point.
 func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, persist *session.PersistenceManager, initialPrompt string, showSessionPicker bool, projectApprovalPath string, mcpOrch *mcp.Orchestrator) error {
+
 	// Enter alternate screen immediately before TUI starts to prevent
 	// any flash of existing terminal content
 	fmt.Print("\x1b[?1049h") // Enter alt screen

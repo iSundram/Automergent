@@ -1,7 +1,6 @@
 package app
 
-// Goal-driven autonomy — a port of CCB's /goal service
-// (see the goal service design notes).
+// Goal-driven autonomy.
 //
 // A goal is a per-session state machine: when the agent goes idle with an
 // active, unpaused goal, a <goal-steering> continuation prompt is injected
