@@ -1016,6 +1016,10 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 	streamTextToUI := isFinalLoop
 	// exploreNudged bounds the explore exit gate to one nudge per phase.
 	exploreNudged := false
+	// filesReadThisPhase tracks distinct read_file targets, feeding the
+	// explore depth floor: a real investigation reads several files, not
+	// one 100-line peek (see phases/explore.txt WORKING STYLE).
+	filesReadThisPhase := map[string]bool{}
 	runMeta := &runMetadata{}
 	// Token-budget continuation ("+500k" / "use 2M tokens" in the user's
 	// message): keeps the turn alive until the budget is spent or returns
@@ -1217,6 +1221,20 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 				continue
 			}
 
+			// Explore depth floor: an investigation that read fewer than
+			// three distinct files answered from a peek, not an
+			// investigation. One nudge; after that, the answer stands
+			// (never loop — see the go-test spiral in session 1c051187).
+			if !exploreNudged && (phase == shared.PhaseExplore || result.TaskSpec.Type == "explore" || result.TaskSpec.Type == "analyze") && len(filesReadThisPhase) < 3 {
+				exploreNudged = true
+				a.injectEphemeral(ephemeralReminderText("Explore depth", fmt.Sprintf(
+					"You have read only %d file(s) so far. A real investigation reads every file that implements the subject — keep going with read_file on the other key files you found (and grep to trace usages), then deliver the comprehensive report.",
+					len(filesReadThisPhase))))
+				a.Emit(EventStatus, "explore depth floor — requesting more reads")
+				state.transition = ContinueExploreCoverage
+				continue
+			}
+
 			// Explore exit gate runs BEFORE the anti-stall nudge and before
 			// the phase's answer is accepted: an explore task must have
 			// actually read its subject files, not answered from the file
@@ -1292,6 +1310,13 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 				ProgressPct: 100,
 				Log:         fmt.Sprintf("Completed %s", executed.call.Name),
 			})
+		}
+		for _, executed := range executedCalls {
+			if executed.call.Name == "read_file" {
+				if path, ok := executed.call.Args["path"].(string); ok && path != "" {
+					filesReadThisPhase[path] = true
+				}
+			}
 		}
 		resultMsg := buildToolResultMessage(toolCalls, executedCalls)
 		a.sess.AddMessage(resultMsg)

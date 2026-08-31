@@ -12,7 +12,7 @@
   <a href="https://github.com/iSundram/Automergent/actions"><img src="https://img.shields.io/badge/tests-passing-4ade80?style=for-the-badge&logo=github&logoColor=white" alt="Tests Status" /></a>
   <a href="https://automergent.github.io"><img src="https://img.shields.io/badge/docs-live-38bdf8?style=for-the-badge&logo=googledocs&logoColor=white" alt="Documentation" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue?style=for-the-badge" alt="License" /></a>
-  <a href="https://github.com/iSundram/Automergent/releases"><img src="https://img.shields.io/badge/release-v0.1.1--dev-c084fc?style=for-the-badge" alt="Release" /></a>
+  <a href="https://github.com/iSundram/Automergent/releases"><img src="https://img.shields.io/badge/release-v0.1.2--dev-c084fc?style=for-the-badge" alt="Release" /></a>
 </p>
 
 <p align="center">
