@@ -192,6 +192,26 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.statusBar.SetStatus(thinkingText)
 		}
 		return a.waitForAgentEvent()
+	case agent.EventPhaseDone:
+		// One phase of a multi-phase arc finished; the run continues with
+		// the next one. Settle the phase's reply into the transcript like
+		// EventDone does, but keep the spinner and thinking state alive and
+		// KEEP LISTENING — the turn is not over and EventDone must remain
+		// the run's single terminal event.
+		a.conversation.RenderIfDirty()
+		text, _ := ev.Payload.(string)
+		if a.streamedReply {
+			a.conversation.FinalizeStreamingWithContent(text)
+		} else {
+			a.conversation.FinalizeStreaming()
+		}
+		if strings.TrimSpace(text) != "" && !a.streamedReply {
+			a.conversation.AddMessage("assistant", text, false)
+		}
+		// The next phase streams into a fresh block.
+		a.streamedReply = false
+		a.statusBar.SetStatus("Phase complete — continuing…")
+		return a.waitForAgentEvent()
 	case agent.EventDone:
 		a.thinking = false
 		a.spin.Stop()

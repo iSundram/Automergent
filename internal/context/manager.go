@@ -104,9 +104,13 @@ func NewManager(rootDir string, cfg ManagerConfig) *Manager {
 
 	selector := NewContextSelector(graph, ranker, budget, detector)
 
-	// Create transcript with persistence
-	transcriptPath := TranscriptPathFor(rootDir, "default")
-	transcript := NewTranscriptManager(NewTranscript(transcriptPath))
+	// Create transcript. It is deliberately in-memory only (empty path): the
+	// on-disk "default.transcript.jsonl" this used to write was never read
+	// back — session restore goes through internal/session — and the
+	// hardcoded "default" ID meant it landed in whatever directory the agent
+	// was launched from, polluting checkouts and contaminating the stats
+	// with the previous run's data at load.
+	transcript := NewTranscriptManager(NewTranscript(""))
 
 	// Create adaptive token calculator with persistence
 	adaptiveCalc := NewAdaptiveTokenCalculator(cfg.ModelLimits.Name).WithPersistence(rootDir)

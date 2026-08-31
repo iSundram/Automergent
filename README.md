@@ -65,26 +65,32 @@ automergent
 Configure via environment variables or `~/.automergent/config.yaml`:
 
 ```yaml
-provider: "gemini" # gemini | openai | anthropic | deepseek | ollama
-model: "gemini-2.5-pro"
+provider: "google-aistudio" # google-aistudio | google-vertex | custom
+model: "gemini-3.6-flash"
 temperature: 0.2
 mode: "accept-edits"  # manual | accept-edits | auto | plan
-theme: "modern"       # modern | catppuccin | tokyonight | dracula | nord | gruvbox | onedark
+theme: "modern"       # modern | catppuccin | tokyonight | dracula | nord | gruvbox | onedark | solarized-dark | solarized-light | high-contrast | monokai
 providers:
-  gemini:
-    api_key: "${GEMINI_API_KEY}"
-  openai:
-    api_key: "${OPENAI_API_KEY}"
-  anthropic:
-    api_key: "${ANTHROPIC_API_KEY}"
+  google-aistudio:
+    apiKey: "${GEMINI_API_KEY}"
 ```
+
+> [!NOTE]
+> The provider catalog is deliberately small: the two Google backends as
+> first-class providers plus one open `custom` provider for any OpenAI- or
+> Gemini-compatible endpoint. Legacy names (`google`, `openai`, `anthropic`,
+> `deepseek`, `ollama`) keep working in old configs by resolving to their
+> nearest supported equivalent — they are aliases, not supported providers.
+
+Config is layered (later layers override earlier): system policy
+(`/etc/automergent/config.yaml`), global (`~/.automergent/config.yaml`),
+project (`.automergent/config.yaml`), and local
+(`.automergent/config.local.yaml`).
 
 ### Environment Variables
 
 ```bash
-export GEMINI_API_KEY="your-gemini-key"
-export OPENAI_API_KEY="your-openai-key"
-export ANTHROPIC_API_KEY="your-anthropic-key"
+export GOOGLE_API_KEY="your-key"   # or GEMINI_API_KEY — both are accepted
 ```
 
 ---
@@ -99,7 +105,7 @@ export ANTHROPIC_API_KEY="your-anthropic-key"
 | **Search & Web** | Ripgrep pattern matching, live web fetch, documentation scraping |
 | **Diagnostics** | Compiler error parsing, root-cause analysis, automated recovery |
 | **Multi-Agent** | Sub-agent orchestration, concurrent background tasks, parallel execution |
-| **Session Memory** | Persistent transcripts, undo/redo, project-scoped sessions |
+| **Session Memory** | Persistent sessions, undo/redo, project-scoped history |
 | **Artifact System** | Plan documents, approval workflows, structured deliverables |
 
 For slash commands, keyboard shortcuts, and detailed feature documentation, visit **[automergent.github.io](https://automergent.github.io)**.
@@ -116,23 +122,34 @@ For slash commands, keyboard shortcuts, and detailed feature documentation, visi
 
 ```text
 Automergent/
-├── cmd/automergent/          # CLI entrypoint
+├── cmd/automergent/          # CLI entrypoint, tool registry bootstrap
 ├── internal/
-│   ├── agent/                # Agent loop, orchestration, approval policies
-│   ├── ai/                   # Provider abstraction (Gemini, OpenAI, Anthropic)
-│   ├── config/               # Viper configuration, validation
-│   ├── context/              # Budget management, dependency tracking
+│   ├── agent/                # Agent loop, orchestration, approval policies, subagent fleet
+│   ├── ai/                   # Provider abstraction (Gemini API, Vertex AI, OpenAI-compatible)
+│   ├── cache/                # Shared caching primitives
+│   ├── config/               # Layered configuration (Viper), provider catalog, secrets
+│   ├── context/              # Budget management, dependency tracking, adaptive token estimation
+│   ├── debug/                # Debug diagnostics
 │   ├── diagnostics/          # Compiler error parsing, root-cause analysis
+│   ├── editreview/           # Atomic edit proposals and review store
 │   ├── errors/               # Structured errors, retry policies
+│   ├── git/                  # Blame, branch, conflict handling
+│   ├── mcp/                  # MCP server orchestration
+│   ├── planning/             # Planning/replanning tools
 │   ├── prompt/               # Phased prompt system (init→explore→plan→build)
+│   ├── recovery/             # Automated error recovery
 │   ├── sandbox/              # OS-level sandboxing
-│   ├── session/              # Persistent transcripts, history, undo stack
-│   ├── tools/                # 43+ tools (FS, Terminal, AST, Web, Diagnostics)
+│   ├── session/              # Persistent sessions, history, undo stack
+│   ├── shared/               # Cross-package types
+│   ├── taskstate/            # Task/todo state
+│   ├── tools/                # 45+ tools (FS, Terminal, AST, Web, Diagnostics, MCP, Skills)
 │   ├── tui/                  # Bubble Tea v2 TUI
 │   │   ├── app/              # Core event loop, layout, view composition
+│   │   ├── commands/         # Slash-command registry and dispatch
 │   │   ├── components/       # Modular UI widgets
 │   │   ├── themes/           # 11 color palettes
 │   │   └── render/           # ANSI parser, diff engine, Markdown renderer
+│   ├── version/              # Build version info
 │   └── workflow/             # Artifact system, plan management
 └── Makefile                  # Build, test, lint, release
 ```

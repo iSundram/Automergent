@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -24,7 +25,7 @@ func modelCommand() Command {
 		SubCommands: []SubCommand{
 			{Name: "list", Description: "List available models", Handler: handleModel},
 			{Name: "add", Description: "Add a custom model", ArgsHint: "<name>", Handler: handleModel},
-			{Name: "remove", Description: "Remove a custom model", ArgsHint: "<name>", Handler: handleModel},
+			{Name: "remove", Description: "Remove a custom model", ArgsHint: "<name>", Handler: handleModel, ValueCompletion: customModelCompletion},
 			{Name: "refresh", Description: "Refresh model list from provider", Handler: handleModel},
 			{Name: "reset", Description: "Reset models to defaults", Handler: handleModel},
 		},
@@ -267,4 +268,15 @@ func modelReset(host Host, provider string) Result {
 	host.PersistProjectConfig()
 	host.SetStatus("Model updated")
 	return Done(nil)
+}
+
+// customModelCompletion offers the provider's registered custom model ids.
+func customModelCompletion(h Host, _ string) []string {
+	pc := h.ProviderConfig(h.Provider())
+	var names []string
+	for name := range pc.Models {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }

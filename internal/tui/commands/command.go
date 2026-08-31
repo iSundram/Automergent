@@ -38,6 +38,11 @@ type SubCommand struct {
 	Description string
 	ArgsHint    string
 	Handler     Handler
+	// ValueCompletion returns candidate values for the subcommand's
+	// argument (provider names for "provider setup", server names for
+	// "mcp enable", ...). The partial is the text typed after the
+	// subcommand; callers filter it.
+	ValueCompletion func(Host, string) []string
 }
 
 // Command represents a slash command definition. The registry is the single
@@ -472,6 +477,33 @@ func (r *Registry) SubCommandPaletteItems(host Host, parentName string) []compon
 			Hint:        sub.ArgsHint,
 			Tier:        components.CommandTier(cmd.Tier),
 		})
+	}
+	return items
+}
+
+// SearchableSubCommandItems returns every sub-command as a palette item whose
+// value is "<parent> <sub>" — these join the command list during palette
+// searches so typing "fallback" surfaces "/provider fallback" without first
+// knowing the parent. Label carries the parent for context; SearchTerms
+// covers parent name, sub name and descriptions both ways.
+func (r *Registry) SearchableSubCommandItems() []components.PaletteItem {
+	var items []components.PaletteItem
+	for _, cmd := range r.commands {
+		if cmd.Hidden {
+			continue
+		}
+		for _, sub := range cmd.SubCommands {
+			items = append(items, components.PaletteItem{
+				Label:       cmd.Name + " " + sub.Name,
+				Value:       cmd.Name + " " + sub.Name,
+				Description: sub.Description,
+				Icon:        cmd.Icon,
+				Category:    cmd.Category,
+				Hint:        sub.ArgsHint,
+				Tier:        components.CommandTier(cmd.Tier),
+				SearchTerms: cmd.Name + " " + sub.Name + " " + sub.Description + " " + cmd.Description,
+			})
+		}
 	}
 	return items
 }

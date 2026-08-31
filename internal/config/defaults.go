@@ -43,7 +43,6 @@ func Default() *Config {
 		NoTUI:       false,
 		Quiet:       false,
 		Verbose:     false,
-		Debug:       DefaultDebugConfig(),
 
 		Security: SecurityConfig{
 			Sandbox:                "auto",

@@ -110,6 +110,8 @@ type mockHost struct {
 
 	refreshModelsCalls int
 	testProviderCalls  []string
+	vertexAuthOK       bool
+	vertexAuthDetail   string
 	authSources        map[string]string
 	fallbacks          []config.FallbackProvider
 
@@ -963,6 +965,12 @@ func (m *mockHost) RefreshModels() tea.Cmd {
 	defer m.mu.Unlock()
 	m.refreshModelsCalls++
 	return nil
+}
+
+func (m *mockHost) CheckVertexAuth() (bool, string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.vertexAuthOK, m.vertexAuthDetail
 }
 
 func (m *mockHost) TestProvider(provider string) tea.Cmd {

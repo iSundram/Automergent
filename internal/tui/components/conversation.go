@@ -248,7 +248,12 @@ func (c *Conversation) SetExpand(expanded bool) string {
 	} else {
 		c.expandMode = ExpandCompact
 	}
+	// invalidateAll alone is not enough: it clears the cache but leaves the
+	// viewport holding the old render, and RenderIfDirty is a no-op when
+	// dirty is false — the toggle visibly did nothing until the next
+	// unrelated refresh. Repaint here so the mode flips on screen at once.
 	c.invalidateAll()
+	c.refreshAndFollow(false)
 	if expanded {
 		return "Expanded — /collapse to collapse blocks"
 	}
@@ -434,8 +439,12 @@ func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, d
 // so a burst of tokens costs one paint, not one paint per token.
 func (c *Conversation) AppendToken(token string) {
 	c.ensureViewport()
-	// Content arriving means the thinking that preceded it is over: settle
-	// its duration so the box header can read "✻ Thought for 4s".
+	// Content arriving means the thinking that preceded it is over. Flush
+	// the thought builder onto the message FIRST: the thought often lives
+	// only in the builder (no message carries it yet), and settling before
+	// the flush found nothing to stamp — the duration was lost and the
+	// settled header read as unknown.
+	c.flushThoughtBuilder()
 	c.settleThoughtDuration()
 	if len(c.messages) == 0 || !c.streaming {
 		c.messages = append(c.messages, ConversationMsg{
@@ -506,6 +515,19 @@ func (c *Conversation) AppendThought(thought string) {
 	c.dirty = true
 }
 
+// flushThoughtBuilder writes the pending thought text onto the last
+// assistant message. Idempotent; clears the builder.
+func (c *Conversation) flushThoughtBuilder() {
+	if c.currentThoughtBuilder == nil {
+		return
+	}
+	if len(c.messages) > 0 && c.messages[len(c.messages)-1].Role == "assistant" {
+		last := &c.messages[len(c.messages)-1]
+		last.Thought = c.currentThoughtBuilder.String()
+	}
+	c.currentThoughtBuilder = nil
+}
+
 // settleThoughtDuration closes out the in-flight thinking clock, stamping
 // the elapsed time on the last message that carries a thought. Called when
 // content tokens arrive or the stream finalizes — whichever ends the
@@ -549,15 +571,10 @@ func (c *Conversation) FinalizeStreaming() {
 // response, when supplied, as the authoritative complete text.
 func (c *Conversation) FinalizeStreamingWithContent(final string) {
 	if c.streaming {
-		// Flush builders to the message FIRST: a thought that lived only in
-		// the builder (no content tokens ever arrived) must be on the
-		// message before the duration is stamped, or settleThoughtDuration
-		// finds nothing to stamp and the header reads as unknown-duration.
-		if c.currentThoughtBuilder != nil && len(c.messages) > 0 {
-			last := &c.messages[len(c.messages)-1]
-			last.Thought = c.currentThoughtBuilder.String()
-			c.currentThoughtBuilder = nil
-		}
+		// Flush the thought builder FIRST: a thought that lived only in the
+		// builder (no content tokens ever arrived) must be on the message
+		// before the duration is stamped.
+		c.flushThoughtBuilder()
 		// A finalized stream ends any thinking still in flight.
 		c.settleThoughtDuration()
 		// Flush text builders to last message
@@ -715,8 +732,12 @@ func (c *Conversation) refresh() {
 				group := c.messages[i:j]
 				var spanKey strings.Builder
 				for _, g := range group {
-					spanKey.WriteString(fmt.Sprintf("\x01%s\x00%s\x00%s\x00%s\x00%d",
-						g.ToolName, g.ToolContext, g.ToolSummary, g.Status, g.Duration.Nanoseconds()))
+					// Content participates: it is not rendered by every group
+					// renderer, but when it is (file-op groups show tails), a
+					// mutation with an otherwise-identical key would serve
+					// the stale render from cache.
+					spanKey.WriteString(fmt.Sprintf("\x01%s\x00%s\x00%s\x00%s\x00%d\x00%d",
+						g.ToolName, g.ToolContext, g.ToolSummary, g.Status, g.Duration.Nanoseconds(), len(g.Content)))
 					for _, k := range metaKeys(g.Metadata) {
 						spanKey.WriteString(fmt.Sprintf("\x03%s\x00%v", k, g.Metadata[k]))
 					}
@@ -731,9 +752,19 @@ func (c *Conversation) refresh() {
 			}
 		}
 
-		key := hashMessage(c.styleEpoch, c.expandMode, c.reviewMode, m, "")
-		mm := m // copy for closure
+		// The live-streaming state must participate in the cache key: the
+		// final token of a stream produces the SAME content hash as the
+		// settled message, so the streaming render (cursor ▌, live "●
+		// Thinking" box) was served from cache after finalize — the
+		// lingering-cursor and stuck-"Thinking" bugs were both this cache
+		// hit, which is also why they "healed" on resize (invalidateAll).
 		isLast := i == lastIdx
+		spanExtra := ""
+		if isLast && c.streaming && m.Role == "assistant" {
+			spanExtra = "live"
+		}
+		key := hashMessage(c.styleEpoch, c.expandMode, c.reviewMode, m, spanExtra)
+		mm := m // copy for closure
 		afterTool := prevRole == "tool_call"
 		writeCached(key, func() string {
 			switch mm.Role {

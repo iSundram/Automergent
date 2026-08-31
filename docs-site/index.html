@@ -39,7 +39,7 @@
       </div>
 
       <div class="navbar-actions">
-        <a href="https://github.com/automergent/automergent" target="_blank" rel="noopener" aria-label="GitHub Repository">
+        <a href="https://github.com/iSundram/Automergent" target="_blank" rel="noopener" aria-label="GitHub Repository">
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
             <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
           </svg>
@@ -66,7 +66,7 @@
       <li><a href="#architecture">Architecture</a></li>
       <li><a href="#configuration">Configuration</a></li>
       <li><a href="#reference">Reference</a></li>
-      <li><a href="https://github.com/automergent/automergent" target="_blank" rel="noopener">GitHub</a></li>
+      <li><a href="https://github.com/iSundram/Automergent" target="_blank" rel="noopener">GitHub</a></li>
     </ul>
   </div>
 
@@ -75,36 +75,41 @@
     <div class="hero-content">
       <div class="hero-badge">
         <span class="badge-dot"></span>
-        v1.0 — Now available
+        v0.1.0 — Now available
       </div>
       <h1>Automergent</h1>
-      <p class="tagline">Next-gen autonomous coding engineer built on Gemini &amp; Vertex AI</p>
-      <p class="subtitle">Multi-phase context intelligence, subagent orchestration, and deep root-cause error diagnostics</p>
+      <p class="tagline">Next-gen autonomous coding engineer built on Gemini & Vertex AI</p>
+      <p class="subtitle">Multi-phase context intelligence, sub-agent orchestration, and deep root-cause error diagnostics</p>
 
       <div class="hero-actions">
         <a href="#quickstart" class="btn btn-primary">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="13 17 18 12 13 7"></polyline><polyline points="6 17 11 12 6 7"></polyline></svg>
           Get Started
         </a>
-        <a href="https://github.com/automergent/automergent" class="btn btn-secondary" target="_blank" rel="noopener">
+        <a href="https://github.com/iSundram/Automergent" class="btn btn-secondary" target="_blank" rel="noopener">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
           GitHub
         </a>
       </div>
 
-      <div class="hero-code" data-search-title="Installation" data-search-desc="Install Automergent with npm" data-search-keywords="install,npm,node,setup">
+      <div class="hero-code" data-search-title="Installation" data-search-desc="Install Automergent via shell installer or Go" data-search-keywords="install,curl,go,setup,shell">
         <div class="code-block">
           <div class="code-block-header">
             <span class="lang-label">Terminal</span>
           </div>
-          <pre><code><span class="code-comment"># Install globally</span>
-<span class="code-prompt">$</span> <span class="code-command">npm install -g</span> <span class="code-flag">automergent</span>
+          <pre><code><span class="code-comment"># Option 1: One-line install (recommended)</span>
+<span class="code-prompt">$</span> <span class="code-command">curl -fsSL https://automergent.github.io/install.sh | bash</span>
 
-<span class="code-comment"># Or run directly with npx</span>
-<span class="code-prompt">$</span> <span class="code-command">npx</span> <span class="code-flag">automergent</span> <span class="code-string">"fix the authentication bug"</span>
+<span class="code-comment"># Option 2: Go install (requires Go 1.25+ with CGO)</span>
+<span class="code-prompt">$</span> <span class="code-command">CGO_ENABLED=1 go install github.com/iSundram/Automergent/cmd/automergent@latest</span>
 
-<span class="code-comment"># Initialize in your project</span>
-<span class="code-prompt">$</span> <span class="code-command">automergent</span> <span class="code-flag">init</span></code></pre>
+<span class="code-comment"># 3. Initialize in your project</span>
+<span class="code-prompt">$</span> <span class="code-command">cd</span> <span class="code-string">your-project/</span>
+<span class="code-prompt">$</span> <span class="code-command">automergent</span>
+<span class="code-comment"># Creates ~/.automergent/config.yaml with sensible defaults</span>
+
+<span class="code-comment"># 4. Start coding</span>
+<span class="code-prompt">$</span> <span class="code-command">automergent</span> <span class="code-string">"add unit tests for the user service"</span></code></pre>
           <button class="copy-btn" aria-label="Copy code">Copy</button>
         </div>
       </div>
@@ -127,28 +132,28 @@
         <p>Lives in your terminal with full shell integration. Execute commands, manage processes, and interact with your system directly.</p>
       </div>
 
-      <div class="feature-card" data-search-title="Multi-Provider AI" data-search-desc="Supports Gemini, Vertex AI, Claude, and OpenAI models" data-search-keywords="ai,gemini,vertex,claude,openai,model,provider">
+      <div class="feature-card" data-search-title="Multi-Provider AI" data-search-desc="Supports Gemini, Vertex AI, OpenAI, Anthropic, and Ollama" data-search-keywords="ai,gemini,vertex,openai,anthropic,ollama,model,provider">
         <div class="feature-icon icon-ai">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a10 10 0 1 0 10 10 4 4 0 0 1-5-5 4 4 0 0 1-5-5"></path><path d="M8.5 8.5v.01"></path><path d="M16 15.5v.01"></path><path d="M12 12v.01"></path><path d="M11 17v.01"></path><path d="M7 14v.01"></path></svg>
         </div>
         <h3>Multi-Provider AI</h3>
-        <p>Powered by Google Gemini &amp; Vertex AI with fallback support for Claude and OpenAI. Choose the best model for each task.</p>
+        <p>Powered by Google Gemini & Vertex AI with support for OpenAI, Anthropic, and Ollama. Choose the best model for each task.</p>
       </div>
 
-      <div class="feature-card" data-search-title="43+ Tools" data-search-desc="Extensive toolset for file operations, git, testing, and more" data-search-keywords="tools,filesystem,git,test,lint,build">
+      <div class="feature-card" data-search-title="37+ Tools" data-search-desc="Extensive toolset for file operations, shell, web, security, and more" data-search-keywords="tools,filesystem,shell,web,security,git,test">
         <div class="feature-icon icon-tools">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"></path></svg>
         </div>
-        <h3>43+ Tools</h3>
-        <p>Comprehensive toolset covering file operations, git workflows, testing, linting, building, database queries, and more.</p>
+        <h3>37+ Tools</h3>
+        <p>Comprehensive toolset covering file operations, shell commands, web fetching, security scanning, diagnostics, and sub-agent spawning.</p>
       </div>
 
-      <div class="feature-card" data-search-title="Sub-agent Orchestration" data-search-desc="Parallel specialist subagents for complex multi-step tasks" data-search-keywords="subagent,orchestration,parallel,agent,specialist">
+      <div class="feature-card" data-search-title="Sub-agent Orchestration" data-search-desc="Parallel specialist sub-agents for complex multi-step tasks" data-search-keywords="subagent,orchestration,parallel,agent,specialist">
         <div class="feature-icon icon-subagents">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line></svg>
         </div>
         <h3>Sub-agent Orchestration</h3>
-        <p>Spawn specialist subagents that work in parallel on different aspects of a problem, then merge results intelligently.</p>
+        <p>Spawn specialist sub-agents that work in parallel on different aspects of a problem, then merge results intelligently.</p>
       </div>
 
       <div class="feature-card" data-search-title="Context Intelligence" data-search-desc="Multi-phase context gathering and intelligent file discovery" data-search-keywords="context,intelligence,files,discovery,semantic">
@@ -159,12 +164,12 @@
         <p>Multi-phase context gathering with semantic file discovery. Automatically understands your codebase structure and conventions.</p>
       </div>
 
-      <div class="feature-card" data-search-title="Beautiful Themes" data-search-desc="Customizable themes with syntax highlighting and UI skins" data-search-keywords="theme,dark,light,appearance,customize">
+      <div class="feature-card" data-search-title="Beautiful Themes" data-search-desc="11 customizable themes with syntax highlighting and UI skins" data-search-keywords="theme,dark,light,appearance,customize">
         <div class="feature-icon icon-theme">
           <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a10 10 0 0 0 0 20 7 7 0 0 1 0-20 10 10 0 0 1 0-20z"></path></svg>
         </div>
         <h3>Beautiful Themes</h3>
-        <p>Dark and light themes with full syntax highlighting. Customize every aspect of the terminal experience to match your workflow.</p>
+        <p>11 built-in themes with full syntax highlighting. Customize every aspect of the terminal experience to match your workflow.</p>
       </div>
     </div>
   </section>
@@ -182,29 +187,29 @@
       <div class="code-block-header">
         <span class="lang-label">Terminal</span>
       </div>
-      <pre><code><span class="code-comment"># 1. Install Automergent globally</span>
-<span class="code-prompt">$</span> <span class="code-command">npm install -g</span> <span class="code-flag">automergent</span>
+      <pre><code><span class="code-comment"># 1. Install Automergent (one-line installer)</span>
+<span class="code-prompt">$</span> <span class="code-command">curl -fsSL https://automergent.github.io/install.sh | bash</span>
 
-<span class="code-comment"># 2. Authenticate with Google Cloud</span>
-<span class="code-prompt">$</span> <span class="code-command">automergent auth login</span>
-<span class="code-comment"># Opens browser for Google OAuth — select your Vertex AI project</span>
+<span class="code-comment"># Or install via Go (requires Go 1.25+ with CGO enabled)</span>
+<span class="code-prompt">$</span> <span class="code-command">CGO_ENABLED=1 go install github.com/iSundram/Automergent/cmd/automergent@latest</span>
 
-<span class="code-comment"># 3. Initialize in your project</span>
+<span class="code-comment"># 2. Configure your AI provider (Google AI Studio, Vertex AI, OpenAI, Anthropic)</span>
+<span class="code-prompt">$</span> <span class="code-command">export GOOGLE_API_KEY="your-api-key"</span>
+<span class="code-comment"># Or set in ~/.automergent/config.yaml</span>
+
+<span class="code-comment"># 3. Run in your project</span>
 <span class="code-prompt">$</span> <span class="code-command">cd</span> <span class="code-string">your-project/</span>
-<span class="code-prompt">$</span> <span class="code-command">automergent init</span>
-<span class="code-comment"># Creates .automergent/config.json with sensible defaults</span>
+<span class="code-prompt">$</span> <span class="code-command">automergent</span>
+<span class="code-comment"># Creates ~/.automergent/config.yaml with sensible defaults on first run</span>
 
 <span class="code-comment"># 4. Start coding</span>
-<span class="code-prompt">$</span> <span class="code-command">automergent</span> <span class="code-string">"add unit tests for the user service"</span>
-
-<span class="code-comment"># Or enter interactive mode</span>
-<span class="code-prompt">$</span> <span class="code-command">automergent</span> <span class="code-flag">--interactive</span></code></pre>
+<span class="code-prompt">$</span> <span class="code-command">automergent</span> <span class="code-string">"add unit tests for the user service"</span></code></pre>
       <button class="copy-btn" aria-label="Copy code">Copy</button>
     </div>
 
-    <div class="callout callout-info" data-search-title="Prerequisites" data-search-desc="Requirements before using Automergent" data-search-keywords="prerequisite,node,npm,google,cloud">
+    <div class="callout callout-info" data-search-title="Prerequisites" data-search-desc="Requirements before using Automergent" data-search-keywords="prerequisite,go,cgo,api,key">
       <div class="callout-title">Prerequisites</div>
-      <p>Node.js 18+ and a Google Cloud project with Vertex AI API enabled. For non-Google providers, set <code>AI_PROVIDER</code> environment variable.</p>
+      <p>Go 1.25+ with CGO enabled (for building from source or Go install). An API key for your chosen AI provider: Google AI Studio (<code>GOOGLE_API_KEY</code> or <code>GEMINI_API_KEY</code>), Google Vertex AI, OpenAI (<code>OPENAI_API_KEY</code>), Anthropic (<code>ANTHROPIC_API_KEY</code>), or Ollama (local). Configure provider in <code>~/.automergent/config.yaml</code> or via environment variables.</p>
     </div>
   </section>
 
@@ -214,34 +219,34 @@
   <section class="section" id="architecture">
     <div class="section-header">
       <h2>Architecture</h2>
-      <p>How Automergent processes tasks through its multi-phase pipeline</p>
+      <p>How Automergent processes tasks through its 4-phase agent loop</p>
     </div>
 
     <div class="code-block" data-search-title="Processing Pipeline" data-search-desc="The four phases of Automergent's context intelligence system" data-search-keywords="pipeline,phase,context,planning,execution,validation">
       <div class="code-block-header">
         <span class="lang-label">Pipeline</span>
       </div>
-      <pre><code><span class="code-comment">// Automergent Processing Pipeline</span>
+      <pre><code><span class="code-comment">// Automergent 4-Phase Agent Loop</span>
 
-<span class="token-keyword">Phase 1:</span> <span class="token-function">Context Gathering</span>
+<span class="token-keyword">Phase 1 — INIT:</span> <span class="token-function">Decompose & Route</span>
+  <span class="code-string">→ Decompose user message into atomic parts</span>
+  <span class="code-string">→ Route each part: direct answer / explore / plan / build</span>
+  <span class="code-string">→ Serious, decisive persona; minimal tools (bash/read/edit/task)</span>
+
+<span class="token-keyword">Phase 2 — EXPLORE:</span> <span class="token-function">Read-only Investigation</span>
   <span class="code-string">→ Semantic file discovery via AST analysis</span>
-  <span class="code-string">→ Dependency graph construction</span>
-  <span class="code-string">→ Relevant code extraction with token budgeting</span>
+  <span class="code-string">→ Violation confirmation & issue-suspect investigation</span>
+  <span class="code-string">→ Report file:line findings; no edits</span>
 
-<span class="token-keyword">Phase 2:</span> <span class="token-function">Planning &amp; Decomposition</span>
-  <span class="code-string">→ Task decomposition into atomic units</span>
-  <span class="code-string">→ Dependency graph for parallel execution</span>
-  <span class="code-string">→ Sub-agent assignment by specialization</span>
+<span class="token-keyword">Phase 3 — PLAN:</span> <span class="token-function">Architect & Design</span>
+  <span class="code-string">→ Consume INIT constraints & exploration findings</span>
+  <span class="code-string">→ Produce structured plan (objective/changes/risks/verification)</span>
+  <span class="code-string">→ Ask when ambiguous; respect user-suggested approaches</span>
 
-<span class="token-keyword">Phase 3:</span> <span class="token-function">Parallel Execution</span>
-  <span class="code-string">→ Specialist sub-agents execute in parallel</span>
-  <span class="code-string">→ Each agent owns isolated file contexts</span>
-  <span class="code-string">→ Conflict detection via file locking</span>
-
-<span class="token-keyword">Phase 4:</span> <span class="token-function">Validation &amp; Integration</span>
-  <span class="code-string">→ Lint, type-check, and test execution</span>
-  <span class="code-string">→ Automatic fix for detected issues</span>
-  <span class="code-string">→ Git commit with conventional message</span></code></pre>
+<span class="token-keyword">Phase 4 — BUILD:</span> <span class="token-function">Implement & Verify</span>
+  <span class="code-string">→ Todo discipline; test-after-change</span>
+  <span class="code-string">→ Sub-agent delegation for parallel work</span>
+  <span class="code-string">→ Transition back to EXPLORE when blocked</span></code></pre>
     </div>
   </section>
 
@@ -251,44 +256,45 @@
   <section class="section" id="configuration">
     <div class="section-header">
       <h2>Configuration</h2>
-      <p>Customize Automergent's behavior with a simple JSON config file</p>
+      <p>Customize Automergent's behavior with a simple YAML config file</p>
     </div>
 
-    <div class="code-block" data-search-title="Configuration File" data-search-desc="Automergent configuration options and defaults" data-search-keywords="config,json,options,settings,model,theme">
+    <div class="code-block" data-search-title="Configuration File" data-search-desc="Automergent configuration options and defaults" data-search-keywords="config,yaml,options,settings,model,theme">
       <div class="code-block-header">
-        <span class="lang-label">.automergent/config.json</span>
+        <span class="lang-label">~/.automergent/config.yaml</span>
       </div>
-      <pre><code>{
-  <span class="token-property">"version"</span>: <span class="token-string">"1.0.0"</span>,
-  <span class="token-property">"ai"</span>: {
-    <span class="token-property">"provider"</span>: <span class="token-string">"gemini"</span>,
-    <span class="token-property">"model"</span>: <span class="token-string">"gemini-2.5-pro"</span>,
-    <span class="token-property">"fallback"</span>: <span class="token-string">"claude-sonnet-4-20250514"</span>,
-    <span class="token-property">"temperature"</span>: <span class="token-number">0.3</span>,
-    <span class="token-property">"maxTokens"</span>: <span class="token-number">8192</span>
-  },
-  <span class="token-property">"context"</span>: {
-    <span class="token-property">"maxFiles"</span>: <span class="token-number">50</span>,
-    <span class="token-property">"maxTokens"</span>: <span class="token-number">120000</span>,
-    <span class="token-property">"includeTests"</span>: <span class="token-keyword">true</span>,
-    <span class="token-property">"excludePatterns"</span>: [
-      <span class="token-string">"node_modules"</span>,
-      <span class="token-string">"dist"</span>,
-      <span class="token-string">"*.min.js"</span>
-    ]
-  },
-  <span class="token-property">"agents"</span>: {
-    <span class="token-property">"maxParallel"</span>: <span class="token-number">4</span>,
-    <span class="token-property">"timeout"</span>: <span class="token-number">300000</span>,
-    <span class="token-property">"retryAttempts"</span>: <span class="token-number">2</span>
-  },
-  <span class="token-property">"theme"</span>: <span class="token-string">"dark"</span>,
-  <span class="token-property">"git"</span>: {
-    <span class="token-property">"autoCommit"</span>: <span class="token-keyword">true</span>,
-    <span class="token-property">"conventionalCommits"</span>: <span class="token-keyword">true</span>,
-    <span class="token-property">"branchPrefix"</span>: <span class="token-string">"automergent/"</span>
-  }
-}</code></pre>
+      <pre><code><span class="code-comment"># Core settings</span>
+provider: gemini              <span class="code-comment"># gemini | openai | anthropic | deepseek | ollama</span>
+model: gemini-3.6-flash       <span class="code-comment"># default model</span>
+mode: accept-edits            <span class="code-comment"># manual | accept-edits | auto | plan</span>
+theme: modern                 <span class="code-comment"># modern | catppuccin | tokyonight | dracula | nord | gruvbox | onedark | solarized-dark | solarized-light | high-contrast | monokai</span>
+keybindings: default          <span class="code-comment"># default | vim | emacs</span>
+
+<span class="code-comment"># Context window management</span>
+maxContextTokens: 1048576     <span class="code-comment"># 1M token ceiling</span>
+maxToolOutputChars: 32768     <span class="code-comment"># 32k chars per tool output</span>
+autoCompressAt: 0.55          <span class="code-comment"># auto-compact trigger fraction</span>
+
+<span class="code-comment"># Provider-specific settings</span>
+providers:
+  gemini:
+    apiKey: "${GOOGLE_API_KEY}"
+  openai:
+    apiKey: "${OPENAI_API_KEY}"
+  anthropic:
+    apiKey: "${ANTHROPIC_API_KEY}"
+
+<span class="code-comment"># Security sandbox</span>
+sandbox: auto                 <span class="code-comment"># auto | bubblewrap | seatbelt | noop</span>
+blockedWritePaths:
+  - "/etc/**"
+  - "/usr/**"
+allowedWritePaths:
+  - "."
+
+<span class="code-comment"># Git settings</span>
+git:
+  coAuthor: ask               <span class="code-comment"># always | never | ask</span></code></pre>
       <button class="copy-btn" aria-label="Copy code">Copy</button>
     </div>
   </section>
@@ -313,39 +319,24 @@
         </thead>
         <tbody>
           <tr>
-            <td><code>automergent &lt;task&gt;</code></td>
-            <td>Execute a coding task autonomously</td>
-            <td><code>--interactive</code>, <code>--dry-run</code></td>
+            <td><code>automergent</code></td>
+            <td>Start interactive session in current directory</td>
+            <td><code>--provider</code>, <code>--model</code>, <code>--theme</code></td>
           </tr>
           <tr>
-            <td><code>automergent init</code></td>
-            <td>Initialize config in current project</td>
-            <td><code>--template &lt;name&gt;</code></td>
+            <td><code>automergent <task></code></td>
+            <td>Execute a coding task and exit</td>
+            <td><code>--provider</code>, <code>--model</code>, <code>--output</code></td>
           </tr>
           <tr>
-            <td><code>automergent auth login</code></td>
-            <td>Authenticate with your AI provider</td>
-            <td><code>--provider &lt;name&gt;</code></td>
-          </tr>
-          <tr>
-            <td><code>automergent auth status</code></td>
-            <td>Show current authentication status</td>
-            <td>—</td>
+            <td><code>automergent --no-tui</code></td>
+            <td>Run in non-interactive mode (stdin/stdout)</td>
+            <td><code>--stdin</code>, <code>--prompt</code></td>
           </tr>
           <tr>
             <td><code>automergent config</code></td>
             <td>View or update configuration</td>
             <td><code>--set</code>, <code>--get</code>, <code>--reset</code></td>
-          </tr>
-          <tr>
-            <td><code>automergent context</code></td>
-            <td>Show gathered context for a task</td>
-            <td><code>--preview</code></td>
-          </tr>
-          <tr>
-            <td><code>automergent history</code></td>
-            <td>View past task execution history</td>
-            <td><code>--last &lt;n&gt;</code>, <code>--json</code></td>
           </tr>
           <tr>
             <td><code>automergent doctor</code></td>
@@ -373,7 +364,7 @@
           </svg>
           <span>Auto<span class="logo-accent">mergent</span></span>
         </a>
-        <p>Next-gen autonomous coding engineer. Powered by Gemini &amp; Vertex AI.</p>
+        <p>Next-gen autonomous coding engineer. Powered by Gemini & Vertex AI.</p>
       </div>
 
       <div class="footer-col">
@@ -390,26 +381,25 @@
         <h4>Resources</h4>
         <ul>
           <li><a href="#architecture">Architecture</a></li>
-          <li><a href="#">Changelog</a></li>
-          <li><a href="#">Examples</a></li>
-          <li><a href="#">Blog</a></li>
+          <li><a href="pages/getting-started.html">Getting Started</a></li>
+          <li><a href="pages/examples.html">Examples</a></li>
+          <li><a href="pages/architecture.html">Architecture</a></li>
         </ul>
       </div>
 
       <div class="footer-col">
         <h4>Community</h4>
         <ul>
-          <li><a href="https://github.com/automergent/automergent" target="_blank" rel="noopener">GitHub</a></li>
-          <li><a href="#">Discord</a></li>
-          <li><a href="#">Twitter</a></li>
-          <li><a href="#">Contributing</a></li>
+          <li><a href="https://github.com/iSundram/Automergent" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/iSundram/Automergent/issues" target="_blank" rel="noopener">Issues</a></li>
+          <li><a href="https://github.com/iSundram/Automergent/blob/main/LICENSE" target="_blank" rel="noopener">MIT License</a></li>
         </ul>
       </div>
     </div>
 
     <div class="footer-bottom">
       <span>&copy; 2026 Automergent. Released under the <a href="https://opensource.org/licenses/MIT">MIT License</a>.</span>
-      <span>Built with care for developers.</span>
+      <span>Built by iSundram & contributors.</span>
     </div>
   </footer>
 

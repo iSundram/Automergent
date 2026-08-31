@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/iSundram/Automergent/internal/ai"
+	"github.com/iSundram/Automergent/internal/modelsdev"
 	automergentErrors "github.com/iSundram/Automergent/internal/errors"
 	"google.golang.org/genai"
 )
@@ -308,6 +309,11 @@ func (c *Client) Models(ctx context.Context) ([]ai.Model, error) {
 	}
 	models, err := c.LiveModels(ctx)
 	if err != nil {
+		// Offline: the models.dev catalog (disk cache or embedded snapshot)
+		// is richer than the curated list; curated stays beneath it.
+		if catalog := modelsdev.Models(ctx); len(catalog) > 0 {
+			return catalog, nil
+		}
 		return append([]ai.Model{}, curatedModels...), nil
 	}
 	return models, nil
@@ -421,20 +427,43 @@ func mergeCuratedModels(live []ai.Model) []ai.Model {
 	for i, m := range live {
 		byID[m.ID] = i
 	}
-	for _, curated := range curatedModels {
-		if i, ok := byID[curated.ID]; ok {
-			if live[i].Name == live[i].ID {
-				live[i].Name = curated.Name
+	merge := func(extra []ai.Model, authoritative bool) {
+		for _, m := range extra {
+			if i, ok := byID[m.ID]; ok {
+				if live[i].Name == live[i].ID {
+					live[i].Name = m.Name
+				}
+				if live[i].ContextLimit == 0 {
+					live[i].ContextLimit = m.ContextLimit
+				}
+				if m.OutputLimit > 0 {
+					live[i].OutputLimit = m.OutputLimit
+				}
+				// Catalog pricing is authoritative when present; curated
+				// entries fill gaps only.
+				if authoritative || (live[i].InputPrice == 0 && live[i].OutputPrice == 0) {
+					live[i].InputPrice = m.InputPrice
+					live[i].OutputPrice = m.OutputPrice
+				}
+				if m.Reasoning {
+					live[i].Reasoning = true
+				}
+				if m.Attachment {
+					live[i].Attachment = true
+				}
+				if m.Knowledge != "" {
+					live[i].Knowledge = m.Knowledge
+				}
+			} else {
+				live = append(live, m)
+				byID[m.ID] = len(live) - 1
 			}
-			if live[i].ContextLimit == 0 {
-				live[i].ContextLimit = curated.ContextLimit
-			}
-			live[i].InputPrice = curated.InputPrice
-			live[i].OutputPrice = curated.OutputPrice
-		} else {
-			live = append(live, curated)
 		}
 	}
+	// The models.dev community catalog first (rich metadata), then the
+	// curated static list for entries the catalog has not caught up with.
+	merge(modelsdev.Models(context.Background()), true)
+	merge(curatedModels, false)
 	return live
 }
 

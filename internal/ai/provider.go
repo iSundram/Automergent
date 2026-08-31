@@ -161,6 +161,14 @@ type Model struct {
 	ContextLimit int
 	InputPrice   float64
 	OutputPrice  float64
+	// OutputLimit is the model's maximum output tokens (0 = unknown).
+	OutputLimit int
+	// Reasoning marks thinking-capable models (effort control applies).
+	Reasoning bool
+	// Attachment marks models that accept file/image attachments.
+	Attachment bool
+	// Knowledge is the model's knowledge cutoff ("2026-03"), when known.
+	Knowledge string
 }
 
 // ProviderConfig holds provider-level credentials and defaults.

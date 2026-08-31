@@ -45,6 +45,7 @@ func TestCollapsedThoughtShowsHeaderOnly(t *testing.T) {
 	c.messages[len(c.messages)-1].Thought = "Let me consider several approaches here.\nOne of them is quite long and detailed with many lines."
 	c.messages[len(c.messages)-1].ThoughtDuration = 4 * time.Second
 	c.invalidateAll()
+	c.refreshAndFollow(false)
 
 	view := c.View()
 	if !strings.Contains(view, "Thought for 4s") {
@@ -79,6 +80,32 @@ func TestHintRowNamesTheFlippingCommand(t *testing.T) {
 	}
 }
 
+func TestFinalizeDoesNotServeStreamingCache(t *testing.T) {
+	// The renderer caches per-message blocks. The final token of a stream
+	// produces the same content hash as the settled message, so a cache key
+	// without the live state served the STREAMING render (cursor, live
+	// "● Thinking" box) forever after finalize. This was the root cause of
+	// both the lingering ▌ and the stuck "Thinking" header.
+	c := expandTestConversation(t)
+	c.AppendThought("reasoning about the problem")
+	c.AppendToken("The answer.")
+	c.RenderIfDirty()
+
+	streamingView := c.View()
+	if !strings.Contains(streamingView, "● Thinking") {
+		t.Fatalf("live view should show Thinking header:\n%s", streamingView)
+	}
+
+	c.FinalizeStreamingWithContent("The answer.")
+	settledView := c.View()
+	if strings.Contains(settledView, "● Thinking") {
+		t.Fatalf("settled view served the cached STREAMING render (stuck Thinking header):\n%s", settledView)
+	}
+	if !strings.Contains(settledView, "✓ Thought") {
+		t.Fatalf("settled view missing ✓ Thought header:\n%s", settledView)
+	}
+}
+
 func TestSettledUnknownDurationNeverReadsAsThinking(t *testing.T) {
 	// A settled block whose duration was never stamped (restored session,
 	// pre-fix finalize order) must read "✓ Thought" — "● Thinking · /expand"
@@ -89,6 +116,7 @@ func TestSettledUnknownDurationNeverReadsAsThinking(t *testing.T) {
 	c.messages[len(c.messages)-1].Thought = "some reasoning"
 	// ThoughtDuration deliberately left zero.
 	c.invalidateAll()
+	c.refreshAndFollow(false)
 
 	view := c.View()
 	if strings.Contains(view, "● Thinking") {

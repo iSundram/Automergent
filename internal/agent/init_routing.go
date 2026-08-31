@@ -149,7 +149,7 @@ func (a *Agent) executeDecomposition(ctx context.Context, d *promptpkg.Decomposi
 
 	// Execute each task in its own phase — the phase is chosen per task,
 	// which is the core of the arc.
-	for _, task := range tasks {
+	for i, task := range tasks {
 		phase := task.Phase
 		if phase == "" {
 			phase = shared.PhaseBuild
@@ -184,7 +184,10 @@ func (a *Agent) executeDecomposition(ctx context.Context, d *promptpkg.Decomposi
 		}
 		a.Emit(EventStatus, fmt.Sprintf("phase %s (%s): %s", phase, agentLabel, task.Description))
 
-		if err := a.runPhaseLoop(ctx, phase, result); err != nil {
+		// The last task's phase loop ends the Run; earlier ones emit
+		// EventPhaseDone so the UI keeps the turn alive (see runPhaseLoop).
+		isFinalLoop := i == len(tasks)-1
+		if err := a.runPhaseLoop(ctx, phase, result, isFinalLoop); err != nil {
 			return err
 		}
 	}

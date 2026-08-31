@@ -753,8 +753,6 @@ func setTopLevelField(cfg *Config, key string, value any) error {
 		cfg.Telemetry = toBool(value)
 	case "noUpdateCheck":
 		cfg.NoUpdateCheck = toBool(value)
-	case "debug":
-		return setDebugField(&cfg.Debug, value)
 	default:
 		return fmt.Errorf("unknown field: %s", key)
 	}
@@ -789,31 +787,6 @@ func setLogField(log *LogConfig, key string, value any) error {
 		log.MaxBackups = toInt(value)
 	default:
 		return fmt.Errorf("unknown log field: %s", key)
-	}
-	return nil
-}
-
-// setDebugField sets a debug config field.
-func setDebugField(debug *DebugConfig, value any) error {
-	m, ok := value.(map[string]any)
-	if !ok {
-		return fmt.Errorf("debug config must be a map")
-	}
-	for k, v := range m {
-		switch k {
-		case "enabled":
-			debug.Enabled = toBool(v)
-		case "directory":
-			debug.Directory = toString(v)
-		case "saveRequests":
-			debug.SaveRequests = toBool(v)
-		case "saveResponses":
-			debug.SaveResponses = toBool(v)
-		case "maxFileSize":
-			debug.MaxFileSize = toInt(v)
-		default:
-			return fmt.Errorf("unknown debug field: %s", k)
-		}
 	}
 	return nil
 }

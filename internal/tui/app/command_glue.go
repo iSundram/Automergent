@@ -29,6 +29,14 @@ func (a *App) updatePalette() {
 	switch trigger {
 	case "help", "command":
 		items = a.fuzzyFilter(a.commands.PaletteItems(a), filter)
+		// A search over the command list also searches sub-commands: typing
+		// "fallback" surfaces "/provider fallback" without knowing the
+		// parent. Only while filtering — the unfiltered list stays the
+		// top-level command surface.
+		if strings.TrimSpace(filter) != "" {
+			subItems := a.fuzzyFilter(a.commands.SearchableSubCommandItems(), filter)
+			items = append(items, subItems...)
+		}
 	default:
 		if spec, ok := subPaletteSpecFor(trigger); ok {
 			items = a.fuzzyFilter(spec.Build(a), filter)
@@ -438,6 +446,18 @@ func (a *App) paletteEnter() tea.Cmd {
 	// Command list (no argument typed yet): dispatch or insert the command.
 	if trigger == "command" || trigger == "help" {
 		if !strings.Contains(filter, " ") {
+			// Sub-command search hit ("<parent> <sub>"): dispatch the
+			// composed command directly.
+			if fields := strings.Fields(sel.Value); len(fields) == 2 {
+				if _, parentOK := a.commands.Lookup(fields[0]); parentOK {
+					if _, subOK := a.commands.LookupSubCommand(fields[0], fields[1]); subOK {
+						a.input.Reset()
+						a.palette.Hide()
+						a.layout()
+						return a.handleSlashCommand("/" + sel.Value)
+					}
+				}
+			}
 			// Sub-palette command → insert value and open its picker.
 			if components.SlashSubPalettes[sel.Value] {
 				a.input.InsertValue(sel.Value)

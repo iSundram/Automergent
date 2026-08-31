@@ -19,8 +19,8 @@ func workflowCommand() Command {
 		SubPalette:  "workflow",
 		SubCommands: []SubCommand{
 			{Name: "list", Description: "List available workflow specs", Handler: handleWorkflow},
-			{Name: "run", Description: "Run a workflow", ArgsHint: "<name> [args...]", Handler: handleWorkflow},
-			{Name: "resume", Description: "Resume an interrupted run", ArgsHint: "<run-id>", Handler: handleWorkflow},
+			{Name: "run", Description: "Run a workflow", ArgsHint: "<name> [args...]", Handler: handleWorkflow, ValueCompletion: workflowSpecCompletion},
+			{Name: "resume", Description: "Resume an interrupted run", ArgsHint: "<run-id>", Handler: handleWorkflow, ValueCompletion: workflowRunCompletion},
 			{Name: "history", Description: "Show recent runs", Handler: handleWorkflow},
 		},
 		Completion: func(h Host, partial string) []string {
@@ -124,4 +124,22 @@ func findWorkflowSpec(specs []WorkflowSpecInfo, name string) (WorkflowSpecInfo, 
 		}
 	}
 	return WorkflowSpecInfo{}, false
+}
+
+// workflowSpecCompletion offers every discoverable workflow's name.
+func workflowSpecCompletion(h Host, _ string) []string {
+	var names []string
+	for _, s := range h.WorkflowSpecs() {
+		names = append(names, s.Name)
+	}
+	return names
+}
+
+// workflowRunCompletion offers recent run ids for resume.
+func workflowRunCompletion(h Host, _ string) []string {
+	var ids []string
+	for _, r := range h.WorkflowRunHistory() {
+		ids = append(ids, r.RunID)
+	}
+	return ids
 }

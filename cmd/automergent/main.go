@@ -21,13 +21,14 @@ import (
 	"github.com/iSundram/Automergent/internal/agent"
 	aiPkg "github.com/iSundram/Automergent/internal/ai"
 	googleProvider "github.com/iSundram/Automergent/internal/ai/google"
+	openaiProvider "github.com/iSundram/Automergent/internal/ai/openai"
 	"github.com/iSundram/Automergent/internal/cache"
 	"github.com/iSundram/Automergent/internal/config"
 	diagcache "github.com/iSundram/Automergent/internal/diagnostics/cache"
-	"github.com/iSundram/Automergent/internal/debug"
 	automergentErrors "github.com/iSundram/Automergent/internal/errors"
 	"github.com/iSundram/Automergent/internal/git"
 	"github.com/iSundram/Automergent/internal/mcp"
+	"github.com/iSundram/Automergent/internal/modelsdev"
 	"github.com/iSundram/Automergent/internal/agent/mcpbridge"
 	planningPkg "github.com/iSundram/Automergent/internal/planning"
 	"github.com/iSundram/Automergent/internal/session"
@@ -409,7 +410,7 @@ func run(cmd *cobra.Command, args []string) error {
 		// Start orchestrator in background (non-blocking)
 		go func() {
 			if err := mcpOrch.Start(context.Background()); err != nil {
-				if cfg.Verbose || cfg.Debug.Enabled {
+				if cfg.Verbose {
 					fmt.Fprintf(os.Stderr, "[MCP] orchestrator start: %v\n", err)
 				}
 			}
@@ -433,6 +434,11 @@ func run(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return fmt.Errorf("provider: %w", err)
 	}
+	// Keep the models.dev community catalog fresh in the background (hourly):
+	// model names, context limits and pricing stay current without a live
+	// provider call. Fully offline-safe — every fallback ends at the
+	// embedded snapshot.
+	modelsdev.StartRefresher(cmd.Context())
 
 	// Build agent
 	ag := agent.New(cfg, provider, sess, reg)
@@ -464,7 +470,7 @@ func run(cmd *cobra.Command, args []string) error {
 	// Graph-backed context operations are registered after the agent exists so
 	// they share the same persistent task/bucket store as orchestration.
 	contextTools := ag.RegisterContextTools()
-	if cfg.Verbose || cfg.Debug.Enabled {
+	if cfg.Verbose {
 		fmt.Fprintf(os.Stderr, "[CONTEXT] config_file=%q context_enabled=%v reason=%q\n",
 			cfg.ConfigFile, contextTools.Enabled, contextTools.Reason)
 	}
@@ -1298,31 +1304,40 @@ func resolveProvider(cfg *config.Config) (aiPkg.Provider, error) {
 
 	var provider aiPkg.Provider
 	switch cfg.Provider {
-	case "google":
+	case "google", "google-aistudio":
+		if cfg.Provider == "google-aistudio" {
+			aiCfg.Backend = "aistudio"
+		}
+		provider = googleProvider.New(aiCfg)
+	case "google-vertex":
+		aiCfg.Backend = "vertex"
 		provider = googleProvider.New(aiCfg)
 	default:
-		// Check global registry
-		if p, ok := aiPkg.Get(cfg.Provider); ok {
-			provider = p
-		} else {
+		// Custom and legacy providers build from their configured ApiType:
+		// gemini → the Google client at the custom base URL; anything else
+		// → the OpenAI-compatible client. config.IsKnownProvider covers the
+		// legacy names, so pre-narrowing configs keep working.
+		spec, known := config.ProviderSpecFor(cfg.Provider)
+		if !known {
 			return nil, fmt.Errorf("unknown provider %q", cfg.Provider)
+		}
+		apiType := pc.ApiType
+		if apiType == "" && spec.ApiType != "" && spec.ApiType != "custom" {
+			apiType = spec.ApiType
+		}
+		if strings.EqualFold(apiType, "gemini") {
+			aiCfg.Backend = "" // let the Google client infer
+			provider = googleProvider.New(aiCfg)
+		} else {
+			if aiCfg.BaseURL == "" {
+				return nil, fmt.Errorf("provider %q needs a baseUrl in its config", cfg.Provider)
+			}
+			provider = openaiProvider.New(aiCfg)
 		}
 	}
 
 	if shouldWrapPromptCacheProvider(cfg, provider) {
 		provider = cache.NewCachingProvider(provider, cache.NewPromptCache())
-	}
-
-	// Wrap with debug provider if debug mode is enabled
-	if cfg.Debug.Enabled {
-		sessionID := debug.NewSessionID()
-		logger, err := debug.NewLogger(cfg.Debug, sessionID)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create debug logger: %w", err)
-		}
-		if logger != nil {
-			provider = debug.NewDebugProvider(provider, logger)
-		}
 	}
 
 	return provider, nil

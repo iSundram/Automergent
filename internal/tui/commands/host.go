@@ -134,6 +134,10 @@ type Host interface {
 	// against it (backs /provider test). The outcome is delivered
 	// asynchronously as a system message.
 	TestProvider(provider string) tea.Cmd
+	// CheckVertexAuth reports whether Vertex AI credentials resolve:
+	// Application Default Credentials via the gcloud CLI. ok=false carries
+	// a short remediation hint (backs /provider login google-vertex).
+	CheckVertexAuth() (ok bool, detail string)
 	// ProviderAuthSource reports where the provider's API key resolves from
 	// ("config", "env NAME", "secret store") or "" when unset. Never reveals
 	// the key itself.

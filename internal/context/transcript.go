@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -514,11 +513,6 @@ func removeToolResultPart(parts []ai.ContentPart, callID string) []ai.ContentPar
 		kept = append(kept, p)
 	}
 	return kept
-}
-
-// TranscriptPathFor returns the JSONL path for a session transcript.
-func TranscriptPathFor(dir, sessionID string) string {
-	return filepath.Join(dir, sessionID+".transcript.jsonl")
 }
 
 func newTurnID() string {

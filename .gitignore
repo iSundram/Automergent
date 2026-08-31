@@ -11,3 +11,4 @@ token_calibration.json
 *.calibration.json
 automergent
 automergent
+.automergent/

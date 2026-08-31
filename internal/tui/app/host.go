@@ -15,10 +15,12 @@ import (
 	"github.com/iSundram/Automergent/internal/tui/render"
 	"github.com/iSundram/Automergent/internal/tui/themes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime/debug"
 	"sort"
 	"strings"
+	"time"
 )
 
 // Compile-time guarantee that App satisfies the command host contract.
@@ -227,6 +229,26 @@ func (a *App) RefreshModels() tea.Cmd {
 
 func (a *App) TestProvider(provider string) tea.Cmd {
 	return a.testProvider(provider)
+}
+
+// CheckVertexAuth verifies Vertex AI credentials the way the genai SDK
+// resolves them: Application Default Credentials via the gcloud CLI. A
+// missing gcloud is reported distinctly from present-but-invalid creds so
+// the login guidance names the actual next step.
+func (a *App) CheckVertexAuth() (bool, string) {
+	if _, err := exec.LookPath("gcloud"); err != nil {
+		return false, "gcloud CLI not found — install it from https://cloud.google.com/sdk/docs/install"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "gcloud", "auth", "application-default", "print-access-token").CombinedOutput()
+	if err != nil {
+		return false, "no valid Application Default Credentials — run: gcloud auth application-default login"
+	}
+	if strings.TrimSpace(string(out)) == "" {
+		return false, "gcloud returned an empty token — re-run: gcloud auth application-default login"
+	}
+	return true, "Application Default Credentials valid"
 }
 
 func (a *App) ProviderFallbacks() []config.FallbackProvider {

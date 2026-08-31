@@ -410,6 +410,13 @@ const (
 	EventTodoSnapshot = "todo_snapshot"
 	EventTodoUpdate   = "todo_update"
 	EventInitAction   = "init_action"
+	// EventPhaseDone reports one phase of a multi-phase arc finishing while
+	// the run continues. Payload is the phase's final text, same shape as
+	// EventDone. It must stay distinct from EventDone: the UI treats
+	// EventDone as end-of-turn and stops listening for further events, so
+	// emitting it per phase leaves the extra events to be misread as the
+	// first reply of the user's NEXT message.
+	EventPhaseDone = "phase_done"
 	// EventRetry reports one retried provider API attempt. Payload is an
 	// ai.RetryInfo. Emitted while the retry is pending, so the UI can show
 	// progress instead of appearing to hang through the backoff.
@@ -863,8 +870,8 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		}}
 	}
 	phases := append([]shared.AgentPhase{classification.PrimaryPhase}, classification.SecondaryPhases...)
-	for _, phase := range phases {
-		for _, task := range tasks {
+	for pi, phase := range phases {
+		for ti, task := range tasks {
 			// A repeat ExecutePhase for the same phase is not a valid
 			// transition (explore→explore); the manager already sits in the
 			// phase after the first task, so later tasks reuse its config.
@@ -898,7 +905,8 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			a.Emit(EventStatus, fmt.Sprintf("phase %s: %s", phase, task.Description))
 
 			// Execute the phase using the standard loop with phase-specific config
-			if err := a.runPhaseLoop(ctx, phase, result); err != nil {
+			isFinalLoop := pi == len(phases)-1 && ti == len(tasks)-1
+			if err := a.runPhaseLoop(ctx, phase, result, isFinalLoop); err != nil {
 				return err
 			}
 		}
@@ -908,7 +916,10 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 }
 
 // runPhaseLoop executes a single phase with its specific configuration.
-func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, result promptpkg.PhaseResult) error {
+// isFinalLoop reports whether this is the last phase of the Run: only then
+// may the loop's completion emit EventDone. Intermediate loops emit
+// EventPhaseDone so the UI keeps the turn alive (one Run, one EventDone).
+func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, result promptpkg.PhaseResult, isFinalLoop bool) error {
 	// Update tool profile for this phase
 	a.toolProfile = a.toolSetToProfile(result.ToolSet)
 	defer func() { a.toolProfile = nil }()
@@ -1068,7 +1079,13 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 			if continueTurn := a.injectLongRunContext(runMeta, false); continueTurn {
 				continue // anti-stall: nudge injected, loop again
 			}
-			a.Emit(EventDone, text)
+			if isFinalLoop {
+				a.Emit(EventDone, text)
+			} else {
+				// More phases follow in this Run; report the phase's reply
+				// without ending the turn (see EventPhaseDone).
+				a.Emit(EventPhaseDone, text)
+			}
 			a.tryPersist()
 			if firstStandardTurn {
 				a.pruneFirstMessageTriage()
@@ -1844,7 +1861,7 @@ func (a *Agent) runStandardLoop(ctx context.Context, prompt string, isFirstMessa
 		a.Emit(EventError, result.Error)
 		return result.Error
 	}
-	return a.runPhaseLoop(ctx, shared.PhaseBuild, result)
+	return a.runPhaseLoop(ctx, shared.PhaseBuild, result, true)
 }
 
 // getAvailableFiles returns a list of available files for classification.

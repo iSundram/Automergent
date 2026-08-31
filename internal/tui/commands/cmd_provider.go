@@ -21,10 +21,17 @@ func providerCommand() Command {
 		Tier:        TierSecondary,
 		SubPalette:  "provider",
 		SubCommands: []SubCommand{
-			{Name: "use", Description: "Switch active provider", ArgsHint: "<name>", Handler: handleProvider},
+			{
+				Name: "use", Description: "Switch active provider", ArgsHint: "<name>", Handler: handleProvider,
+				ValueCompletion: providerNameCompletion,
+			},
 			{Name: "list", Description: "List configured providers", Handler: handleProvider},
-			{Name: "setup", Description: "Setup a provider", ArgsHint: "<name>", Handler: handleProvider},
-			{Name: "test", Description: "Test provider connectivity", ArgsHint: "<name>", Handler: handleProvider},
+			{Name: "setup", Description: "Setup a provider", ArgsHint: "<name>", Handler: handleProvider, ValueCompletion: providerNameCompletion},
+			{Name: "login", Description: "Check or guide provider login", ArgsHint: "<name>", Handler: handleProvider, ValueCompletion: providerNameCompletion},
+			{
+				Name: "test", Description: "Test provider connectivity", ArgsHint: "<name>", Handler: handleProvider,
+				ValueCompletion: providerNameCompletion,
+			},
 			{Name: "set", Description: "Set provider config", ArgsHint: "<key> <value>", Handler: handleProvider},
 			{Name: "unset", Description: "Unset provider config", ArgsHint: "<key>", Handler: handleProvider},
 			{Name: "backend", Description: "Manage provider backend", Handler: handleProvider},
@@ -58,6 +65,8 @@ func handleProvider(host Host, args []string) Result {
 		return providerBackend(host, args[1:])
 	case "setup":
 		return providerSetup(host, args[1:])
+	case "login":
+		return providerLogin(host, args[1:])
 	case "test":
 		return providerTestCmd(host, args[1:])
 	case "set":
@@ -618,4 +627,68 @@ func listFallbacks(host Host) {
 		b.WriteString("\n\n(no fallbacks — add one with: /provider fallback add <provider> <model>)")
 	}
 	host.AddSystemMessage(b.String())
+}
+
+// providerNameCompletion offers every known provider for the name argument
+// of /provider use|setup|test.
+func providerNameCompletion(h Host, _ string) []string {
+	return h.Providers()
+}
+
+// providerLogin checks the credential path for a provider and guides the
+// user through it — the "how do I log in with this" entry point:
+//
+//   - google-aistudio: API key from config or environment; guidance points
+//     at AI Studio's key page and the exact setup command.
+//   - google-vertex: Application Default Credentials via gcloud; the check
+//     runs `gcloud auth application-default print-access-token` and the
+//     guidance names the login command, plus the project/location the
+//     backend also requires.
+func providerLogin(host Host, args []string) Result {
+	if len(args) == 0 {
+		host.CommandUsage("/provider login <google-aistudio|google-vertex>")
+		return Done(nil)
+	}
+	provider := args[0]
+	spec, ok := config.ProviderSpecFor(provider)
+	if !ok {
+		host.CommandError(fmt.Sprintf("Unknown provider %q — /provider list shows what is available", provider))
+		return Done(nil)
+	}
+
+	var b strings.Builder
+	switch config.DefaultBackend(provider) {
+	case "vertex":
+		b.WriteString("Google Vertex AI login\n\n")
+		ok, detail := host.CheckVertexAuth()
+		if ok {
+			fmt.Fprintf(&b, "✓ %s\n", detail)
+		} else {
+			fmt.Fprintf(&b, "✗ %s\n", detail)
+		}
+		pc := host.ProviderConfig(provider)
+		if pc.Project == "" || pc.Location == "" {
+			b.WriteString("\nVertex also needs a Cloud project and location:\n")
+			fmt.Fprintf(&b, "  /provider setup %s --project <gcp-project> --location us-central1\n", provider)
+		} else {
+			fmt.Fprintf(&b, "\nProject: %s · Location: %s\n", pc.Project, pc.Location)
+		}
+		b.WriteString("\nThen verify end to end: /provider test " + provider)
+	default:
+		b.WriteString("Google AI Studio login\n\n")
+		if src := host.ProviderAuthSource(provider); src != "" {
+			fmt.Fprintf(&b, "✓ API key resolves from %s\n", src)
+			b.WriteString("\nVerify end to end: /provider test " + provider)
+		} else {
+			b.WriteString("✗ No API key configured\n\n")
+			b.WriteString("Get a key at https://aistudio.google.com/apikey, then either:\n")
+			if len(spec.EnvKeys) > 0 {
+				fmt.Fprintf(&b, "  export %s=<key>\n", spec.EnvKeys[0])
+			}
+			fmt.Fprintf(&b, "  /provider setup %s --api-key <key>\n", provider)
+		}
+	}
+	host.AddSystemMessage(strings.TrimRight(b.String(), "\n"))
+	host.SetStatus("Login checked: " + provider)
+	return Done(nil)
 }

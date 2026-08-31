@@ -320,14 +320,27 @@ func (a *App) argumentItems(trigger, filter string) []components.PaletteItem {
 // subCommandValueItems provides dynamic value lists for sub-commands whose
 // arguments are enumerable (currently MCP enable/disable server names).
 func (a *App) subCommandValueItems(trigger, sub, partial string) []components.PaletteItem {
-	if trigger == "mcp" && (sub == "enable" || sub == "disable") {
-		var items []components.PaletteItem
-		for _, s := range a.MCPStatus() {
-			items = append(items, components.PaletteItem{
-				Label: s.Name, Description: s.Status, Value: s.Name, Icon: "→", Category: "MCP Servers",
-			})
+	// Declarative path: the subcommand names its value domain through
+	// SubCommand.ValueCompletion (provider names, MCP servers, workflow
+	// specs, custom models, ...). Every command gets completion by
+	// declaring it where the subcommand is defined — no per-command special
+	// cases here.
+	if cmd, ok := a.commands.Lookup(trigger); ok {
+		if subDef, found := a.commands.LookupSubCommand(trigger, sub); found && subDef.ValueCompletion != nil {
+			var items []components.PaletteItem
+			for _, value := range subDef.ValueCompletion(a, partial) {
+				if value == "" {
+					continue
+				}
+				items = append(items, components.PaletteItem{
+					Label:    value,
+					Value:    value,
+					Icon:     cmd.Icon,
+					Category: cmd.Name + " " + sub,
+				})
+			}
+			return items
 		}
-		return items
 	}
 	return nil
 }

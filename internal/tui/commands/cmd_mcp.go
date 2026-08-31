@@ -23,9 +23,10 @@ func mcpCommand() Command {
 		Page:          mcpPage,
 		SubCommands: []SubCommand{
 			{Name: "list", Description: "List all MCP servers", Handler: handleMCP},
-			{Name: "enable", Description: "Enable an MCP server", ArgsHint: "<name>", Handler: handleMCP},
-			{Name: "disable", Description: "Disable an MCP server", ArgsHint: "<name>", Handler: handleMCP},
-			{Name: "reconnect", Description: "Reconnect MCP servers", Handler: handleMCP},
+			{Name: "enable", Description: "Enable an MCP server", ArgsHint: "<name>", Handler: handleMCP, ValueCompletion: mcpServerNameCompletion},
+			{Name: "disable", Description: "Disable an MCP server", ArgsHint: "<name>", Handler: handleMCP, ValueCompletion: mcpServerNameCompletion},
+			{Name: "reconnect", Description: "Reconnect MCP servers", Handler: handleMCP, ValueCompletion: mcpServerNameCompletion},
+			{Name: "tools", Description: "List MCP tools", Handler: handleMCP, ValueCompletion: mcpServerNameCompletion},
 			{Name: "refresh", Description: "Refresh MCP tools and resources", Handler: handleMCP},
 			{Name: "tools", Description: "List MCP tools", Handler: handleMCP},
 			{Name: "resources", Description: "List MCP resources", Handler: handleMCP},
@@ -296,3 +297,12 @@ const mcpHelp = `/mcp            - Show MCP server status
 /mcp cache      - Invalidate tool cache
 /mcp add <n> <t> <u> [args] - Add a server
 /mcp remove <s> - Remove a server`
+
+// mcpServerNameCompletion offers every configured MCP server's name.
+func mcpServerNameCompletion(h Host, _ string) []string {
+	var names []string
+	for _, s := range h.MCPStatus() {
+		names = append(names, s.Name)
+	}
+	return names
+}

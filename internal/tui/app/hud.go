@@ -12,7 +12,6 @@ import (
 	openaiProvider "github.com/iSundram/Automergent/internal/ai/openai"
 	"github.com/iSundram/Automergent/internal/cache"
 	"github.com/iSundram/Automergent/internal/config"
-	"github.com/iSundram/Automergent/internal/debug"
 	"os/exec"
 	"strings"
 	"time"
@@ -191,15 +190,6 @@ func buildProviderFromConfig(cfg *config.Config) (ai.Provider, error) {
 	// Prompt cache wrapper.
 	if shouldWrapPromptCacheProvider(cfg, primary) {
 		primary = cache.NewCachingProvider(primary, cache.NewPromptCache())
-	}
-
-	// Debug wrapper (only for the active provider to avoid duplicate loggers).
-	if cfg.Debug.Enabled {
-		sessionID := debug.NewSessionID()
-		logger, err := debug.NewLogger(cfg.Debug, sessionID)
-		if err == nil && logger != nil {
-			primary = debug.NewDebugProvider(primary, logger)
-		}
 	}
 
 	return primary, nil
