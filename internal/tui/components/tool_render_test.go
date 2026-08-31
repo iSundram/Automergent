@@ -162,8 +162,8 @@ func TestEditCardShowsDiffStats(t *testing.T) {
 		Content:  "ctx\n-old\n+new\n+new2\nctx2",
 	}
 	plain := ansi.Strip(c.renderToolCall(m, 90))
-	if !strings.Contains(plain, "+2") || !strings.Contains(plain, "−1") {
-		t.Fatalf("edit card missing +2/−1 diff stats:\n%s", plain)
+	if !strings.Contains(plain, "+2") || !strings.Contains(plain, "-1") {
+		t.Fatalf("edit card missing +2/-1 diff stats:\n%s", plain)
 	}
 	if !strings.Contains(plain, "1 line replaced") {
 		t.Errorf("edit card missing replacement chip:\n%s", plain)

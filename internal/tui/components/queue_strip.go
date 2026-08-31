@@ -101,9 +101,9 @@ func (q QueueStrip) Height() int {
 	}
 	rows := len(q.items)
 	if rows > queueMaxRows {
-		return 1 + queueMaxRows + 1
+		return 2 + queueMaxRows + 1
 	}
-	return 1 + rows
+	return 2 + rows
 }
 
 // View renders the strip. It returns "" when the queue is empty — an empty
