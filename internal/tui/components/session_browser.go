@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,6 +73,19 @@ func (s sessionItem) firstUserLine() string {
 		return line
 	}
 	return ""
+}
+
+// messageCount reports the session's message count: the loaded slice when
+// present, otherwise the lite-listing count carried in metadata (the picker
+// lists transcripts without parsing messages).
+func (s sessionItem) messageCount() int {
+	if len(s.sess.Messages) > 0 || s.sess.Metadata == nil {
+		return len(s.sess.Messages)
+	}
+	if n, err := strconv.Atoi(s.sess.Metadata["lite_message_count"]); err == nil {
+		return n
+	}
+	return len(s.sess.Messages)
 }
 
 func (s sessionItem) Description() string {

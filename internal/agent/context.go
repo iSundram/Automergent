@@ -20,11 +20,10 @@ import (
 type AgentPhase string
 
 const (
-	PhaseInit     AgentPhase = "init"
-	PhaseExplore  AgentPhase = "explore"
-	PhasePlan     AgentPhase = "plan"
-	PhaseBuild    AgentPhase = "build"
-	PhaseVerify   AgentPhase = "verify"
+	PhaseInit    AgentPhase = "init"
+	PhaseExplore AgentPhase = "explore"
+	PhasePlan    AgentPhase = "plan"
+	PhaseBuild   AgentPhase = "build"
 )
 
 // DetectPhase analyzes the current state to determine the agent phase.
@@ -37,10 +36,7 @@ func DetectPhase(messages []ai.Message) AgentPhase {
 	hasPlanned := hasPlanFile()
 	hasBuilt := hasBuildToolResult(messages)
 
-	if hasBuilt {
-		return PhaseVerify
-	}
-	if hasPlanned {
+	if hasBuilt || hasPlanned {
 		return PhaseBuild
 	}
 	if hasExplored {
@@ -96,7 +92,6 @@ func toolNameFromMetadata(metadata map[string]any) string {
 	}
 	return ""
 }
-
 
 func isExploreToolName(name string) bool {
 	name = strings.ToLower(strings.TrimSpace(name))

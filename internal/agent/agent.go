@@ -11,9 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/agent/agentdef"
 	"github.com/iSundram/Automergent/internal/agent/builtin"
+	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
 	contextmgr "github.com/iSundram/Automergent/internal/context"
 	"github.com/iSundram/Automergent/internal/editreview"
@@ -29,18 +29,18 @@ import (
 
 // Agent is the core AI coding agent.
 type Agent struct {
-	cfg                 *config.Config
-	provider            ai.Provider
-	sess                *session.Session
-	tools               *tools.Registry
-	events              chan Event
-	closeOnce           sync.Once
-	eventsClosed        bool
-	sessionPersist      func()
-	mu                  sync.RWMutex
+	cfg            *config.Config
+	provider       ai.Provider
+	sess           *session.Session
+	tools          *tools.Registry
+	events         chan Event
+	closeOnce      sync.Once
+	eventsClosed   bool
+	sessionPersist func()
+	mu             sync.RWMutex
 	// sessionGrants is shared with every subagent this agent spawns (see
 	// Execute), so "always allow" decisions cover the whole agent tree.
-	sessionGrants *grants
+	sessionGrants       *grants
 	approvalSource      string
 	workDir             string
 	firstMessageHandled bool
@@ -417,6 +417,11 @@ const (
 	// emitting it per phase leaves the extra events to be misread as the
 	// first reply of the user's NEXT message.
 	EventPhaseDone = "phase_done"
+	// EventPhase reports the arc phase a run is entering (payload: the phase
+	// name). Emitted at each phase-loop start so the UI's phase indicator
+	// reflects the phase manager's real state instead of guessing from
+	// message history (DetectPhase).
+	EventPhase = "phase"
 	// EventRetry reports one retried provider API attempt. Payload is an
 	// ai.RetryInfo. Emitted while the retry is pending, so the UI can show
 	// progress instead of appearing to hang through the backoff.
@@ -436,10 +441,10 @@ var errPromptSystemPrepared = fmt.Errorf("prompt system prepared execution conte
 // New creates a new Agent.
 func New(cfg *config.Config, provider ai.Provider, sess *session.Session, reg *tools.Registry) *Agent {
 	agent := &Agent{
-		cfg:                 cfg,
-		provider:            provider,
-		sess:                sess,
-		tools:               reg,
+		cfg:             cfg,
+		provider:        provider,
+		sess:            sess,
+		tools:           reg,
 		events:          make(chan Event, 8192),
 		steer:           make(chan string, 8),
 		approvalSource:  "tui",
@@ -902,6 +907,7 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			}
 
 			// Make the arc visible: the UI shows which phase is taking over.
+			a.Emit(EventPhase, string(phase))
 			a.Emit(EventStatus, fmt.Sprintf("phase %s: %s", phase, task.Description))
 
 			// Execute the phase using the standard loop with phase-specific config
@@ -1861,6 +1867,7 @@ func (a *Agent) runStandardLoop(ctx context.Context, prompt string, isFirstMessa
 		a.Emit(EventError, result.Error)
 		return result.Error
 	}
+	a.Emit(EventPhase, string(shared.PhaseBuild))
 	return a.runPhaseLoop(ctx, shared.PhaseBuild, result, true)
 }
 
@@ -1880,7 +1887,7 @@ func (a *Agent) handleViolation(v *shared.ViolationCheck) {
 		"title":   "Policy Violation Detected",
 		"message": fmt.Sprintf("Type: %s, Severity: %s, Action: %s", v.Type, v.Severity, v.Action),
 	})
-	
+
 	// Record violation in phase manager
 	a.phaseManager.RecordViolation(v.Type, v.Severity, v.UserMessage, v.AgentResponse)
 }
@@ -1899,21 +1906,21 @@ func (a *Agent) answerDirectQuestion(ctx context.Context, question string) error
 	// Use a simple completion for direct questions
 	provider := a.Provider()
 	systemPrompt := a.getSystemPrompt(ctx, provider)
-	
+
 	req := ai.CompletionRequest{
-		Messages: prependUserContext([]ai.Message{ai.NewTextMessage(ai.RoleUser, question)}, a.userContext()),
-		Tools:    []ai.ToolSchema{},
-		System:   systemPrompt,
+		Messages:    prependUserContext([]ai.Message{ai.NewTextMessage(ai.RoleUser, question)}, a.userContext()),
+		Tools:       []ai.ToolSchema{},
+		System:      systemPrompt,
 		Temperature: 0.0,
-		MaxTokens:  1024,
-		Stream:     true,
+		MaxTokens:   1024,
+		Stream:      true,
 	}
-	
+
 	resp, err := provider.Complete(ctx, req)
 	if err != nil {
 		return err
 	}
-	
+
 	text, _, _, err := a.drainStream(resp)
 	if err != nil {
 		return err
@@ -1933,7 +1940,7 @@ func (a *Agent) answerDirectQuestion(ctx context.Context, question string) error
 func (a *Agent) toolSetToProfile(ts shared.ToolSet) map[string]bool {
 	all := buildToolSchemas(a.tools)
 	profile := make(map[string]bool)
-	
+
 	switch ts {
 	case shared.ToolSetContextOnly:
 		return map[string]bool{}
@@ -1970,7 +1977,7 @@ func (a *Agent) toolSetToProfile(ts shared.ToolSet) map[string]bool {
 			profile[schema.Name] = true
 		}
 	}
-	
+
 	return profile
 }
 
@@ -2046,7 +2053,7 @@ func (a *Agent) RegisterContextTools() ContextToolRegistration {
 		}
 		a.tools.Register(toolsShell.NewWaitTool())
 		a.tools.Register(toolsFS.NewMultiEditTool(a.cfg))
-			subagent.RegisterControlTool(a.tools)
+		subagent.RegisterControlTool(a.tools)
 		names = append(names,
 			"git_status", "git_diff", "git_log", "git_add", "git_commit",
 			"git_branch", "git_checkout", "git_stash",

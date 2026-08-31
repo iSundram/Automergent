@@ -169,9 +169,13 @@ type App struct {
 	fetchingModels     bool
 	availableProviders []string
 	streamedReply      bool
-	browsing           bool
-	lastCtrlCAt        time.Time
-	askUserReplyCh     chan string
+	// livePhase is the arc phase last reported by agent.EventPhase; empty
+	// until the first phase event of a session (updatePhaseHeader falls back
+	// to DetectPhase for restored sessions).
+	livePhase      string
+	browsing       bool
+	lastCtrlCAt    time.Time
+	askUserReplyCh chan string
 
 	// Bottom-chrome state. infoLine renders the `└─` hint line; the rest is
 	// derived UI state consumed by uistate.go (see refreshChrome).
@@ -237,17 +241,17 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	ctx, cancel := context.WithCancel(context.Background())
 
 	app := &App{
-		cfg:                cfg,
-		ag:                 ag,
-		sess:               sess,
-		storage:            storage,
-		persist:            persist,
-		keys:               kb,
-		styles:             styles,
-		theme:              theme,
-		mcpOrch:            mcpOrch,
-		conversation:       components.NewConversation(styles),
-		diffPane:           components.NewDiff(styles),
+		cfg:          cfg,
+		ag:           ag,
+		sess:         sess,
+		storage:      storage,
+		persist:      persist,
+		keys:         kb,
+		styles:       styles,
+		theme:        theme,
+		mcpOrch:      mcpOrch,
+		conversation: components.NewConversation(styles),
+		diffPane:     components.NewDiff(styles),
 		// Prompt history persists beside the sessions dir (typically
 		// ~/.automergent/history.txt) so up-arrow recall survives restarts.
 		input:              components.NewInput(styles).WithHistoryFile(filepath.Join(filepath.Dir(cfg.SessionDir), "history.txt")),

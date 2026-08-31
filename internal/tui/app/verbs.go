@@ -72,8 +72,6 @@ func verbForPhase(phase string) string {
 		return "planning"
 	case "build":
 		return "building"
-	case "verify":
-		return "verifying"
 	default:
 		return "working"
 	}
@@ -84,7 +82,7 @@ func verbForPhase(phase string) string {
 // drive the spinner without a new event type.
 func verbForStatus(s string) (string, bool) {
 	lower := strings.ToLower(s)
-	for _, phase := range []string{"init", "explore", "plan", "build", "verify"} {
+	for _, phase := range []string{"init", "explore", "plan", "build"} {
 		if strings.HasPrefix(lower, "phase "+phase) {
 			return verbForPhase(phase), true
 		}

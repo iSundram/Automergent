@@ -20,6 +20,19 @@ import (
 	"strings"
 )
 
+// updatePhaseHeader sets the header's phase indicator and the spinner verb.
+// The live phase reported by EventPhase is authoritative once the arc has
+// announced it; DetectPhase (a guess from message history) is only a
+// fallback for restored sessions where no phase event has fired yet.
+func (a *App) updatePhaseHeader() {
+	phase := a.livePhase
+	if phase == "" {
+		phase = string(agent.DetectPhase(a.sess.Messages))
+	}
+	a.header.SetPhase(phase)
+	a.setSpinVerb(verbForPhase(phase))
+}
+
 func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	// Live-update active token estimate on every agent event.
 	a.updateActiveTokens()
@@ -110,8 +123,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 				a.conversation.AddMessage("tool_result", truncateUIContent(r.Content, a.conversation.ReviewMode()), false)
 			}
 		}
-		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
-		a.setSpinVerb(verbForPhase(string(agent.DetectPhase(a.sess.Messages))))
+		a.updatePhaseHeader()
 		a.statusBar.SetStatus("Thinking…")
 		return a.waitForAgentEvent()
 	case agent.EventStatus:
@@ -192,6 +204,15 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.statusBar.SetStatus(thinkingText)
 		}
 		return a.waitForAgentEvent()
+	case agent.EventPhase:
+		// The arc entered a new phase (explore/plan/build/…): drive the
+		// header's phase indicator from the phase manager's real state
+		// instead of the DetectPhase history heuristic.
+		if p, ok := ev.Payload.(string); ok && strings.TrimSpace(p) != "" {
+			a.livePhase = p
+			a.updatePhaseHeader()
+		}
+		return a.waitForAgentEvent()
 	case agent.EventPhaseDone:
 		// One phase of a multi-phase arc finished; the run continues with
 		// the next one. Settle the phase's reply into the transcript like
@@ -258,7 +279,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		if calc := a.ag.AdaptiveCalculator(); calc != nil {
 			a.header.SetAdaptiveWeight(calc.Weight())
 		}
-		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
+		a.updatePhaseHeader()
 		if strings.TrimSpace(text) != "" && !a.streamedReply {
 			a.conversation.AddMessage("assistant", text, false)
 		}
@@ -293,7 +314,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		if calc := a.ag.AdaptiveCalculator(); calc != nil {
 			a.header.SetAdaptiveWeight(calc.Weight())
 		}
-		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
+		a.updatePhaseHeader()
 		a.conversation.AddMessage("system", "Context compacted successfully", false)
 		return nil
 	case agent.EventError:

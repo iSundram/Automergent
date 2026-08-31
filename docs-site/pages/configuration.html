@@ -415,7 +415,7 @@
                     <td><code>theme</code></td>
                     <td><code>string</code></td>
                     <td><code>"modern"</code></td>
-                    <td>UI theme. One of: <code>modern</code>, <code>catppuccin</code>, <code>dracula</code>, <code>nord</code>, <code>gruvbox</code>, <code>onedark</code>, <code>monokai</code>, <code>tokyonight</code>, <code>default</code>.</td>
+                    <td>UI theme. One of: <code>modern</code>, <code>catppuccin</code>, <code>dracula</code>, <code>nord</code>, <code>gruvbox</code>, <code>onedark</code>, <code>monokai</code>, <code>tokyonight</code>, <code>solarized-dark</code>, <code>solarized-light</code>, <code>high-contrast</code>.</td>
                 </tr>
                 <tr>
                     <td><code>keybindings</code></td>
@@ -1424,24 +1424,14 @@
                 <td>Alias for Google API key. Used as fallback if <code>GOOGLE_API_KEY</code> is not set.</td>
             </tr>
             <tr>
-                <td><code>OPENAI_API_KEY</code></td>
-                <td>OpenAI</td>
-                <td>API key for GPT models via OpenAI.</td>
-            </tr>
-            <tr>
-                <td><code>ANTHROPIC_API_KEY</code></td>
-                <td>Anthropic</td>
-                <td>API key for Claude models via Anthropic.</td>
-            </tr>
-            <tr>
                 <td><code>AUTOMERGENT_PROVIDER</code></td>
                 <td>Core</td>
-                <td>Override the configured provider (e.g., <code>google-aistudio</code>, <code>openai</code>).</td>
+                <td>Override the configured provider (<code>google-aistudio</code>, <code>google-vertex</code>, <code>custom</code>).</td>
             </tr>
             <tr>
                 <td><code>AUTOMERGENT_MODEL</code></td>
                 <td>Core</td>
-                <td>Override the configured model (e.g., <code>gemini-2.5-pro</code>).</td>
+                <td>Override the configured model (e.g., <code>gemini-3.6-flash</code>).</td>
             </tr>
             <tr>
                 <td><code>AUTOMERGENT_MODE</code></td>
@@ -1622,7 +1612,7 @@
 <span class="yaml-comment"># Minimal configuration — everything else uses defaults</span>
 <span class="yaml-key">provider</span>: <span class="yaml-str">"google-aistudio"</span>
 <span class="yaml-key">model</span>: <span class="yaml-str">"gemini-3.6-flash"</span>
-<span class="yaml-key">mode</span>: <span class="yaml-str">"edit"</span>
+<span class="yaml-key">mode</span>: <span class="yaml-str">"manual"</span>
 
 <span class="yaml-key">providers</span>:
   <span class="yaml-key">google-aistudio</span>:
@@ -1635,7 +1625,7 @@
 <span class="yaml-comment"># Multi-provider setup with fallback chain</span>
 <span class="yaml-key">provider</span>: <span class="yaml-str">"google-aistudio"</span>
 <span class="yaml-key">model</span>: <span class="yaml-str">"gemini-2.5-pro"</span>
-<span class="yaml-key">mode</span>: <span class="yaml-str">"edit"</span>
+<span class="yaml-key">mode</span>: <span class="yaml-str">"manual"</span>
 <span class="yaml-key">theme</span>: <span class="yaml-str">"catppuccin"</span>
 
 <span class="yaml-key">providers</span>:
@@ -1649,14 +1639,11 @@
     <span class="yaml-key">location</span>: <span class="yaml-str">"us-central1"</span>
     <span class="yaml-key">temperature</span>: <span class="yaml-num">0.2</span>
 
-  <span class="yaml-key">openai</span>:
-    <span class="yaml-key">apiKey</span>: <span class="yaml-str">"${OPENAI_API_KEY}"</span>
+  <span class="yaml-key">custom</span>:
+    <span class="yaml-key">apiKey</span>: <span class="yaml-str">"${PROVIDER_API_KEY}"</span>
+    <span class="yaml-key">baseUrl</span>: <span class="yaml-str">"https://api.openai.com/v1"</span>
     <span class="yaml-key">defaultModel</span>: <span class="yaml-str">"gpt-4o"</span>
     <span class="yaml-key">temperature</span>: <span class="yaml-num">0.3</span>
-
-  <span class="yaml-key">anthropic</span>:
-    <span class="yaml-key">apiKey</span>: <span class="yaml-str">"${ANTHROPIC_API_KEY}"</span>
-    <span class="yaml-key">defaultModel</span>: <span class="yaml-str">"claude-sonnet-4-20250514"</span>
 
 <span class="yaml-key">fastModel</span>: <span class="yaml-str">"gemini-3.6-flash"</span>
 <span class="yaml-key">effort</span>: <span class="yaml-str">"medium"</span>
@@ -1664,8 +1651,8 @@
 <span class="yaml-key">providerFallback</span>:
   - <span class="yaml-key">provider</span>: <span class="yaml-str">"google-aistudio"</span>
     <span class="yaml-key">model</span>: <span class="yaml-str">"gemini-3.6-flash"</span>
-  - <span class="yaml-key">provider</span>: <span class="yaml-str">"anthropic"</span>
-    <span class="yaml-key">model</span>: <span class="yaml-str">"claude-3-5-haiku-20241022"</span></code></pre>
+  - <span class="yaml-key">provider</span>: <span class="yaml-str">"google-vertex"</span>
+    <span class="yaml-key">model</span>: <span class="yaml-str">"gemini-3.6-flash"</span></code></pre>
 
 <!-- ═══ Enterprise ═══ -->
 <h3>Enterprise Config with Security</h3>
@@ -1674,8 +1661,8 @@
 <span class="yaml-comment"># Enterprise configuration with strict security</span>
 <span class="yaml-key">provider</span>: <span class="yaml-str">"google-vertex"</span>
 <span class="yaml-key">model</span>: <span class="yaml-str">"gemini-2.5-pro"</span>
-<span class="yaml-key">mode</span>: <span class="yaml-str">"edit"</span>
-<span class="yaml-key">theme</span>: <span class="yaml-str">"default"</span>
+<span class="yaml-key">mode</span>: <span class="yaml-str">"manual"</span>
+<span class="yaml-key">theme</span>: <span class="yaml-str">"modern"</span>
 
 <span class="yaml-key">providers</span>:
   <span class="yaml-key">google-vertex</span>:
@@ -1818,7 +1805,7 @@
 <span class="yaml-comment"># ─── Core ───────────────────────────────────────────────────────</span>
 <span class="yaml-key">provider</span>: <span class="yaml-str">"google-aistudio"</span>
 <span class="yaml-key">model</span>: <span class="yaml-str">"gemini-3.6-flash"</span>
-<span class="yaml-key">mode</span>: <span class="yaml-str">"edit"</span>
+<span class="yaml-key">mode</span>: <span class="yaml-str">"manual"</span>
 <span class="yaml-key">theme</span>: <span class="yaml-str">"modern"</span>
 <span class="yaml-key">keybindings</span>: <span class="yaml-str">"default"</span>
 <span class="yaml-key">layout</span>: <span class="yaml-str">"default"</span>

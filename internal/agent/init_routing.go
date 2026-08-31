@@ -182,6 +182,7 @@ func (a *Agent) executeDecomposition(ctx context.Context, d *promptpkg.Decomposi
 		if agentLabel == "" {
 			agentLabel = "main"
 		}
+		a.Emit(EventPhase, string(phase))
 		a.Emit(EventStatus, fmt.Sprintf("phase %s (%s): %s", phase, agentLabel, task.Description))
 
 		// The last task's phase loop ends the Run; earlier ones emit
