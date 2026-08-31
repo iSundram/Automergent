@@ -858,7 +858,8 @@ func (a *App) OpenAgentView(agentID string) {
 	a.openInspector(components.DockEntry{Kind: components.DockAgent, ID: agentID})
 }
 
-func (a *App) OpenSettingsPicker() {	pc := a.ProviderConfig(a.Provider())
+func (a *App) OpenSettingsPicker() {
+	pc := a.ProviderConfig(a.Provider())
 	effort := pc.Effort
 	if effort == "" {
 		effort = pc.ThinkingLevel

@@ -11,17 +11,41 @@ import (
 // another assistant message appended on retry) or after autocompact rewrites.
 // Merging their content parts is safe because providers treat them as a single
 // turn regardless.
+//
+// System messages between two assistant turns do not make the pair legal: the
+// validator skips system roles, and mid-history system messages (compaction
+// boundary markers, compacted summaries, JIT loads, stall nudges) routinely
+// sit between assistant turns. The merge therefore looks past system messages
+// when deciding whether two assistant messages are consecutive — but never
+// reorders them: the injected system content stays between the merged parts.
 func MergeConsecutiveAssistantMessages(messages []Message) []Message {
 	if len(messages) == 0 {
 		return messages
 	}
 	out := make([]Message, 0, len(messages))
+	// lastAssistant is the index in out of the most recent assistant message
+	// with only system messages after it; -1 when none qualifies.
+	lastAssistant := -1
 	for _, m := range messages {
-		if len(out) > 0 && out[len(out)-1].Role == RoleAssistant && m.Role == RoleAssistant {
-			// Merge content parts into the previous assistant message.
-			out[len(out)-1].Content = append(out[len(out)-1].Content, m.Content...)
-		} else {
+		switch {
+		case m.Role == RoleAssistant && lastAssistant >= 0:
+			// Merge content parts into the earlier assistant message. The
+			// system messages between them keep their position: appended
+			// content lands after them, which is where the second assistant
+			// message would have been anyway.
+			out[lastAssistant].Content = append(out[lastAssistant].Content, m.Content...)
+			// Metadata from the dropped message (e.g. google_parts) is
+			// stale for the merged message; the earlier message's metadata
+			// stays authoritative.
+		case m.Role == RoleAssistant:
 			out = append(out, m)
+			lastAssistant = len(out) - 1
+		case m.Role == RoleSystem:
+			// Keeps the merge eligible across system messages.
+			out = append(out, m)
+		default:
+			out = append(out, m)
+			lastAssistant = -1
 		}
 	}
 	return out

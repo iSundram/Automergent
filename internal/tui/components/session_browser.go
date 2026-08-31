@@ -686,7 +686,7 @@ func (sb SessionBrowser) addScrollbar(lines []string, viewportItems, rowCount in
 		}
 		// MaxWidth truncates (never wraps): full-width rules and headers just
 		// lose their last two cells to the scrollbar instead of breaking lines.
-		lines[i] = lipgloss.NewStyle().MaxWidth(sb.width - 2).Render(line) +
+		lines[i] = lipgloss.NewStyle().MaxWidth(sb.width-2).Render(line) +
 			lipgloss.NewStyle().Foreground(sb.styles.T.BorderNormal).Render(bar) + " "
 	}
 	return lines
@@ -716,4 +716,3 @@ func (sb SessionBrowser) Height() int {
 	// rule + search + project + blank + rows*2 + blank + rule + 2 footer lines
 	return visible*2 + 8
 }
-

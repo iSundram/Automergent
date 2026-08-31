@@ -120,3 +120,97 @@ func TestRepairMissingToolResults(t *testing.T) {
 		t.Fatalf("unexpected synthetic result: %+v", result)
 	}
 }
+
+// TestMergeConsecutiveAssistantAcrossSystem pins the compaction-shape repair:
+// a system message between two assistant turns (compaction boundary marker,
+// compacted summary, JIT load) does not make the pair legal. The validator
+// skips system roles, so the merge must look past them or the request fails
+// with INVALID_INPUT ("consecutive assistant messages").
+func TestMergeConsecutiveAssistantAcrossSystem(t *testing.T) {
+	messages := []Message{
+		NewTextMessage(RoleUser, "hello"),
+		NewTextMessage(RoleAssistant, "first reply"),
+		NewTextMessage(RoleSystem, "── compaction boundary ──"),
+		NewTextMessage(RoleAssistant, "second reply"),
+	}
+
+	merged := MergeConsecutiveAssistantMessages(messages)
+	if err := ValidateMessageSequence(merged); err != nil {
+		t.Fatalf("merged sequence must validate, got: %v", err)
+	}
+
+	// The system message keeps its position between the two assistant
+	// messages; the second assistant message's content is merged into the
+	// first, so the sequence is [user, assistant(+merged), system].
+	if len(merged) != 3 {
+		t.Fatalf("expected 3 messages after merge, got %d: %+v", len(merged), merged)
+	}
+	if merged[1].Role != RoleAssistant {
+		t.Fatalf("expected assistant at [1], got %s", merged[1].Role)
+	}
+	if merged[2].Role != RoleSystem {
+		t.Fatalf("expected system at [2], got %s", merged[2].Role)
+	}
+	if got := merged[1].TextContent(); got != "first replysecond reply" {
+		t.Fatalf("assistant content must be merged, got %q", got)
+	}
+}
+
+// TestMergeConsecutiveAssistantDirect pins the simple adjacent case: two
+// assistant messages with nothing between them collapse into one.
+func TestMergeConsecutiveAssistantDirect(t *testing.T) {
+	messages := []Message{
+		NewTextMessage(RoleUser, "hello"),
+		NewTextMessage(RoleAssistant, "part one"),
+		NewTextMessage(RoleAssistant, "part two"),
+	}
+	merged := MergeConsecutiveAssistantMessages(messages)
+	if len(merged) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(merged))
+	}
+	if got := merged[1].TextContent(); got != "part onepart two" {
+		t.Fatalf("expected merged text, got %q", got)
+	}
+	if err := ValidateMessageSequence(merged); err != nil {
+		t.Fatalf("merged sequence must validate: %v", err)
+	}
+}
+
+// TestMergePreservesUserSeparatedAssistants pins that a user message between
+// two assistant messages still keeps them separate — the merge only bridges
+// system messages, never user or tool turns.
+func TestMergePreservesUserSeparatedAssistants(t *testing.T) {
+	messages := []Message{
+		NewTextMessage(RoleUser, "hello"),
+		NewTextMessage(RoleAssistant, "reply one"),
+		NewTextMessage(RoleUser, "follow-up"),
+		NewTextMessage(RoleAssistant, "reply two"),
+	}
+	merged := MergeConsecutiveAssistantMessages(messages)
+	if len(merged) != 4 {
+		t.Fatalf("user-separated assistants must stay separate, got %d messages", len(merged))
+	}
+}
+
+// TestMergeAcrossMultipleSystemMessages pins the worst compaction shape:
+// several system markers between two assistant turns still merge.
+func TestMergeAcrossMultipleSystemMessages(t *testing.T) {
+	messages := []Message{
+		NewTextMessage(RoleUser, "hello"),
+		NewTextMessage(RoleAssistant, "a"),
+		NewTextMessage(RoleSystem, "marker one"),
+		NewTextMessage(RoleSystem, "marker two"),
+		NewTextMessage(RoleAssistant, "b"),
+	}
+	merged := MergeConsecutiveAssistantMessages(messages)
+	if err := ValidateMessageSequence(merged); err != nil {
+		t.Fatalf("merged sequence must validate: %v", err)
+	}
+	// [user, assistant(a+b), system, system]
+	if len(merged) != 4 {
+		t.Fatalf("expected 4 messages, got %d", len(merged))
+	}
+	if got := merged[1].TextContent(); got != "ab" {
+		t.Fatalf("expected merged text, got %q", got)
+	}
+}

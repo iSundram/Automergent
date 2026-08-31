@@ -1,12 +1,15 @@
 package context
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/iSundram/Automergent/internal/modelsdev"
 )
 
 // ContextBreakdown captures the token composition of a prompt.
@@ -96,6 +99,13 @@ func (tc *TelemetryCollector) RecordCompaction(e CompactionEvent) {
 		tc.compactionEvents = tc.compactionEvents[len(tc.compactionEvents)-tc.maxEvents:]
 	}
 	_ = tc.flushCompactionEvents()
+}
+
+// SetCostProvider names the provider the cost tracker prices models
+// against (models.dev catalog prices). Called by the agent whenever usage
+// is recorded so catalog lookups hit the right provider.
+func (tc *TelemetryCollector) SetCostProvider(provider string) {
+	tc.costTracker.SetProvider(provider)
 }
 
 // RecordUsage records token usage and cost.
@@ -212,25 +222,33 @@ func (tc *TelemetryCollector) Load() error {
 
 // --- Cost Tracking ---
 
-// CostTracker maintains per-model cost accumulation.
+// CostTracker maintains per-model cost accumulation. Prices come from the
+// models.dev catalog (via the provider set with SetProvider), with
+// per-model SetPricing overrides and a legacy family table as fallbacks.
 type CostTracker struct {
-	mu      sync.RWMutex
-	models  map[string]*ModelCost
-	pricing map[string]ModelPricing
+	mu       sync.RWMutex
+	models   map[string]*ModelCost
+	pricing  map[string]ModelPricing
+	provider string
 }
 
-// ModelPricing defines cost per 1K tokens.
+// ModelPricing defines cost per 1K tokens. Cache fields are zero when the
+// provider doesn't bill cache traffic separately.
 type ModelPricing struct {
-	InputPer1K  float64 `json:"input_per_1k"`
-	OutputPer1K float64 `json:"output_per_1k"`
+	InputPer1K      float64 `json:"input_per_1k"`
+	OutputPer1K     float64 `json:"output_per_1k"`
+	CacheReadPer1K  float64 `json:"cache_read_per_1k,omitempty"`
+	CacheWritePer1K float64 `json:"cache_write_per_1k,omitempty"`
 }
 
 // ModelCost tracks cost for a single model.
 type ModelCost struct {
-	Model        string  `json:"model"`
-	InputTokens  int     `json:"input_tokens"`
-	OutputTokens int     `json:"output_tokens"`
-	TotalCost    float64 `json:"total_cost_usd"`
+	Model             string  `json:"model"`
+	InputTokens       int     `json:"input_tokens"`
+	OutputTokens      int     `json:"output_tokens"`
+	CachedReadTokens  int     `json:"cached_read_tokens,omitempty"`
+	CachedWriteTokens int     `json:"cached_write_tokens,omitempty"`
+	TotalCost         float64 `json:"total_cost_usd"`
 }
 
 // CostSummary aggregates cost across models.
@@ -241,16 +259,14 @@ type CostSummary struct {
 	ByModel           map[string]ModelCost `json:"by_model"`
 }
 
-// DefaultPricing returns known model pricing. Keys are canonical family
-// names; matching is by longest substring so versioned or suffixed model
-// IDs ("gemini-2.5-flash-lite", "gemini-2.5-flash-preview") resolve to
-// their family without enumerating every alias.
-func DefaultPricing() map[string]ModelPricing {
+// legacyPricing returns the fallback family table, used only for models the
+// models.dev catalog doesn't carry (custom endpoints, exotic aliases).
+// Matching is by longest substring so versioned or suffixed model IDs
+// ("gemini-2.5-flash-lite", "gemini-2.5-flash-preview") resolve to their
+// family without enumerating every alias. Catalog models never reach this
+// table — their prices are exact.
+func legacyPricing() map[string]ModelPricing {
 	return map[string]ModelPricing{
-		"gemini-3.6-pro":     {InputPer1K: 0.000125, OutputPer1K: 0.0005},
-		"gemini-3.6-flash":   {InputPer1K: 0.000075, OutputPer1K: 0.0003},
-		"gemini-3.5-pro":     {InputPer1K: 0.000125, OutputPer1K: 0.0005},
-		"gemini-3.5-flash":   {InputPer1K: 0.000075, OutputPer1K: 0.0003},
 		"gemini-2.5-pro":     {InputPer1K: 0.000125, OutputPer1K: 0.0005},
 		"gemini-2.5-flash":   {InputPer1K: 0.000075, OutputPer1K: 0.0003},
 		"gpt-4o":             {InputPer1K: 0.005, OutputPer1K: 0.015},
@@ -259,21 +275,41 @@ func DefaultPricing() map[string]ModelPricing {
 		"claude-3.5-haiku":   {InputPer1K: 0.00025, OutputPer1K: 0.00125},
 		"claude-sonnet-4":    {InputPer1K: 0.003, OutputPer1K: 0.015},
 		"claude-opus-4":      {InputPer1K: 0.015, OutputPer1K: 0.075},
-		"claude-haiku-3":     {InputPer1K: 0.00025, OutputPer1K: 0.00125},
 		"deepseek-chat":      {InputPer1K: 0.00014, OutputPer1K: 0.00028},
 		"deepseek-reasoner":  {InputPer1K: 0.00055, OutputPer1K: 0.00219},
 	}
 }
 
-// pricingFor resolves the pricing entry for a concrete model ID by longest
-// substring match against the table's family names — "gemini-2.5-flash-lite"
-// matches "gemini-2.5-flash", and a longer matching family always wins over
-// a shorter one.
-func pricingFor(pricing map[string]ModelPricing, model string) (ModelPricing, bool) {
+// pricingFor resolves the pricing for a concrete model ID: the models.dev
+// catalog first (live per-model prices, including cache pricing), then the
+// tracker's override table (SetPricing), then the legacy family-substring
+// table for models the catalog doesn't carry (custom endpoints). Callers
+// hold ct.mu (read or write).
+func pricingFor(ct *CostTracker, model string) (ModelPricing, bool) {
+	// User-set overrides win over everything.
+	if p, ok := ct.pricing[model]; ok {
+		return p, true
+	}
+
+	// models.dev catalog: exact per-model prices for the active provider.
+	// Prices are already loaded (cache/snapshot) so this is a map lookup,
+	// not a network call.
+	if ct.provider != "" {
+		if m, ok := modelsdev.ModelInfo(context.Background(), ct.provider, model); ok {
+			return ModelPricing{
+				InputPer1K:      m.InputPrice / 1000,
+				OutputPer1K:     m.OutputPrice / 1000,
+				CacheReadPer1K:  m.CacheReadPrice / 1000,
+				CacheWritePer1K: m.CacheWritePrice / 1000,
+			}, true
+		}
+	}
+
+	// Legacy family-substring fallback.
 	lower := strings.ToLower(model)
 	best := ""
 	var found ModelPricing
-	for family, p := range pricing {
+	for family, p := range legacyPricing() {
 		if strings.Contains(lower, family) && len(family) > len(best) {
 			best = family
 			found = p
@@ -282,16 +318,34 @@ func pricingFor(pricing map[string]ModelPricing, model string) (ModelPricing, bo
 	return found, best != ""
 }
 
-// NewCostTracker creates a cost tracker with default pricing.
+// NewCostTracker creates a cost tracker. Pricing resolves through the
+// models.dev catalog once SetProvider names the active provider.
 func NewCostTracker() *CostTracker {
 	return &CostTracker{
 		models:  make(map[string]*ModelCost),
-		pricing: DefaultPricing(),
+		pricing: make(map[string]ModelPricing),
 	}
 }
 
-// Add records usage for a model.
+// SetProvider names the provider whose catalog prices apply. Call it
+// whenever the active provider or model changes.
+func (ct *CostTracker) SetProvider(provider string) {
+	ct.mu.Lock()
+	ct.provider = provider
+	ct.mu.Unlock()
+}
+
+// Add records usage for a model. Cache tokens are billed at the cache
+// rates when the provider reports them; the remainder of the input is
+// billed at the regular input rate.
 func (ct *CostTracker) Add(model string, inputTokens, outputTokens int) {
+	ct.AddDetailed(model, inputTokens, outputTokens, 0, 0)
+}
+
+// AddDetailed records usage with cache accounting. cachedReadTokens /
+// cachedWriteTokens are billed at the cache rates (write is typically a
+// premium over input); uncached input pays the regular rate.
+func (ct *CostTracker) AddDetailed(model string, inputTokens, outputTokens, cachedReadTokens, cachedWriteTokens int) {
 	ct.mu.Lock()
 	defer ct.mu.Unlock()
 
@@ -301,10 +355,27 @@ func (ct *CostTracker) Add(model string, inputTokens, outputTokens int) {
 	mc := ct.models[model]
 	mc.InputTokens += inputTokens
 	mc.OutputTokens += outputTokens
+	mc.CachedReadTokens += cachedReadTokens
+	mc.CachedWriteTokens += cachedWriteTokens
 
-	if pricing, ok := pricingFor(ct.pricing, model); ok {
-		mc.TotalCost += float64(inputTokens) / 1000.0 * pricing.InputPer1K
-		mc.TotalCost += float64(outputTokens) / 1000.0 * pricing.OutputPer1K
+	pricing, ok := pricingFor(ct, model)
+	if !ok {
+		return
+	}
+	uncached := inputTokens - cachedReadTokens
+	if uncached < 0 {
+		uncached = 0
+	}
+	mc.TotalCost += float64(uncached) / 1000.0 * pricing.InputPer1K
+	mc.TotalCost += float64(outputTokens) / 1000.0 * pricing.OutputPer1K
+	if pricing.CacheReadPer1K > 0 {
+		mc.TotalCost += float64(cachedReadTokens) / 1000.0 * pricing.CacheReadPer1K
+	} else {
+		// No separate cache rate: cached reads bill as input.
+		mc.TotalCost += float64(cachedReadTokens) / 1000.0 * pricing.InputPer1K
+	}
+	if pricing.CacheWritePer1K > 0 {
+		mc.TotalCost += float64(cachedWriteTokens) / 1000.0 * pricing.CacheWritePer1K
 	}
 }
 

@@ -124,15 +124,7 @@ func (h Header) View() string {
 		phaseLabel = " " + h.getPhaseStyle().Render(phaseText)
 	}
 
-	// Total session usage: the cumulative, provider-reported token count
-	// across every request this session (distinct from the context bar's
-	// "how full is the window right now"). Σ marks it as a sum.
-	totalLabel := ""
-	if h.totalTokens > 0 && h.width > 90 {
-		totalLabel = " " + lipgloss.NewStyle().Foreground(h.styles.T.Muted).
-			Render(fmt.Sprintf("Σ %s", formatTokens(h.totalTokens)))
-	}
-	left := lipgloss.JoinHorizontal(lipgloss.Center, brand, phaseLabel, totalLabel)
+	left := lipgloss.JoinHorizontal(lipgloss.Center, brand, phaseLabel)
 
 	// 2. Center Section: Provider & Model
 	providerIcon := h.getProviderIcon()

@@ -210,6 +210,20 @@ func (a *Agent) executeDecomposition(ctx context.Context, d *promptpkg.Decomposi
 			}
 		}
 
+		// Attach the init file map to the task spec so the phase loop's
+		// prompt block (and the explore exit gate) know which files the
+		// task concerns. Without this, the gate starves on the decomposition
+		// path — every task lands without a coverage baseline.
+		if ir := a.promptSystem.GetInitResults(); ir != nil && len(ir.FilesFound) > 0 {
+			if task.Context == nil {
+				task.Context = map[string]any{}
+			}
+			if _, ok := task.Context["files_found"]; !ok {
+				task.Context["files_found"] = ir.FilesFound
+				result.TaskSpec = task
+			}
+		}
+
 		agentLabel := task.Agent
 		if agentLabel == "" {
 			agentLabel = "main"

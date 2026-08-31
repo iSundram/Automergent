@@ -27,8 +27,23 @@ var titleModelLadder = []string{
 // titleRequestFormat is the prompt/system pair shared by every ladder rung.
 const (
 	titleRequestSystem = "You write terse, specific session titles in the user's language. Plain text only."
-	titleMaxTokens     = 32
+	titleMaxTokens     = 128
 )
+
+// titleThinking pins near-zero reasoning for title generation. Without it the
+// provider's default (dynamic thinking) applies: thinking tokens count against
+// MaxOutputTokens, so a reasoning model burns the whole budget before writing
+// a single character and every rung returns empty. The three fields together
+// cover every model family the ladder can hit:
+//   - BudgetTokens=1   → Gemini 2.5 (thinkingBudget; 0 would mean "dynamic")
+//   - ThinkingLevel    → Gemini 3.x (thinking_level)
+//   - Effort           → legacy path fallback for anything older
+var titleThinking = &ai.ThinkingConfig{
+	Type:          "enabled",
+	BudgetTokens:  1,
+	ThinkingLevel: "minimal",
+	Effort:        "minimal",
+}
 
 // GenerateSessionTitle produces a short title for a conversation's opening
 // exchange, used to auto-name sessions in the picker. It walks the cheap-model
@@ -149,6 +164,9 @@ func completeTitle(ctx context.Context, p ai.Provider, prompt string) string {
 		Temperature: 0.2,
 		MaxTokens:   titleMaxTokens,
 		Stream:      true,
+		// Near-zero thinking, or reasoning models spend the entire token
+		// budget before emitting the title (see titleThinking).
+		Thinking: titleThinking,
 	}
 	resp, err := p.Complete(ctx, req)
 	if err != nil {

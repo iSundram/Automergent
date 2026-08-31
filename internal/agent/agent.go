@@ -1092,6 +1092,7 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		toolCalls := resp.ToolCalls()
 		stop := resp.StopReason()
 		a.sess.AddUsage(usage)
+		a.recordUsage(usage)
 
 		msg := ai.Message{
 			Role:     ai.RoleAssistant,
@@ -1119,23 +1120,31 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		}
 
 		if stop != ai.StopReasonTools || len(toolCalls) == 0 {
-			if continueTurn := a.injectLongRunContext(runMeta, false); continueTurn {
-				continue // anti-stall: nudge injected, loop again
-			}
-			// Explore exit gate: an explore phase that produced no tool
-			// calls must actually have covered its subject. If the task
-			// names files and none of them were read this run, the model
-			// answered from the file map alone — nudge once, then let it
-			// answer (the same one-nudge budget as the anti-stall path).
+			// Explore exit gate runs BEFORE the anti-stall nudge and before
+			// the phase's answer is accepted: an explore task must have
+			// actually read its subject files, not answered from the file
+			// map alone (or from one 50-line peek). One nudge naming the
+			// unread files; after that, the answer stands.
 			if a.phaseExploreUndercovered(result.TaskSpec) && !exploreNudged {
 				exploreNudged = true
+				_, _, unread := a.exploreCoverage(result.TaskSpec)
+				// Bound the list: a map of hundreds of files must not flood
+				// the prompt — the first 20 name the gap, the count covers
+				// the rest.
+				if len(unread) > 20 {
+					unread = append(unread[:20], fmt.Sprintf("... and %d more", len(unread)-20))
+				}
 				a.sess.AddMessage(ai.Message{
 					Role: ai.RoleSystem,
 					Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: fmt.Sprintf(
-						"[Explore coverage] You are finishing the exploration task without having read any of the files it concerns. Read the relevant files (at minimum the ones named in the task) with read_file, then produce your findings report with path:line references.")}},
+						"[Explore coverage] Your findings answer a task about %d discovered files, but you have read too few of them to report accurately. Continue exploring: read_file the still-unread files that matter to the question (start with: %s), then produce your findings report with path:line references.",
+						lenSpecFiles(result.TaskSpec), strings.Join(unread, ", "))}},
 				})
 				a.Emit(EventStatus, "explore under-covered — requesting deeper read")
 				continue
+			}
+			if continueTurn := a.injectLongRunContext(runMeta, false); continueTurn {
+				continue // anti-stall: nudge injected, loop again
 			}
 			if isFinalLoop {
 				a.Emit(EventDone, text)
@@ -1398,33 +1407,90 @@ func formatThinking(thought string) string {
 	return "● " + string(runes)
 }
 
-// phaseExploreUndercovered reports whether an explore task is about to exit
-// without any of its subject files having been read in this session run.
-// It inspects the messages added since the run started: if the model read
-// something (read_file calls present), coverage is assumed good; the gate
-// only catches the "answered straight from the prompt without opening a
-// single file" failure mode.
-func (a *Agent) phaseExploreUndercovered(spec shared.TaskSpec) bool {
-	if spec.Phase != shared.PhaseExplore && spec.Type != "explore" {
-		return false
-	}
+// exploreCoverage is the fraction of the task's discovered files the model
+// actually read this session, plus which files remain unread. Files listed
+// in the pre-explored map that were never opened are the gap.
+func (a *Agent) exploreCoverage(spec shared.TaskSpec) (read, total int, unread []string) {
 	files, _ := spec.Context["files_found"].([]string)
 	if len(files) == 0 {
-		return false // no map to check against; trust the model
+		return 0, 0, nil
 	}
-	// Any read_file in this run's messages counts as real exploration.
+	readSet := map[string]bool{}
 	for i := range a.sess.Messages {
 		msg := a.sess.Messages[i]
 		if msg.Role != ai.RoleAssistant {
 			continue
 		}
 		for _, part := range msg.Content {
-			if part.Type == ai.ContentTypeToolCall && part.ToolCall != nil && part.ToolCall.Name == "read_file" {
-				return false
+			if part.Type != ai.ContentTypeToolCall || part.ToolCall == nil || part.ToolCall.Name != "read_file" {
+				continue
+			}
+			if p, ok := part.ToolCall.Args["path"].(string); ok && p != "" {
+				readSet[p] = true
 			}
 		}
 	}
-	return true
+	for _, f := range files {
+		if readSet[f] {
+			read++
+			continue
+		}
+		// Normalize basename matching: the map may carry bare names
+		// (init glob results) while reads use repo-relative paths.
+		base := f
+		if idx := strings.LastIndexByte(f, '/'); idx >= 0 {
+			base = f[idx+1:]
+		}
+		matched := false
+		for p := range readSet {
+			pb := p
+			if idx := strings.LastIndexByte(p, '/'); idx >= 0 {
+				pb = p[idx+1:]
+			}
+			if pb == base {
+				matched = true
+				break
+			}
+		}
+		if matched {
+			read++
+			continue
+		}
+		unread = append(unread, f)
+	}
+	return read, len(files), unread
+}
+
+// lenSpecFiles reports how many files the task's discovered map carries.
+func lenSpecFiles(spec shared.TaskSpec) int {
+	files, _ := spec.Context["files_found"].([]string)
+	return len(files)
+}
+
+// phaseExploreUndercovered reports whether an explore task is about to exit
+// with materially incomplete coverage: it must have read essentially none of
+// the discovered files, or fewer than a quarter of them when the map is
+// small enough that skimming is feasible. One prior read_file is NOT enough
+// anymore — the "read 50 lines of 1 of 24 files, then answered" failure mode
+// must be caught.
+func (a *Agent) phaseExploreUndercovered(spec shared.TaskSpec) bool {
+	if spec.Phase != shared.PhaseExplore && spec.Type != "explore" {
+		return false
+	}
+	read, total, _ := a.exploreCoverage(spec)
+	if total == 0 {
+		return false // no map to check against; trust the model
+	}
+	if read == 0 {
+		return true
+	}
+	// A tiny map: reading the key file suffices. Otherwise require at least
+	// a quarter of the discovered files before the exit is accepted.
+	if total <= 4 {
+		return read < 1
+	}
+	minRead := (total + 3) / 4
+	return read < minRead
 }
 
 // recordPromptTokenUsage feeds the system prompt's token count into the
@@ -2062,6 +2128,7 @@ func (a *Agent) answerDirectQuestion(ctx context.Context, question string) error
 	// request, and the session totals (header Σ, run summary ↑/↓) must
 	// reflect it.
 	a.sess.AddUsage(usage)
+	a.recordUsage(usage)
 
 	// Record the answer so it survives compaction and session resume.
 	msg := ai.NewTextMessage(ai.RoleAssistant, text)
@@ -2272,6 +2339,38 @@ func (a *Agent) Telemetry() *contextmgr.TelemetryCollector {
 		return mgr.Telemetry()
 	}
 	return nil
+}
+
+// recordUsage feeds one provider response's token usage into the telemetry
+// cost tracker. Session totals (header Σ) are updated separately via
+// sess.AddUsage; this is what puts a dollar figure on them — priced from the
+// models.dev catalog for the active provider (input/output/cache).
+func (a *Agent) recordUsage(u ai.Usage) {
+	if u.InputTokens == 0 && u.OutputTokens == 0 && u.TotalTokens == 0 {
+		return
+	}
+	tel := a.Telemetry()
+	if tel == nil {
+		return
+	}
+	a.mu.Lock()
+	provider := ""
+	model := ""
+	if a.provider != nil {
+		provider = a.provider.Name()
+	}
+	if a.cfg != nil {
+		model = a.cfg.Model
+	}
+	a.mu.Unlock()
+	tel.SetCostProvider(provider)
+	tel.RecordUsage(contextmgr.UsageEvent{
+		Model:        model,
+		InputTokens:  u.InputTokens,
+		OutputTokens: u.OutputTokens,
+		TotalTokens:  u.TotalTokens,
+		CacheHits:    u.CacheHits,
+	})
 }
 
 // AdaptiveCalculator returns the adaptive token calculator.

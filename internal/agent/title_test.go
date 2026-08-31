@@ -15,7 +15,7 @@ type fakeTitleProvider struct {
 	err     error
 	text    string
 	called  bool
-	streams int // how many times Stream() is drained (0 = error before stream)
+	lastReq ai.CompletionRequest
 }
 
 func (f *fakeTitleProvider) Name() string { return f.name }
@@ -29,6 +29,7 @@ func (f *fakeTitleProvider) ContextLimit() int { return 1000 }
 
 func (f *fakeTitleProvider) Complete(ctx context.Context, req ai.CompletionRequest) (ai.CompletionResponse, error) {
 	f.called = true
+	f.lastReq = req
 	if f.err != nil {
 		return nil, f.err
 	}
@@ -47,7 +48,6 @@ func (r *fakeTitleResponse) Stream() <-chan ai.Chunk {
 		ch <- ai.Chunk{Error: context.Canceled, Done: true}
 	}
 	close(ch)
-	r.provider.streams++
 	return ch
 }
 func (r *fakeTitleResponse) ToolCalls() []ai.ToolCall { return nil }
@@ -56,6 +56,40 @@ func (r *fakeTitleResponse) StopReason() ai.StopReason {
 }
 func (r *fakeTitleResponse) Usage() ai.Usage             { return ai.Usage{} }
 func (r *fakeTitleResponse) GetMetadata() map[string]any { return nil }
+
+// TestTitleRequestPinsMinimalThinking pins the request shape that makes title
+// generation work at all: reasoning models spend their entire MaxOutputTokens
+// budget thinking before writing a word, so a title request without minimal
+// thinking returns empty text and every ladder rung silently fails.
+func TestTitleRequestPinsMinimalThinking(t *testing.T) {
+	a := &Agent{cfg: &config.Config{}}
+	rung := &fakeTitleProvider{name: "rung", text: "Fix login bug"}
+	a.titleLadder = []ai.Provider{rung}
+	a.provider = &fakeTitleProvider{name: "active", text: "nope"}
+	a.titleOnce.Do(func() {})
+
+	a.GenerateSessionTitle(context.Background(), []ai.Message{
+		ai.NewTextMessage(ai.RoleUser, "fix the login bug"),
+	})
+
+	req := rung.lastReq
+	if req.Thinking == nil {
+		t.Fatal("title request must pin Thinking — without it reasoning models burn MaxOutputTokens before emitting text")
+	}
+	if req.Thinking.BudgetTokens > 1 {
+		t.Fatalf("BudgetTokens must be ≤1 for Gemini 2.5 rungs, got %d", req.Thinking.BudgetTokens)
+	}
+	if req.Thinking.ThinkingLevel != "minimal" && req.Thinking.Effort != "minimal" {
+		t.Fatalf("a minimal effort/level must be set for Gemini 3.x rungs, got level=%q effort=%q",
+			req.Thinking.ThinkingLevel, req.Thinking.Effort)
+	}
+	if req.MaxTokens < 32 {
+		t.Fatalf("MaxTokens must leave room for the title after thinking, got %d", req.MaxTokens)
+	}
+	if req.MaxTokens > 256 {
+		t.Fatalf("title requests stay cheap, got MaxTokens=%d", req.MaxTokens)
+	}
+}
 
 // TestGenerateSessionTitleLadderOrder verifies the cheap-model cascade: the
 // first rung that produces usable text wins and no later rung (including the
