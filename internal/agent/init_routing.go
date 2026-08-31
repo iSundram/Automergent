@@ -125,6 +125,23 @@ func (a *Agent) executeDecomposition(ctx context.Context, d *promptpkg.Decomposi
 	// concise. Skipped when routed tasks exist — the phase loop's final
 	// answer covers the whole message.
 	direct := d.DirectParts()
+	// A direct part that is really an implementation request ("create file
+	// golang.go", "write the code to x") cannot be fulfilled by the direct
+	// path: answerDirectParts runs with an empty toolset, so the model would
+	// rightly report it cannot create files. Route those as build tasks,
+	// where the full toolset exists.
+	for _, p := range direct {
+		if directPartIsActionable(p.Text) {
+			tasks = append(tasks, shared.TaskSpec{
+				ID:          p.ID,
+				Type:        "build",
+				Description: p.Text,
+				Role:        "implementer",
+				Phase:       shared.PhaseBuild,
+				Priority:    1,
+			})
+		}
+	}
 	if len(direct) > 0 && len(tasks) == 0 {
 		return a.answerDirectParts(ctx, direct)
 	}
@@ -242,6 +259,27 @@ func noiseSummary(d *promptpkg.Decomposition) []string {
 		lines = append(lines, "(noted, set aside: \""+p.Text+"\")")
 	}
 	return lines
+}
+
+// directPartIsActionable reports whether a decomposed direct part is really
+// an implementation request the tool-less direct-answer path cannot fulfill
+// ("create file golang.go", "write the code to x"). Build intent plus an
+// imperative shape (not a question) means it must run as a build task.
+func directPartIsActionable(text string) bool {
+	t := strings.ToLower(strings.TrimSpace(text))
+	if !looksLikeBuildWork(t) || strings.HasSuffix(t, "?") {
+		return false
+	}
+	for _, w := range []string{
+		"what", "how", "why", "when", "where", "who", "which",
+		"can ", "could ", "should ", "would ", "is ", "are ", "do ", "does ",
+		"tell me", "show me", "explain",
+	} {
+		if strings.HasPrefix(t, w) {
+			return false
+		}
+	}
+	return true
 }
 
 // buildIntentKeywords mark messages that expect implementation work, not

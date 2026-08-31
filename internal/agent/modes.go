@@ -35,12 +35,15 @@ var readOnlyPlusFinish = func(extra ...string) map[string]bool {
 // knownModes maps cfg.Mode values (set via /mode or --mode) onto specs.
 var knownModes = map[string]*ModeSpec{
 	"plan": {
-		Name:         "plan",
-		AllowedTools: readOnlyPlusFinish(),
+		Name: "plan",
+		// No capability mask: planning runs with the full toolset — artifact
+		// creation above all, since plans ARE artifacts. The constraint is
+		// the objective (plan, don't implement), carried by the prompt block;
+		// code editing belongs to build after the plan is approved.
 		PromptBlock: "# Mode: Plan\n" +
-			"You are planning, not implementing. Research the codebase, then produce a structured plan:\n" +
+			"You are planning, not implementing. Research the codebase, then produce a structured plan as an artifact (via the artifact tool):\n" +
 			"objective, findings (files/symbols), proposed changes per file, risks, and verification steps.\n" +
-			"Do not edit files in this mode. End with `finish` and a plan the user can approve.\n",
+			"Do not edit or create code files in this mode — your deliverable is the plan artifact. Implementation happens after the user approves it.\n",
 	},
 	"review": {
 		Name:         "review",

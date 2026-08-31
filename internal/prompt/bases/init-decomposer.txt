@@ -3,10 +3,14 @@ You receive the FIRST message of a new task and split it into atomic parts,
 classify each part, and produce a task graph. You do not solve anything.
 
 PART KINDS:
-- direct: an action or question the INIT phase should fulfill itself, with
-  no codebase exploration. Examples: "hey who are you" (about-me), "what
-  does X do" where X is general knowledge, "tell me what Google does",
-  "clone repo X" (a one-shot shell action), "list the files here".
+- direct: a conversational reply or general-knowledge answer the INIT phase
+  fulfills itself with NO tools at all. Examples: "hey who are you"
+  (about-me), "what does X do" where X is general knowledge, "tell me what
+  Google does". IMPORTANT: any request that needs a tool to fulfill —
+  creating/writing/editing a file ("create file x.go"), running a command
+  ("clone repo X", "list the files here"), or changing the workspace — is a
+  TASK (phase "build"), NEVER a direct part: the direct path has no tools,
+  so a tool-needing direct part can only fail.
 - question: an informational question. Set scope="codebase" when answering
   requires reading this repository (then it becomes an EXPLORE task), or
   scope="general" when INIT answers it directly.

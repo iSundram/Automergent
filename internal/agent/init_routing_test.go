@@ -104,3 +104,29 @@ func TestNoiseSummary(t *testing.T) {
 		t.Fatalf("noise summary = %v", lines)
 	}
 }
+
+func TestDirectPartIsActionable(t *testing.T) {
+	cases := []struct {
+		text string
+		want bool
+	}{
+		// Tool-needing imperatives must run as build tasks, not the
+		// tool-less direct path (the "File creation tools are not
+		// available" regression).
+		{"create file golang.go with an syntax error,", true},
+		{"write the code to golang.go", true},
+		{"make the plan", true},
+		{"implement a retry loop in client.go", true},
+		// Questions and conversational parts stay direct.
+		{"hey who are you", false},
+		{"how do I write tests?", false},
+		{"what should I add there more, tell me a comprehensive plan", false},
+		{"can you create a file?", false},
+		{"tell me what Google does", false},
+	}
+	for _, tc := range cases {
+		if got := directPartIsActionable(tc.text); got != tc.want {
+			t.Errorf("directPartIsActionable(%q) = %v, want %v", tc.text, got, tc.want)
+		}
+	}
+}

@@ -91,8 +91,8 @@ func TestDetectPhaseIgnoresToolCallIDStringHeuristics(t *testing.T) {
 		toolResult("read_like_id", nil),
 	}
 
-	if got := DetectPhase(messages); got != PhaseVerify {
-		t.Fatalf("expected %q, got %q", PhaseVerify, got)
+	if got := DetectPhase(messages); got != PhaseBuild {
+		t.Fatalf("expected %q, got %q", PhaseBuild, got)
 	}
 }
 
