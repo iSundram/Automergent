@@ -864,15 +864,15 @@ func (pm *PromptManager) notifyTaskPlan(tasks []shared.TaskSpec) {
 	if pm.progress == nil || len(tasks) == 0 {
 		return
 	}
-	var sb strings.Builder
-	for i, t := range tasks {
-		deps := ""
-		if len(t.Dependencies) > 0 {
-			deps = fmt.Sprintf(" (after %s)", strings.Join(t.Dependencies, ", "))
-		}
-		sb.WriteString(fmt.Sprintf("%d. [%s] %s%s\n", i+1, t.Type, t.Description, deps))
+	// One line, never the full multi-line plan: this text lands in the TUI
+	// conversation log via the notify channel, where a raw task dump breaks
+	// the layout. The detailed items already reach the task board through
+	// attachTodos' todo snapshot — the log line is only a pointer.
+	types := make([]string, 0, len(tasks))
+	for _, t := range tasks {
+		types = append(types, t.Type)
 	}
-	pm.notifyProgress("Plan", strings.TrimSpace(sb.String()))
+	pm.notifyProgress("Plan", fmt.Sprintf("%d tasks: %s", len(tasks), strings.Join(types, " → ")))
 }
 
 // GetInitResults returns the init phase results.

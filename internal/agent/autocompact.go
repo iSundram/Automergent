@@ -71,6 +71,13 @@ const (
 	// microCompactMinChars is the smallest tool result worth clearing.
 	microCompactMinChars = 400
 
+	// microCompactCacheTTL is the idle gap after which the provider's prompt
+	// cache is considered expired. Clearing old tool results is normally
+	// deferred (it invalidates a warm cache prefix); once the cache is cold
+	// anyway, clearing is free. Mirrors the reference agent's time-based
+	// microcompact trigger (tengu_slate_heron).
+	microCompactCacheTTL = 60 * time.Minute
+
 	// post-compact file restoration budgets (recently read files are
 	// re-attached after a compaction so the model does not re-read them).
 	postCompactMaxFilesToRestore   = 5
@@ -175,11 +182,14 @@ func (a *Agent) recordUsageAnchor(usage ai.Usage, coveredMessages int) {
 }
 
 // invalidateUsageAnchor is called whenever messages are rewritten in place
-// (compaction, ghosting): the anchor no longer describes the prefix.
+// (compaction, ghosting): the anchor no longer describes the prefix. It also
+// resets the prompt-cache baseline — a post-rewrite cache-hit drop is
+// expected, not a break (see cachedetect.go).
 func (a *Agent) invalidateUsageAnchor() {
 	a.mu.Lock()
 	a.usageAnchor = 0
 	a.usageAnchoredTokens = 0
+	a.promptCache = promptCacheState{}
 	a.mu.Unlock()
 }
 
@@ -234,11 +244,25 @@ func (a *Agent) manageContextWindow(ctx context.Context, provider ai.Provider) e
 	ghosted := a.GhostLargeOutputs(messages)
 
 	// Tier 1: micro-compact — content-clear old tool results once usage
-	// crosses the cache-friendly fraction. Never touches the most recent
+	// crosses the cache-friendly fraction, or unconditionally when the
+	// provider cache has gone cold (a long idle gap expired it — clearing
+	// no longer costs a cache rewrite). Never touches the most recent
 	// results, tool calls, or user/assistant text.
 	tokens := a.tokenCountWithEstimation(ghosted)
-	if float64(tokens)/float64(effective) >= microCompactTriggerFraction {
-		ghosted = microCompactToolResults(ghosted, microCompactKeepRecent)
+	cacheCold := a.cacheLikelyCold()
+	if cacheCold || float64(tokens)/float64(effective) >= microCompactTriggerFraction {
+		cleared, freed := microCompactToolResults(ghosted, microCompactKeepRecent)
+		if freed > 0 {
+			// Boundary event with real accounting so /context and the HUD
+			// report reclaimed space, and so a microcompact that freed
+			// nothing is visible as the no-op it was.
+			a.Emit(EventCompacted, map[string]any{
+				"micro":       true,
+				"tokens_freed": freed,
+				"cache_cold":  cacheCold,
+			})
+			ghosted = cleared
+		}
 	}
 
 	if len(ghosted) != len(messages) || messagesDiffer(ghosted, messages) {
@@ -342,7 +366,7 @@ func (a *Agent) reactiveCompact(ctx context.Context, err error, provider ai.Prov
 	if len(compacted) >= before {
 		// Nothing to summarize (short but dense conversation): ghost and
 		// micro-compact are all we can do; retrying would fail identically.
-		compacted = microCompactToolResults(a.GhostLargeOutputs(compacted), 2)
+		compacted, _ = microCompactToolResults(a.GhostLargeOutputs(compacted), 2)
 	}
 	a.sess.SetMessages(compacted)
 	a.invalidateUsageAnchor()
@@ -352,6 +376,26 @@ func (a *Agent) reactiveCompact(ctx context.Context, err error, provider ai.Prov
 		"reactive":      true,
 	})
 	return a.tokenCountWithEstimation(compacted) < a.blockingLimit(provider) || a.blockingLimit(provider) <= 0
+}
+
+// cacheLikelyCold reports whether the gap since the last assistant response
+// exceeds the provider's prompt-cache TTL. When the cache is cold the full
+// prefix will be rewritten on the next request regardless, so clearing old
+// tool results first shrinks what gets rewritten (the reference agent's
+// time-based microcompact trigger).
+func (a *Agent) cacheLikelyCold() bool {
+	a.mu.RLock()
+	last := a.lastAssistantAt
+	a.mu.RUnlock()
+	return !last.IsZero() && time.Since(last) > microCompactCacheTTL
+}
+
+// noteAssistantResponse records the time of the last assistant response,
+// feeding the cache-coldness check above.
+func (a *Agent) noteAssistantResponse() {
+	a.mu.Lock()
+	a.lastAssistantAt = time.Now()
+	a.mu.Unlock()
 }
 
 // compactableTools lists the tools whose results may be content-cleared by
@@ -387,8 +431,10 @@ func toolCallNames(messages []ai.Message) map[string]string {
 // recent keepRecent compactable tool-result messages verbatim. Only results
 // from compactableTools are eligible; tool calls and the call/result pairing
 // are never touched, so the message sequence stays valid for strict
-// providers. Idempotent: already-cleared results are skipped.
-func microCompactToolResults(messages []ai.Message, keepRecent int) []ai.Message {
+// providers. Idempotent: already-cleared results are skipped. Returns the
+// new slice and an estimate of the tokens freed (chars/4 of the cleared
+// content).
+func microCompactToolResults(messages []ai.Message, keepRecent int) ([]ai.Message, int) {
 	callNames := toolCallNames(messages)
 
 	// Index the compactable tool-result messages from the end.
@@ -412,6 +458,7 @@ func microCompactToolResults(messages []ai.Message, keepRecent int) []ai.Message
 
 	out := make([]ai.Message, len(messages))
 	changed := false
+	freedChars := 0
 	for i, msg := range messages {
 		if msg.Role != ai.RoleTool || recent[i] {
 			out[i] = msg
@@ -429,6 +476,7 @@ func microCompactToolResults(messages []ai.Message, keepRecent int) []ai.Message
 				if len(preview) > 200 {
 					preview = preview[:200]
 				}
+				freedChars += len(cleared.Content) - 200
 				cleared.Content = fmt.Sprintf(
 					"[Old tool result cleared to reclaim context. First %d chars retained: %s]",
 					len(preview), preview)
@@ -441,9 +489,9 @@ func microCompactToolResults(messages []ai.Message, keepRecent int) []ai.Message
 		out[i] = newMsg
 	}
 	if !changed {
-		return messages
+		return messages, 0
 	}
-	return out
+	return out, freedChars / 4
 }
 
 // messageHasCompactableResult reports whether a tool message contains at

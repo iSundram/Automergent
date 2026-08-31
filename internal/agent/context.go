@@ -12,6 +12,8 @@ import (
 	"github.com/iSundram/Automergent/internal/cache"
 	"github.com/iSundram/Automergent/internal/config"
 	contextmgr "github.com/iSundram/Automergent/internal/context"
+	promptpkg "github.com/iSundram/Automergent/internal/prompt"
+	"github.com/iSundram/Automergent/internal/session"
 	"github.com/iSundram/Automergent/internal/tools"
 	"github.com/iSundram/Automergent/internal/version"
 )
@@ -404,8 +406,10 @@ func (a *Agent) identifyImportantMessages(messages []ai.Message) []ai.Message {
 	return important
 }
 
-// summarizeWithLLM uses the AI provider to generate a concise summary of messages.
-// It formats the messages as text and calls the provider with a specialized summarization prompt.
+// summarizeWithLLM uses the AI provider to generate a structured summary of
+// messages (see prompt.CompactSummaryPrompt). The raw response may carry an
+// <analysis> drafting scratchpad; it is stripped here so only the summary
+// itself enters the session.
 func (a *Agent) summarizeWithLLM(ctx context.Context, messages []ai.Message, prompt string) string {
 	// Format messages as text for summarization
 	var sb strings.Builder
@@ -415,14 +419,16 @@ func (a *Agent) summarizeWithLLM(ctx context.Context, messages []ai.Message, pro
 		sb.WriteString("\n\n")
 	}
 
-	// Create summarization request
+	// Create summarization request. No tools are offered, so the model cannot
+	// derail the summarization into exploration; the prompt's "text only"
+	// instruction is insurance for providers that inject tool defaults.
 	req := ai.CompletionRequest{
 		Messages: []ai.Message{
 			ai.NewTextMessage(ai.RoleUser, fmt.Sprintf("%s\n\nConversation history:\n%s", prompt, sb.String())),
 		},
 		System:      "You are a precise technical summarizer. Extract and condense key information without adding interpretation.",
 		Temperature: 0.3,
-		MaxTokens:   1000,
+		MaxTokens:   8000,
 		Stream:      true,
 	}
 
@@ -442,7 +448,7 @@ func (a *Agent) summarizeWithLLM(ctx context.Context, messages []ai.Message, pro
 		summary.WriteString(chunk.Text)
 	}
 
-	return summary.String()
+	return promptpkg.FormatCompactSummary(summary.String())
 }
 
 // GhostLargeOutputs truncates large tool results to save context space,
@@ -490,15 +496,34 @@ func (a *Agent) GhostLargeOutputs(messages []ai.Message) []ai.Message {
 	return ghosted
 }
 
-// CompactSessionMessages provides intelligent context compaction with LLM-based summarization.
-// This should be called by the Agent loop when context usage is high.
+// CompactSessionMessages compacts the session mid-run (auto-compact,
+// predictive, or reactive). The model receives the resume-directly
+// continuation framing so the interrupted turn continues instead of ending
+// with a recap of the summary.
+func (a *Agent) CompactSessionMessages(ctx context.Context, messages []ai.Message) []ai.Message {
+	return a.compactSessionMessages(ctx, messages, true)
+}
+
+// CompactSessionMessagesManual compacts at the user's request (/compact).
+// No continuation framing: the user is waiting and will speak next.
+func (a *Agent) CompactSessionMessagesManual(ctx context.Context, messages []ai.Message) []ai.Message {
+	return a.compactSessionMessages(ctx, messages, false)
+}
+
+// compactSessionMessages provides intelligent context compaction with
+// LLM-based summarization. This should be called by the Agent loop when
+// context usage is high.
 //
 // The compacted history keeps our multi-phase arc intact: the original user
 // request and the compact boundary marker (with the active todo/phase state
 // folded into the summary), followed by the verbatim recent suffix. The
 // split point is adjusted so an assistant tool-call is never separated from
 // its tool-result message — strict providers reject such sequences.
-func (a *Agent) CompactSessionMessages(ctx context.Context, messages []ai.Message) []ai.Message {
+//
+// suppressFollowUp selects the framing of the summary message: mid-run
+// compaction (auto/predictive/reactive) tells the model to resume directly;
+// a user-initiated /compact does not.
+func (a *Agent) compactSessionMessages(ctx context.Context, messages []ai.Message, suppressFollowUp bool) []ai.Message {
 	// 0. Pre-process large tool outputs
 	messages = a.GhostLargeOutputs(messages)
 
@@ -544,16 +569,11 @@ func (a *Agent) CompactSessionMessages(ctx context.Context, messages []ai.Messag
 	// Generate LLM-based summary if there are messages to summarize
 	var summaryText string
 	if len(messagesToSummarize) > 0 {
-		prompt := `Summarize this segment of the coding session history.
-Focus on:
-1. The specific problem being addressed.
-2. Key files investigated or modified.
-3. Decisions made and rationale provided.
-4. Any constraints or requirements identified.
-5. Successful vs. failed attempts.
-6. The current phase of work (exploration / planning / implementation) and what remains.
-
-Keep the summary technical and concise (max 800 words).`
+		// Structured nine-section prompt: primary intent, concepts, files &
+		// code, errors & fixes, problem solving, ALL user messages, pending
+		// tasks, current work, and next step with verbatim quotes. See
+		// prompt/compact/summary.txt for why each section exists.
+		prompt := promptpkg.CompactSummaryPrompt()
 
 		prompt += a.compactionStateBlock()
 
@@ -562,14 +582,29 @@ Keep the summary technical and concise (max 800 words).`
 		summaryText = "[No additional messages required summarization]"
 	}
 
-	// Add the LLM-generated summary as a system message with a "Neural" header.
+	// Assemble the summary message the model receives. The framing matters:
+	// mid-run compaction must instruct the model to resume the interrupted
+	// work directly, or the phase arc stalls on a recap.
+	var summarySb strings.Builder
+	summarySb.WriteString(promptpkg.CompactSummaryHeader)
+	summarySb.WriteString("\n\n")
+	summarySb.WriteString(summaryText)
+	if path := a.transcriptPath(); path != "" {
+		summarySb.WriteString(fmt.Sprintf("\n\nIf you need exact details from before compaction (code snippets, error messages, full file contents), read the durable transcript at: %s", path))
+	}
+	summarySb.WriteString("\n\n")
+	summarySb.WriteString(promptpkg.CompactRecentPreservedNote)
+	if suppressFollowUp {
+		summarySb.WriteString(promptpkg.CompactContinuationSuffix)
+	}
+
 	// The metadata marks the compaction boundary: a later compaction must not
 	// summarize content that is itself already a summary.
 	summaryMsg := ai.Message{
 		Role: ai.RoleSystem,
 		Content: []ai.ContentPart{{
 			Type: ai.ContentTypeText,
-			Text: fmt.Sprintf("# Neural Context Summary\n\n> This is a compressed representation of the earlier conversation to maintain context efficiency.\n\n%s\n\n---", summaryText),
+			Text: summarySb.String(),
 		}},
 		Metadata: map[string]any{compactionBoundaryKey: true},
 	}
@@ -604,6 +639,32 @@ Keep the summary technical and concise (max 800 words).`
 		})
 	}
 
+	// Re-inject the skill bodies that apply to the files this session is
+	// actually touching, so skill guidance survives the boundary (bounded;
+	// see autocompact.go).
+	if skills := a.buildPostCompactSkillInjection(); skills != "" {
+		compacted = append(compacted, ai.Message{
+			Role: ai.RoleSystem,
+			Content: []ai.ContentPart{{
+				Type: ai.ContentTypeText,
+				Text: skills,
+			}},
+		})
+	}
+
+	// Re-inject the active mode's instruction block (e.g. plan mode): the
+	// mode constraint otherwise dies with the compacted messages that carried
+	// it, and the model would silently exit the mode.
+	if mode := a.modePromptBlock(); mode != "" {
+		compacted = append(compacted, ai.Message{
+			Role: ai.RoleSystem,
+			Content: []ai.ContentPart{{
+				Type: ai.ContentTypeText,
+				Text: "## Active Mode (re-stated after compaction)\n" + mode,
+			}},
+		})
+	}
+
 	// Keep the most recent messages
 	compacted = append(compacted, messages[startIdx:]...)
 
@@ -612,6 +673,111 @@ Keep the summary technical and concise (max 800 words).`
 	// strict providers reject. Merging them is lossless — only the message
 	// boundary disappears, never content. Tool messages never merge (their
 	// pairing with the preceding assistant's calls is an API invariant).
+	return mergeAdjacentRoles(compacted)
+}
+
+// transcriptPath returns the durable JSONL transcript path for this agent's
+// session, or "" when storage is not configured. Referenced in the
+// post-compaction summary so the model knows where the pre-compaction
+// history lives.
+func (a *Agent) transcriptPath() string {
+	if a.cfg == nil || a.sess == nil {
+		return ""
+	}
+	return session.TranscriptPathFor(a.cfg.SessionDir, a.workDir, a.sess.ID)
+}
+
+// buildPostCompactSkillInjection re-injects the skill bodies whose globs
+// match the files this session has actually touched, so skill guidance
+// survives a compaction boundary. Bounded per skill and in total (mirrors
+// the file-restoration budgets in autocompact.go): the head of a skill —
+// where setup and usage instructions live — is the valuable part, so an
+// oversized skill is head-truncated with a pointer to its file rather than
+// dropped.
+func (a *Agent) buildPostCompactSkillInjection() string {
+	if len(a.skills) == 0 {
+		return ""
+	}
+	recent := a.skillSnapshot()
+	if len(recent) == 0 {
+		return ""
+	}
+
+	const (
+		perSkillChars = postCompactMaxTokensPerFile * 4
+		totalChars    = 25_000 * 4
+	)
+
+	var sb strings.Builder
+	used := 0
+	injected := 0
+	for _, skill := range a.skills {
+		if injected >= postCompactMaxFilesToRestore || used >= totalChars {
+			break
+		}
+		matched := false
+		for _, path := range recent {
+			if skillGlobMatches(skill.Globs, path) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			continue
+		}
+		body := skill.Body
+		if len(body) > perSkillChars {
+			body = body[:perSkillChars] + "\n\n[... skill content truncated after compaction; read " + skill.Path + " for the full text]"
+		}
+		sb.WriteString(fmt.Sprintf("### Skill: %s\n%s\n\n", skill.Name, body))
+		used += len(body)
+		injected++
+	}
+	if injected == 0 {
+		return ""
+	}
+	return "## Skills re-attached after compaction\nThese skills matched the files you are working on and remain in effect:\n\n" + sb.String()
+}
+
+// CompactSessionMessagesUpTo performs a user-directed PARTIAL compaction:
+// everything before the pivot message is summarized, everything from the
+// pivot on is kept verbatim ("squash everything up to here"). The pivot is
+// adjusted so a tool-call/result pair is never split across the boundary.
+// Returns the input unchanged when there is nothing safe to summarize.
+func (a *Agent) CompactSessionMessagesUpTo(ctx context.Context, messages []ai.Message, pivot int) []ai.Message {
+	messages = a.GhostLargeOutputs(messages)
+	if pivot <= 1 || pivot >= len(messages) {
+		return messages
+	}
+	pivot = adjustIndexToPreservePairs(messages, pivot)
+	if pivot <= 1 {
+		return messages
+	}
+
+	messagesToSummarize := messages[1:pivot]
+	summaryText := a.summarizeWithLLM(ctx, messagesToSummarize, promptpkg.CompactSummaryPrompt()+a.compactionStateBlock())
+
+	var sb strings.Builder
+	sb.WriteString(promptpkg.CompactSummaryHeader)
+	sb.WriteString("\n\n")
+	sb.WriteString(summaryText)
+	if path := a.transcriptPath(); path != "" {
+		sb.WriteString(fmt.Sprintf("\n\nIf you need exact details from before compaction, read the durable transcript at: %s", path))
+	}
+	sb.WriteString("\n\n")
+	sb.WriteString(promptpkg.CompactRecentPreservedNote)
+	summaryMsg := ai.Message{
+		Role: ai.RoleSystem,
+		Content: []ai.ContentPart{{
+			Type: ai.ContentTypeText,
+			Text: sb.String(),
+		}},
+		Metadata: map[string]any{compactionBoundaryKey: true},
+	}
+
+	compacted := make([]ai.Message, 0, len(messages)-pivot+2)
+	compacted = append(compacted, messages[0], summaryMsg)
+	compacted = append(compacted, messages[pivot:]...)
 	return mergeAdjacentRoles(compacted)
 }
 

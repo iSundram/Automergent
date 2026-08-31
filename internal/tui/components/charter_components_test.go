@@ -44,10 +44,13 @@ func TestDockHeightMatchesView(t *testing.T) {
 		})
 	}
 
-	for i, entries := range cases {
-		d.SetEntries(entries)
-		if got, want := d.Height(), lineCount(d.View()); got != want {
-			t.Errorf("case %d: Height() = %d, View() renders %d rows", i, got, want)
+	for _, w := range []int{20, 40, 80} {
+		d.SetWidth(w)
+		for i, entries := range cases {
+			d.SetEntries(entries)
+			if got, want := d.Height(), lineCount(d.View()); got != want {
+				t.Errorf("width %d case %d: Height() = %d, View() renders %d rows", w, i, got, want)
+			}
 		}
 	}
 }

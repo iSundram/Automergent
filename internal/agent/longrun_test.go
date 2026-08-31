@@ -46,12 +46,19 @@ func TestStallNudgeRequiresPendingWork(t *testing.T) {
 	a := &Agent{sess: newTestSession(), promptSystem: nil}
 	// No turn context: nudge only fires when a goal exists.
 	a.SetGoal("keep going")
-	if got := a.stallNudgeBlock(1); got == "" {
+	if got := a.stallNudgeBlock(1, true); got == "" {
 		t.Error("stall nudge expected with active goal")
 	}
 	a.SetGoal("")
-	if got := a.stallNudgeBlock(1); got != "" {
+	if got := a.stallNudgeBlock(1, true); got != "" {
 		t.Errorf("no nudge without pending work, got %q", got)
+	}
+	// Informational phases never stall-nudge: their deliverable is the
+	// answer, and nudging produced the answer→pointless-tool loop
+	// (session 1c051187).
+	a.SetGoal("keep going")
+	if got := a.stallNudgeBlock(1, false); got != "" {
+		t.Errorf("informational phase must not be nudged, got %q", got)
 	}
 }
 
@@ -61,25 +68,31 @@ func TestInjectLongRunContextStallContinues(t *testing.T) {
 	a.SetGoal("pending work")
 	meta := &runMetadata{}
 	// First call: turn 1, no tools — treated as warm-up, no continuation.
-	if a.injectLongRunContext(meta, false) {
+	if a.injectLongRunContext(meta, false, true) {
 		t.Fatal("turn 1 must not force continuation")
 	}
-	// Second consecutive no-tool turn: stall nudge forces continuation.
-	if !a.injectLongRunContext(meta, false) {
+	// Second consecutive no-tool turn: stall nudge forces continuation. The
+	// nudge rides as an ephemeral request-only reminder — it must reach the
+	// next provider call without ever being written into the session history
+	// (see ephemeral.go for why persistence is pollution).
+	if !a.injectLongRunContext(meta, false, true) {
 		t.Fatal("stall on turn 2 with active goal should continue")
 	}
-	if len(a.sess.Messages) < 1 {
-		t.Fatal("expected injected system message")
+	if len(a.sess.Messages) != 0 {
+		t.Fatalf("nudge must not pollute session history, got %d messages", len(a.sess.Messages))
 	}
-	if got := a.sess.Messages[len(a.sess.Messages)-1].Role; got != aiRoleSystemForTest() {
-		t.Fatalf("injected role = %v", got)
+	msgs := a.drainEphemeral()
+	if len(msgs) != 1 {
+		t.Fatalf("expected one ephemeral reminder queued, got %d", len(msgs))
+	}
+	if msgs[0].Role != aiRoleSystemForTest() {
+		t.Fatalf("injected role = %v", msgs[0].Role)
 	}
 	// Tool activity resets stalls; no message injected.
-	before := len(a.sess.Messages)
-	if a.injectLongRunContext(meta, true) {
+	if a.injectLongRunContext(meta, true, true) {
 		t.Fatal("healthy turn must not continue")
 	}
-	if len(a.sess.Messages) != before {
+	if len(a.drainEphemeral()) != 0 {
 		t.Fatal("healthy turn must not inject messages")
 	}
 }

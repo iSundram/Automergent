@@ -113,7 +113,10 @@ func TestMicroCompactToolResults(t *testing.T) {
 	}
 
 	msgs := build(10)
-	out := microCompactToolResults(msgs, 2)
+	out, freed := microCompactToolResults(msgs, 2)
+	if freed <= 0 {
+		t.Fatal("micro-compact reported no tokens freed despite clearing results")
+	}
 
 	cleared, kept := 0, 0
 	for _, m := range out {
@@ -136,8 +139,8 @@ func TestMicroCompactToolResults(t *testing.T) {
 		t.Fatalf("sequence invalid after micro-compact: %v", err)
 	}
 
-	// Idempotent: a second pass changes nothing.
-	if again := microCompactToolResults(out, 2); !sameToolContents(again, out) {
+	// Idempotent: a second pass changes nothing and frees nothing.
+	if again, freedAgain := microCompactToolResults(out, 2); !sameToolContents(again, out) || freedAgain != 0 {
 		t.Fatal("micro-compact is not idempotent")
 	}
 }

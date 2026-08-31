@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/iSundram/Automergent/internal/ai"
 	promptpkg "github.com/iSundram/Automergent/internal/prompt"
@@ -51,6 +52,10 @@ func (a *Agent) userContext() map[string]string {
 		if global := promptpkg.GlobalInstructions(); global != "" {
 			ctx["globalInstructions"] = global
 		}
+		// Today's date is conversation-scoped context, not system-prompt
+		// content: a date line in the composed prompt would bust the provider
+		// prompt cache on every phase transition (and every midnight).
+		ctx["sessionDate"] = time.Now().Format("Mon Jan 2 2006")
 		// Persistent agent memory (subagents with a MemoryScope).
 		if a.agentMemory != nil {
 			if mem := a.agentMemory.Prompt(); mem != "" {
@@ -122,6 +127,16 @@ func prependUserContext(messages []ai.Message, context map[string]string) []ai.M
 		prefix[0].Content = append(prefix[0].Content, ai.ContentPart{
 			Type: ai.ContentTypeText,
 			Text: fmt.Sprintf("<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# gitStatus\n%s\nIMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>\n", git),
+		})
+	}
+
+	if date := context["sessionDate"]; date != "" {
+		if len(prefix) == 0 {
+			prefix = append(prefix, ai.Message{Role: ai.RoleUser, Metadata: map[string]any{"meta": true}})
+		}
+		prefix[0].Content = append(prefix[0].Content, ai.ContentPart{
+			Type: ai.ContentTypeText,
+			Text: fmt.Sprintf("<system-reminder>\nToday's date is %s.\n</system-reminder>\n", date),
 		})
 	}
 

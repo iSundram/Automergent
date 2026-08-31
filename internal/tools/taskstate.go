@@ -67,6 +67,26 @@ func (*todoWriteTool) EstimatedCost() ToolCost {
 }
 func (*todoWriteTool) IsDestructive(map[string]any) bool { return false }
 func (*todoWriteTool) IsReadOnly(map[string]any) bool    { return false }
+
+// normalizeTodoStatus maps the natural-language status words models reach
+// for ("done", "complete", "finished") onto the canonical enum. Models
+// occasionally send them despite the schema enum; rejecting the call made
+// the todo board wedge (observed in session 89869a5e: two consecutive
+// `invalid status` errors, todo never marked completed).
+func normalizeTodoStatus(s string) shared.TodoStatus {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "done", "complete", "completed", "finished":
+		return shared.TodoStatusCompleted
+	case "in_progress", "inprogress", "started", "active", "doing":
+		return shared.TodoStatusInProgress
+	case "pending", "todo", "not_started":
+		return shared.TodoStatusPending
+	case "blocked", "blocked_on", "waiting":
+		return shared.TodoStatusBlocked
+	default:
+		return shared.TodoStatus(s)
+	}
+}
 func (*todoWriteTool) Meta() *ToolMeta {
 	return &ToolMeta{
 		Category:    "memory",
@@ -125,12 +145,12 @@ func (t *todoWriteTool) Execute(ctx context.Context, args map[string]any) (Resul
 	case "status":
 		id, _ := args["id"].(string)
 		statusStr, _ := args["status"].(string)
-		status := shared.TodoStatus(statusStr)
+		status := normalizeTodoStatus(statusStr)
 		switch status {
 		case shared.TodoStatusPending, shared.TodoStatusInProgress,
 			shared.TodoStatusCompleted, shared.TodoStatusBlocked:
 		default:
-			return Result{IsError: true, Content: "todo_write status: invalid `status`"}, nil
+			return Result{IsError: true, Content: "todo_write status: invalid `status` (use pending, in_progress, completed, or blocked)"}, nil
 		}
 		if !t.store.SetTodoStatus(id, status) {
 			return Result{IsError: true, Content: fmt.Sprintf("todo %q not found", id)}, nil

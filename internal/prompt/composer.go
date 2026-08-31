@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"time"
+
 
 	"github.com/iSundram/Automergent/internal/agent/agentdef"
 	"github.com/iSundram/Automergent/internal/shared"
@@ -121,7 +121,7 @@ func NewPromptComposer(
 func (c *PromptComposer) buildAllLayers() {
 	c.buildBaseModelLayer()
 	c.buildPlatformLayer()
-	c.buildEnvironmentLayer()
+	c.layers[shared.LayerEnvironment] = []string{c.buildEnvironmentLayer()}
 	c.buildInstructionsLayer()
 	c.buildSkillsLayer()
 	c.buildMCPLayer()
@@ -215,8 +215,16 @@ func (c *PromptComposer) buildPlatformLayer() {
 	c.layers[shared.LayerPlatform] = []string{basePlatform}
 }
 
-// buildEnvironmentLayer adds dynamic environment context.
-func (c *PromptComposer) buildEnvironmentLayer() {
+// buildEnvironmentLayer adds the stable environment block.
+//
+// CACHE DISCIPLINE: this layer must be a pure function of (model, provider,
+// workDir) — no time, no git status, no session state. The system prompt is
+// what providers cache across requests; a volatile line here busts the
+// prompt cache for the entire prefix on every phase transition. Volatile
+// environment facts (today's date, the git snapshot) live in the request-time
+// user context instead (agent/usercontext.go), which is rebuilt per
+// conversation and never cached.
+func (c *PromptComposer) buildEnvironmentLayer() string {
 	var sb strings.Builder
 	sb.WriteString("## Environment Context\n")
 	sb.WriteString(fmt.Sprintf("You are powered by the model named %s. The exact model ID is %s/%s\n", c.model.Name, c.model.Provider, c.model.Name))
@@ -225,27 +233,24 @@ func (c *PromptComposer) buildEnvironmentLayer() {
 	sb.WriteString(fmt.Sprintf("  Working directory: %s\n", c.workingDir))
 	sb.WriteString(fmt.Sprintf("  Workspace root folder: %s\n", c.workingDir))
 
-	// Check if git repo
+	// Git presence only — the branch/status snapshot is request-time user
+	// context (see usercontext.go); embedding it here would bust the cache
+	// prefix on every phase transition.
 	if _, err := os.Stat(filepath.Join(c.workingDir, ".git")); err == nil {
 		sb.WriteString("  Is directory a git repo: yes\n")
-		sb.WriteString(c.gitStatusBlock())
 	} else {
 		sb.WriteString("  Is directory a git repo: no\n")
 	}
 
 	sb.WriteString(fmt.Sprintf("  Platform: %s\n", runtime.GOOS))
-	sb.WriteString(fmt.Sprintf("  Today's date: %s\n", time.Now().Format("Mon Jan 2 2006")))
 	sb.WriteString("</env>\n")
 
-	c.layers[shared.LayerEnvironment] = []string{sb.String()}
+	return sb.String()
 }
 
-// gitStatusBlock renders a compact, read-only git snapshot: current branch,
-// the default branch, and the first lines of the working-tree status. Bounded
-// so a dirty tree cannot flood the system prompt.
-func (c *PromptComposer) gitStatusBlock() string {
-	return GitStatusBlock(c.workingDir)
-}
+// gitStatusBlock is retired from the environment layer: the git snapshot is
+// request-time user context (see usercontext.go and buildEnvironmentLayer's
+// cache-discipline note). GitStatusBlock below remains the shared renderer.
 
 // GitStatusBlock renders a compact, read-only git snapshot of dir: current
 // branch, the default branch, the first lines of the working-tree status,

@@ -69,6 +69,21 @@ type Agent struct {
 	// call instead of waiting for the whole turn to finish.
 	steer chan string
 
+	// ephemeral holds turn-scoped nudge messages (explore coverage, stall
+	// recovery, step budget) that ride the next provider request but are
+	// never persisted to the session. See ephemeral.go.
+	ephemeral []ai.Message
+
+	// promptCache tracks the previous call's cache-relevant prefix so a
+	// cache-hit collapse can be explained (ours vs server-side). See
+	// cachedetect.go.
+	promptCache promptCacheState
+
+	// lastTransition records why the phase loop's previous iteration
+	// continued (see transitions.go) — test observability for the recovery
+	// paths.
+	lastTransition ContinueReason
+
 	// Context-window management state (see autocompact.go). usageAnchor is
 	// the message count covered by the last provider-reported usage;
 	// usageAnchoredTokens is that usage total. Compaction rewrites messages
@@ -77,6 +92,10 @@ type Agent struct {
 	usageAnchoredTokens int
 	compactionFailures  int
 	lastCompactedAt     time.Time
+
+	// lastAssistantAt feeds the cache-coldness check for time-based
+	// microcompact (see autocompact.go).
+	lastAssistantAt time.Time
 
 	// userCtx is the conversation-scoped user context (project instructions,
 	// git snapshot) injected as meta user messages at request time. See
@@ -429,6 +448,10 @@ const (
 	// ai.RetryInfo. Emitted while the retry is pending, so the UI can show
 	// progress instead of appearing to hang through the backoff.
 	EventRetry = "retry"
+	// EventCacheBreak reports a detected prompt-cache hit collapse between
+	// consecutive provider calls. Payload is a human-readable explanation
+	// (ours vs server-side). See cachedetect.go.
+	EventCacheBreak = "cache_break"
 	// EventSteered reports that a queued user message was injected mid-run at
 	// a tool boundary. Payload is the message text.
 	EventSteered = "steered"
@@ -990,7 +1013,13 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 	if maxSteps <= 0 {
 		maxSteps = 20
 	}
-	reactiveCompactions := 0
+
+	// Loop state machine (see transitions.go): every continue-site writes
+	// the reason it continued, every retry path owns exactly the counter
+	// that bounds it. maxOutputTokens is the request cap for the current
+	// iteration — the truncation recovery path escalates it once.
+	state := loopState{}
+	maxOutputTokens := defaultMaxOutputTokens
 
 	// The composed system prompt is phase-scoped: it changes only between
 	// phase loops, never between iterations of one loop. Composing it once
@@ -1004,6 +1033,11 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 	// reality instead of reporting zeros.
 
 	for {
+		// Record why the previous iteration continued (empty on the first
+		// iteration) so tests can assert recovery paths without inspecting
+		// injected message text. See transitions.go.
+		a.setLastTransition(state.transition)
+
 		provider := a.Provider()
 		a.sess.SetMessages(ai.RepairMissingToolResults(a.sess.Messages))
 
@@ -1040,8 +1074,9 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		thinkingLevel := a.getThinkingLevel()
 
 		// Project instructions + git snapshot ride as a leading meta user
-		// message (never persisted; see usercontext.go).
-		messagesForQuery := prependUserContext(a.sess.Messages, a.userContext())
+		// message (never persisted; see usercontext.go). Ephemeral nudges
+		// (see ephemeral.go) append the same way: request-only.
+		messagesForQuery := a.appendEphemeral(prependUserContext(a.sess.Messages, a.userContext()))
 		// Strict providers require role alternation: merged history,
 		// steered notifications, or compacted blocks can produce adjacent
 		// same-role messages, so coalesce them before the request.
@@ -1052,7 +1087,7 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 			Tools:       toolSchemas,
 			System:      systemPrompt,
 			Temperature: 0.0,
-			MaxTokens:   8192,
+			MaxTokens:   maxOutputTokens,
 			Stream:      true,
 			Thinking: &ai.ThinkingConfig{
 				Type:            "enabled",
@@ -1064,18 +1099,21 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		}
 
 		a.Emit(EventStatus, "thinking")
+		state.turnCount++
 		resp, err := provider.Complete(ctx, req)
 		if err != nil {
 			if errors.Is(err, errors.CodeQuotaExceeded) {
 				if a.handleQuotaExceeded(ctx, err) {
+					state.transition = ContinueQuotaRetry
 					continue
 				}
 			}
 			// Reactive compaction: the provider rejected the prompt as too
 			// long (estimation drifted from its real counting). Compact and
 			// retry once rather than failing the whole phase.
-			if reactiveCompactions < 1 && a.reactiveCompact(ctx, err, provider) {
-				reactiveCompactions++
+			if state.reactiveCompactions < 1 && a.reactiveCompact(ctx, err, provider) {
+				state.reactiveCompactions++
+				state.transition = ContinueReactiveCompact
 				continue
 			}
 			a.Emit(EventError, err)
@@ -1093,6 +1131,11 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		stop := resp.StopReason()
 		a.sess.AddUsage(usage)
 		a.recordUsage(usage)
+		// Cache-break observability: explain a cache-hit collapse between
+		// consecutive calls (see cachedetect.go). Emitted, never fatal.
+		if explain := a.observePromptCache(provider.Name(), systemPrompt, toolSchemas, usage); explain != "" {
+			a.Emit(EventCacheBreak, explain)
+		}
 
 		msg := ai.Message{
 			Role:     ai.RoleAssistant,
@@ -1117,6 +1160,35 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 			// Anchor token counting on this response's real usage: the
 			// request covered exactly the messages now in the session.
 			a.recordUsageAnchor(usage, len(a.sess.Messages))
+			a.noteAssistantResponse()
+		}
+
+		// Output-truncation recovery (see transitions.go). The truncated
+		// assistant message is already recorded, so the model can pick up
+		// mid-thought: escalate the cap once, then resume-mid-thought nudges,
+		// then accept the truncation.
+		if stop == ai.StopReasonLength {
+			if !state.maxOutputEscalated {
+				state.maxOutputEscalated = true
+				maxOutputTokens = escalatedMaxOutputTokens
+				state.transition = ContinueMaxOutputEscalate
+				a.Emit(EventStatus, "output truncated at token cap — retrying at escalated cap")
+				continue
+			}
+			if state.maxOutputRecoveryCount < maxOutputRecoveryLimit {
+				state.maxOutputRecoveryCount++
+				a.injectEphemeral(ephemeralReminderText("Output truncated", truncatedRecoveryNudge))
+				state.transition = ContinueMaxOutputRecovery
+				a.Emit(EventStatus, "output truncated — resuming mid-thought")
+				continue
+			}
+			// Recovery exhausted: fall through and accept the truncated
+			// response as the phase's answer.
+			a.Emit(EventStatus, "output truncated; recovery budget exhausted — accepting partial response")
+		} else {
+			// A healthy (non-truncated) response resets the recovery budget
+			// for the next truncation event.
+			state.maxOutputRecoveryCount = 0
 		}
 
 		if stop != ai.StopReasonTools || len(toolCalls) == 0 {
@@ -1134,16 +1206,15 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 				if len(unread) > 20 {
 					unread = append(unread[:20], fmt.Sprintf("... and %d more", len(unread)-20))
 				}
-				a.sess.AddMessage(ai.Message{
-					Role: ai.RoleSystem,
-					Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: fmt.Sprintf(
-						"[Explore coverage] Your findings answer a task about %d discovered files, but you have read too few of them to report accurately. Continue exploring: read_file the still-unread files that matter to the question (start with: %s), then produce your findings report with path:line references.",
-						lenSpecFiles(result.TaskSpec), strings.Join(unread, ", "))}},
-				})
+				a.injectEphemeral(ephemeralReminderText("Explore coverage", fmt.Sprintf(
+					"Your findings answer a task about %d discovered files, but you have read too few of them to report accurately. Continue exploring: read_file the still-unread files that matter to the question (start with: %s), then produce your findings report with path:line references.",
+					lenSpecFiles(result.TaskSpec), strings.Join(unread, ", "))))
 				a.Emit(EventStatus, "explore under-covered — requesting deeper read")
+				state.transition = ContinueExploreCoverage
 				continue
 			}
-			if continueTurn := a.injectLongRunContext(runMeta, false); continueTurn {
+			if continueTurn := a.injectLongRunContext(runMeta, false, phase == shared.PhaseBuild); continueTurn {
+				state.transition = ContinueStallNudge
 				continue // anti-stall: nudge injected, loop again
 			}
 			// Explore exit gate: an explore phase that produced no tool
@@ -1153,12 +1224,10 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 			// answer (the same one-nudge budget as the anti-stall path).
 			if a.phaseExploreUndercovered(result.TaskSpec) && !exploreNudged {
 				exploreNudged = true
-				a.sess.AddMessage(ai.Message{
-					Role: ai.RoleSystem,
-					Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: fmt.Sprintf(
-						"[Explore coverage] You are finishing the exploration task without having read any of the files it concerns. Read the relevant files (at minimum the ones named in the task) with read_file, then produce your findings report with path:line references.")}},
-				})
+				a.injectEphemeral(ephemeralReminderText("Explore coverage",
+					"You are finishing the exploration task without having read any of the files it concerns. Read the relevant files (at minimum the ones named in the task) with read_file, then produce your findings report with path:line references."))
 				a.Emit(EventStatus, "explore under-covered — requesting deeper read")
+				state.transition = ContinueExploreCoverage
 				continue
 			}
 			if isFinalLoop {
@@ -1203,7 +1272,7 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		a.sess.AddMessage(resultMsg)
 		a.recordToTranscript(resultMsg)
 		a.drainSteer()
-		a.injectLongRunContext(runMeta, true)
+		a.injectLongRunContext(runMeta, true, phase == shared.PhaseBuild)
 
 		// Phase step budget: past MaxSteps the model gets one wrap-up nudge,
 		// and past twice that the phase is cut off so a runaway loop cannot
@@ -1211,16 +1280,17 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		// what bounds their cost).
 		phaseSteps++
 		if phaseSteps == maxSteps {
-			a.sess.AddMessage(ai.Message{
-				Role: ai.RoleSystem,
-				Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: fmt.Sprintf(
-					"[Phase step budget] You have used %d of %d steps in the %s phase. Wrap up: finish the current action, verify what you can, and produce your best partial result now.",
-					phaseSteps, maxSteps, phase)}},
-			})
+			a.injectEphemeral(ephemeralReminderText("Phase step budget", fmt.Sprintf(
+				"You have used %d of %d steps in the %s phase. Wrap up: finish the current action, verify what you can, and produce your best partial result now.",
+				phaseSteps, maxSteps, phase)))
 			a.Emit(EventStatus, fmt.Sprintf("phase %s hit step budget (%d); requesting wrap-up", phase, maxSteps))
+			state.transition = ContinuePhaseStepWrapup
 		}
 		if phaseSteps >= maxSteps*2 {
 			return fmt.Errorf("phase %s exceeded %d steps without completing; aborting to protect the session", phase, phaseSteps)
+		}
+		if state.transition != ContinuePhaseStepWrapup {
+			state.transition = ContinueNextTurn
 		}
 	}
 }

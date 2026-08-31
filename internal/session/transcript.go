@@ -125,6 +125,18 @@ func (s *Storage) transcriptPath(project, id string) string {
 	return filepath.Join(s.dir, projectsSubdir, project, id+".jsonl")
 }
 
+// TranscriptPathFor returns the transcript file path for a session without
+// requiring a Storage instance. The agent uses it to point the model at the
+// full durable transcript after a compaction ("read the transcript if you
+// need exact earlier content"), mirroring the reference agent's post-compact
+// transcript pointer.
+func TranscriptPathFor(storageDir, workDir, sessionID string) string {
+	if storageDir == "" || sessionID == "" {
+		return ""
+	}
+	return filepath.Join(storageDir, projectsSubdir, sanitizeProjectDir(workDir), sessionID+".jsonl")
+}
+
 // findTranscript locates the transcript file for a session ID by scanning
 // the project subdirectories. Returns "" when not found.
 func (s *Storage) findTranscript(id string) string {

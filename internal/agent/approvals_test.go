@@ -99,7 +99,7 @@ func TestShellGrantMatchesPrefix(t *testing.T) {
 
 func TestScopeRoundTrip(t *testing.T) {
 	a := &Agent{}
-	tc := ai.ToolCall{Name: "run_command", Args: map[string]any{"command": "docker compose up"}}
+	tc := ai.ToolCall{Name: "bash", Args: map[string]any{"command": "docker compose up"}}
 	scope := a.buildApprovalScope(tc, &stubShellTool{})
 	fields := approvalScopeFields(scope)
 	cmd, gen := scopeCmd(fields)

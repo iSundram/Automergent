@@ -59,7 +59,8 @@ RULES:
 3. Dependencies must reference earlier task ids
 4. Create only the tasks genuinely needed — a simple question may need zero or one task
 5. Commit tasks only if the user asked to commit
-6. Return ONLY valid JSON, no extra text`
+6. Return ONLY valid JSON, no extra text
+7. NEVER create an "answer" task that greets the user, restates the plan, or reports/summarizes the results of earlier tasks. The completion response of the LAST task is shown to the user directly — reporting is free. An "answer" task is only valid when the request is a pure informational question with no other work, and then it must be the ONLY task. Duplicating it after real work produces a second, repetitive reply.`
 }
 
 // PlanTasks asks the LLM to produce the task plan.
@@ -182,7 +183,49 @@ func (p *LLMTaskPlanner) parseResponse(response string, intentSet *IntentSet) ([
 		})
 	}
 
-	return tasks, nil
+	return dropRedundantAnswerTasks(tasks), nil
+}
+
+// dropRedundantAnswerTasks removes "answer"-type tasks that only greet the
+// user or report the results of earlier tasks. The final task's completion
+// response is the user-visible answer, so such a task produces a second,
+// repetitive reply (observed in session 89869a5e: an [analyze] task followed
+// by "[answer] Greet the user and report the findings" greeted twice). An
+// answer task survives only when it is the sole task — a pure informational
+// question — or when its description clearly does work of its own.
+func dropRedundantAnswerTasks(tasks []TaskSpec) []TaskSpec {
+	if len(tasks) <= 1 {
+		return tasks
+	}
+	answerOnly := func(t TaskSpec) bool {
+		if !strings.EqualFold(t.Type, "answer") {
+			return false
+		}
+		d := strings.ToLower(t.Description)
+		for _, marker := range []string{
+			"greet", "greeting", "hello", "summar", "report", "restate",
+			"present the", "tell the user", "respond to the user",
+			"acknowledge", "wrap up", "final answer",
+		} {
+			if strings.Contains(d, marker) {
+				return true
+			}
+		}
+		return false
+	}
+	out := make([]TaskSpec, 0, len(tasks))
+	for _, t := range tasks {
+		if answerOnly(t) {
+			continue
+		}
+		out = append(out, t)
+	}
+	if len(out) == 0 {
+		// Every task was an answer-report: keep the original plan rather
+		// than executing nothing.
+		return tasks
+	}
+	return out
 }
 
 func firstIntentID(intentSet *IntentSet) string {

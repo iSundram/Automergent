@@ -78,6 +78,10 @@ var pendingSweep = []string{
 	"tui/components/model_hub.go",
 	"tui/components/session_browser.go",
 	"tui/components/header.go",
+	// Owned by the parallel commands workstream: the /expand and /collapse
+	// icons (⌄ ⌃) predate the charter and will be swept with that package's
+	// icon pass.
+	"tui/commands/cmd_expand.go",
 }
 
 // stringLiterals extracts the contents of every string literal in a line of Go

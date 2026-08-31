@@ -195,9 +195,13 @@ func TestExecuteToolAlwaysPersistsApprovalToSession(t *testing.T) {
 		sess:                sess,
 		tools:               reg,
 		events:              make(chan Event, 8),
-		sessionGrants: newGrants(nil),
 		approvalSource:      "test",
 	}
+	// New() wires the grants' persist hook to the session; a hand-built agent
+	// must wire the same hook or "always allow" grants vanish with the run.
+	ag.sessionGrants = newGrants(func(scope string) {
+		ag.sess.AddApproval(scope, ag.approvalSource)
+	})
 
 	go func() {
 		for event := range ag.Events() {

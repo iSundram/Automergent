@@ -148,7 +148,7 @@ func (a *App) compactContext() tea.Cmd {
 		if a.ag == nil {
 			return nil
 		}
-		compacted := a.ag.CompactSessionMessages(ctx, a.sess.Messages)
+		compacted := a.ag.CompactSessionMessagesManual(ctx, a.sess.Messages)
 		a.sess.SetMessages(compacted)
 		// The usage anchor described the pre-compaction prefix; drop it so
 		// token estimates are recomputed from the compacted history.

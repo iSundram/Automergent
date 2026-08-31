@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/iSundram/Automergent/internal/ai"
 	promptpkg "github.com/iSundram/Automergent/internal/prompt"
 )
 
@@ -15,8 +14,14 @@ import (
 
 const (
 	goalReminderEveryTurns = 5
-	maxAutoContinuations   = 20
-	stallNudgeMaxPerRun    = 2
+	// maxAutoContinuations bounds FORCED stall-recovery continuations per
+	// Run (goal reminders annotate but never force). 20 let an
+	// answer→nudge→pointless-tool→answer cycle burn ~380K tokens on a
+	// simple informational question (session 1c051187); a genuine stall
+	// that needs more than a few nudges is a model problem, not a
+	// try-harder problem.
+	maxAutoContinuations = 4
+	stallNudgeMaxPerRun  = 2
 )
 
 // goalMetadataKey marks the session-level goal in session metadata.
@@ -64,9 +69,16 @@ func (a *Agent) goalContinuationBlock(continuation int) string {
 }
 
 // stallNudgeBlock returns the injected message when the model replied without
-// tool calls while todos remain open. Returns "" when no nudge is warranted.
-func (a *Agent) stallNudgeBlock(stallCount int) string {
+// tool calls while todos remain open. Only IMPLEMENTATION phases (build)
+// nudge: there, stopping without verified work is a real stall. Informational
+// phases (explore/plan) deliver the answer itself — nudging them to "keep
+// calling tools" after a complete findings report produced the go-test loop
+// in session 1c051187. Returns "" when no nudge is warranted.
+func (a *Agent) stallNudgeBlock(stallCount int, implementationPhase bool) string {
 	if stallCount <= 0 || stallCount > stallNudgeMaxPerRun {
+		return ""
+	}
+	if !implementationPhase {
 		return ""
 	}
 	var turnCtx *promptpkg.TurnContext
@@ -84,7 +96,7 @@ func (a *Agent) stallNudgeBlock(stallCount int) string {
 	if pending == 0 && a.Goal() == "" {
 		return ""
 	}
-	return "\n[System note] You did not call any tools this turn, but work remains. Continue calling tools until the task is complete; call `finish` only once you have verification evidence.\n"
+	return "\n[System note] You did not call any tools this turn, but implementation work remains incomplete or unverified. Continue with the next concrete step and verify with real command output; call `finish` only once you have verification evidence.\n"
 }
 
 // runMetadata carries per-Run counters (continuation index, stall count).
@@ -94,17 +106,20 @@ type runMetadata struct {
 	continuations int
 }
 
-// injectLongRunContext appends goal reminders and stall nudges as a system
-// message before the next provider turn. It reports whether the run should
-// CONTINUE instead of stopping: only stall recovery forces continuation;
-// goal reminders annotate without forcing.
-func (a *Agent) injectLongRunContext(meta *runMetadata, hadToolCalls bool) (continueTurn bool) {
+// injectLongRunContext queues goal reminders and stall nudges as an
+// ephemeral system reminder for the next provider turn (see ephemeral.go —
+// nudges are request-only and never pollute the session history). It reports
+// whether the run should CONTINUE instead of stopping: only stall recovery
+// forces continuation; goal reminders annotate without forcing.
+// implementationPhase selects stall-nudge semantics (build yes, informational
+// no — see stallNudgeBlock).
+func (a *Agent) injectLongRunContext(meta *runMetadata, hadToolCalls bool, implementationPhase bool) (continueTurn bool) {
 	meta.turn++
 	var block string
 
 	if !hadToolCalls && meta.turn > 1 {
 		meta.stalls++
-		block = a.stallNudgeBlock(meta.stalls)
+		block = a.stallNudgeBlock(meta.stalls, implementationPhase)
 	} else {
 		meta.stalls = 0
 	}
@@ -119,10 +134,6 @@ func (a *Agent) injectLongRunContext(meta *runMetadata, hadToolCalls bool) (cont
 	if strings.TrimSpace(block) == "" {
 		return false
 	}
-	msg := ai.Message{
-		Role:    ai.RoleSystem,
-		Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: strings.TrimSpace(block)}},
-	}
-	a.sess.AddMessage(msg)
+	a.injectEphemeral(block)
 	return forceContinue
 }

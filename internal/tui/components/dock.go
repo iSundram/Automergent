@@ -228,9 +228,13 @@ func (d BottomDock) View() string {
 		return ""
 	}
 
+	// The tray lives inside Padding(0, 2) inside Width(d.width), so its line
+	// budget is width-4. Composing rows to anything wider makes lipgloss wrap
+	// them inside the border, and every claim the dock makes about its height
+	// becomes a lie.
 	inner := d.width - 4
-	if inner < 20 {
-		inner = 20
+	if inner < 1 {
+		inner = 1
 	}
 
 	var b strings.Builder
@@ -246,12 +250,21 @@ func (d BottomDock) View() string {
 	}
 	b.WriteString(d.preview(inner))
 
+	// Clip every line to the budget before the border is applied. The row and
+	// header builders already fit their columns to it; this is the backstop
+	// that makes the invariant unconditional rather than conventional.
+	body := strings.TrimRight(b.String(), "\n")
+	lines := strings.Split(body, "\n")
+	for i, line := range lines {
+		lines[i] = render.Clip(line, inner)
+	}
+
 	return lipgloss.NewStyle().
 		Border(lipgloss.NormalBorder(), true, false, false, false).
 		BorderForeground(d.styles.T.BorderFocused).
 		Padding(0, 2).
 		Width(d.width).
-		Render(strings.TrimRight(b.String(), "\n"))
+		Render(strings.Join(lines, "\n"))
 }
 
 // header is the tray's title row: a label, the running/cap ratio, and a hairline
@@ -351,21 +364,29 @@ func (d BottomDock) row(e DockEntry, selected bool, inner int) string {
 	// Column budget, right to left: elapsed is fixed, activity gets a third of
 	// what remains, and the label absorbs the rest. Sizing the flexible column
 	// last is what keeps a long command from pushing the timings off-screen.
-	fixed := 2 + render.Width(indent) + 2 + 7 + 5 + 4 // cursor, mark, kind, elapsed, gaps
-	remaining := inner - fixed
-	if remaining < 12 {
-		remaining = 12
+	// When the tray is too narrow for a column it is dropped — activity first,
+	// then the timing — because the label is the cell the user actually reads,
+	// and a row wider than its line budget wraps inside the border.
+	line := cursor + indent + mark + " " + kindStyle.Render(render.Cell(kind, 7))
+	rest := inner - render.Width(line)
+
+	elapsedCol := ""
+	if rest >= 12 { // the 5-cell column and its gap, with a label stub left over
+		elapsedCol = " " + elapsed
+		rest -= 6
 	}
-	activityW := remaining / 3
-	if activityW > 24 {
-		activityW = 24
+	activityCol := ""
+	if rest >= 12 { // two gaps and a cell wide enough to say something
+		activityW := rest / 3
+		if activityW > 24 {
+			activityW = 24
+		}
+		activityCol = "  " + activityStyle.Render(render.Cell(activity, activityW))
+		rest -= 2 + activityW
 	}
-	if activityW < 8 {
-		activityW = 8
-	}
-	labelW := remaining - activityW
-	if labelW < 6 {
-		labelW = 6
+	labelW := rest - 1
+	if labelW < 1 {
+		labelW = 1
 	}
 
 	labelStyle := lipgloss.NewStyle().Foreground(t.Text)
@@ -373,12 +394,7 @@ func (d BottomDock) row(e DockEntry, selected bool, inner int) string {
 		labelStyle = lipgloss.NewStyle().Foreground(t.Subtext)
 	}
 
-	line := cursor + indent +
-		mark + " " +
-		kindStyle.Render(render.Cell(kind, 7)) + " " +
-		labelStyle.Render(render.Cell(e.Label, labelW)) + "  " +
-		activityStyle.Render(render.Cell(activity, activityW)) + " " +
-		elapsed
+	line += " " + labelStyle.Render(render.Cell(e.Label, labelW)) + activityCol + elapsedCol
 
 	if selected {
 		return lipgloss.NewStyle().Bold(true).Render(line)

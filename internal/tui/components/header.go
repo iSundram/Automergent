@@ -156,9 +156,19 @@ func (h Header) View() string {
 	usageInfo := costStyle.Render(fmt.Sprintf("$%.2f", h.cost))
 	// Effort chip: the thinking level the model is running at. Always shown
 	// (even the default) so the user can see what they'll get; widened
-	// thresholds only gate it on very narrow terminals.
+	// thresholds only gate it on very narrow terminals. Color carries the
+	// intensity: minimal/low muted, medium blue, high yellow, max red.
 	if e := strings.ToLower(strings.TrimSpace(h.effort)); e != "" && h.width > 60 {
-		usageInfo += " " + lipgloss.NewStyle().Foreground(h.styles.T.Muted).Render("effort:" + e)
+		effortColor := h.styles.T.Muted
+		switch e {
+		case "medium":
+			effortColor = h.styles.T.Blue
+		case "high":
+			effortColor = h.styles.T.Yellow
+		case "xhigh", "max":
+			effortColor = h.styles.T.Red
+		}
+		usageInfo += " " + lipgloss.NewStyle().Foreground(effortColor).Render("effort:" + e)
 	}
 
 	barWidth := 0
