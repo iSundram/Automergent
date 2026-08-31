@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="assets/logo.svg" width="160" alt="Automergent Logo" />
+  <img src="assets/logo.svg" width="480" alt="Automergent Logo" />
 </p>
-
-<h1 align="center">Automergent</h1>
 
 <p align="center">
   <strong>Next-gen autonomous AI coding engineer built on Gemini &amp; Vertex AI with multi-phase context intelligence, subagent fleet orchestration, tree-sitter AST parsing, and deep root-cause error diagnostics.</strong>

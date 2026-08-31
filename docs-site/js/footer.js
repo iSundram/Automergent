@@ -10,8 +10,7 @@
     <div class="footer-inner docs-footer-inner">
       <div class="footer-brand docs-footer-brand">
         <a href="${isIndex ? 'index.html' : '../index.html'}" class="navbar-logo">
-          <img src="${logoSrc}" alt="Automergent" height="26" style="height:26px; width:auto;">
-          <span>Auto<span class="logo-accent">mergent</span></span>
+          <img src="${logoSrc}" alt="Automergent" class="footer-logo-img">
         </a>
         <p>Next-gen autonomous coding engineer built on Gemini & Vertex AI with multi-phase context intelligence, subagent orchestration, and deep root-cause error diagnostics.</p>
       </div>

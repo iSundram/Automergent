@@ -41,8 +41,7 @@
   <nav class="navbar docs-nav" role="navigation" aria-label="Main navigation">
     <div class="navbar-inner docs-nav-inner">
       <a href="${homeHref}" class="navbar-logo docs-nav-logo" aria-label="Automergent Home">
-        <img src="${logoSrc}" alt="Automergent" height="28" style="height:28px; width:auto;">
-        <span>Auto<span class="logo-accent">mergent</span></span>
+        <img src="${logoSrc}" alt="Automergent" class="navbar-logo-img">
       </a>
 
       <div class="navbar-links docs-nav-links">
