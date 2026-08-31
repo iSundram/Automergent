@@ -21,6 +21,7 @@ type Theme struct {
 	Green         color.Color
 	Red           color.Color
 	Yellow        color.Color
+	Orange        color.Color
 	Blue          color.Color
 	Magenta       color.Color
 	Cyan          color.Color

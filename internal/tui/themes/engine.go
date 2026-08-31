@@ -178,6 +178,12 @@ func CreateCustomTheme(name string, colors map[string]string) *Theme {
 		}
 		return lipgloss.Color(hex)
 	}
+	// Orange is optional in custom themes: blend toward red when absent so
+	// effort-ladder rendering keeps a distinct warm color.
+	orange := colors["orange"]
+	if orange == "" {
+		orange = colors["red"]
+	}
 
 	return &Theme{
 		Name:          name,
@@ -192,6 +198,7 @@ func CreateCustomTheme(name string, colors map[string]string) *Theme {
 		Green:         parseColor(colors["green"]),
 		Red:           parseColor(colors["red"]),
 		Yellow:        parseColor(colors["yellow"]),
+		Orange:        parseColor(orange),
 		Blue:          parseColor(colors["blue"]),
 		Magenta:       parseColor(colors["magenta"]),
 		Cyan:          parseColor(colors["cyan"]),
@@ -215,6 +222,7 @@ func Gruvbox() *Theme {
 		Green:         lipgloss.Color("#b8bb26"),
 		Red:           lipgloss.Color("#fb4934"),
 		Yellow:        lipgloss.Color("#fabd2f"),
+		Orange:        lipgloss.Color("#fe8019"),
 		Blue:          lipgloss.Color("#83a598"),
 		Magenta:       lipgloss.Color("#d3869b"),
 		Cyan:          lipgloss.Color("#8ec07c"),
@@ -238,6 +246,7 @@ func OneDark() *Theme {
 		Green:         lipgloss.Color("#98c379"),
 		Red:           lipgloss.Color("#e06c75"),
 		Yellow:        lipgloss.Color("#e5c07b"),
+		Orange:        lipgloss.Color("#d19a66"),
 		Blue:          lipgloss.Color("#61afef"),
 		Magenta:       lipgloss.Color("#c678dd"),
 		Cyan:          lipgloss.Color("#56b6c2"),
@@ -261,6 +270,7 @@ func TokyoNight() *Theme {
 		Green:         lipgloss.Color("#9ece6a"),
 		Red:           lipgloss.Color("#f7768e"),
 		Yellow:        lipgloss.Color("#e0af68"),
+		Orange:        lipgloss.Color("#ff9e64"),
 		Blue:          lipgloss.Color("#7aa2f7"),
 		Magenta:       lipgloss.Color("#bb9af7"),
 		Cyan:          lipgloss.Color("#7dcfff"),
@@ -284,6 +294,7 @@ func SolarizedDark() *Theme {
 		Green:         lipgloss.Color("#859900"),
 		Red:           lipgloss.Color("#dc322f"),
 		Yellow:        lipgloss.Color("#b58900"),
+		Orange:        lipgloss.Color("#cb4b16"),
 		Blue:          lipgloss.Color("#268bd2"),
 		Magenta:       lipgloss.Color("#d33682"),
 		Cyan:          lipgloss.Color("#2aa198"),
@@ -307,6 +318,7 @@ func SolarizedLight() *Theme {
 		Green:         lipgloss.Color("#859900"),
 		Red:           lipgloss.Color("#dc322f"),
 		Yellow:        lipgloss.Color("#b58900"),
+		Orange:        lipgloss.Color("#cb4b16"),
 		Blue:          lipgloss.Color("#268bd2"),
 		Magenta:       lipgloss.Color("#d33682"),
 		Cyan:          lipgloss.Color("#2aa198"),
@@ -330,6 +342,7 @@ func HighContrast() *Theme {
 		Green:         lipgloss.Color("#00ff00"),
 		Red:           lipgloss.Color("#ff0000"),
 		Yellow:        lipgloss.Color("#ffff00"),
+		Orange:        lipgloss.Color("#ff8000"),
 		Blue:          lipgloss.Color("#0080ff"),
 		Magenta:       lipgloss.Color("#ff00ff"),
 		Cyan:          lipgloss.Color("#00ffff"),
@@ -353,6 +366,7 @@ func Monokai() *Theme {
 		Green:         lipgloss.Color("#a6e22e"),
 		Red:           lipgloss.Color("#f92672"),
 		Yellow:        lipgloss.Color("#e6db74"),
+		Orange:        lipgloss.Color("#fd971f"),
 		Blue:          lipgloss.Color("#66d9ef"),
 		Magenta:       lipgloss.Color("#ae81ff"),
 		Cyan:          lipgloss.Color("#66d9ef"),

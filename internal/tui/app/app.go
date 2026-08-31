@@ -228,9 +228,16 @@ type App struct {
 	streamTickPending bool
 	runChars          int       // streamed characters in the current run (~4 chars ≈ 1 token)
 	runStart          time.Time // when the current run started
+	runBaseIn         int       // session TotalInputTokens at run start; the diff is this run's real input usage
+	runBaseOut        int       // session TotalOutputTokens at run start; the diff is this run's real output usage
 	spinLabel         string    // current activity verb (reading/editing/…); the stream tick decorates it with the "(12s • ↓ N tokens)" readout
 	lastRunSummary    string    // settled readout of the last completed run, rendered in the spinner slot
 	clockMinute       string    // last-painted minute of the footer clock, so it repaints only on rollover
+
+	// Idle info-line rotation: cycles through every command's one-line tip
+	// and then the coding facts while the app sits idle.
+	tipRotate     *tipRotator
+	tipLastRotate time.Time // when the rotator last advanced, gating the 15s cadence
 }
 
 func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, persist *session.PersistenceManager, initialPrompt string, showSessionPicker bool, mcpOrch *mcp.Orchestrator) *App {
@@ -289,6 +296,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		availableProviders: config.ProviderNames(),
 		commands:           commands.Default(),
 	}
+	app.tipRotate = newTipRotator(app.commands)
 	app.providerStudio.SetHost(app)
 	app.modelHub.SetHost(app)
 	sort.Strings(app.availableProviders)
@@ -340,7 +348,9 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	app.syncCommandHints()
 	app.header.SetModel(cfg.Model)
 	app.header.SetProvider(cfg.Provider)
-	app.header.SetEffort(cfg.Effort)
+	// Effort display mirrors what the provider client will actually send:
+	// per-provider value, then global config, then the provider default.
+	app.header.SetEffort(config.EffectiveEffort(cfg.Provider, cfg.Providers[cfg.Provider], cfg.Effort))
 	if wd, err := os.Getwd(); err == nil {
 		app.statusBar.SetWorkDir(wd)
 	}
@@ -353,7 +363,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	app.header.SetMode(cfg.Mode)
 	app.statusBar.SetMode(cfg.Mode)
 	app.header.SetPhase(string(agent.DetectPhase(sess.Messages)))
-	app.header.SetTokens(sess.TotalInputTokens + sess.TotalOutputTokens)
+	app.header.SetTotalTokens(sess.TotalInputTokens + sess.TotalOutputTokens)
 	app.stats.InputTokens = sess.TotalInputTokens
 	app.stats.OutputTokens = sess.TotalOutputTokens
 	if len(sess.Messages) > 0 {
@@ -730,6 +740,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.retrying || a.thinking {
 			a.refreshChrome()
 		}
+		// The idle info line rotates its tip/fact entry on its own cadence.
+		if a.maybeRotateTip(time.Now()) {
+			a.refreshChrome()
+		}
 		// The footer clock ticks on minute boundaries only: repaint when the
 		// displayed time actually changed.
 		if stamp := a.statusBar.ClockMinute(); stamp != "" && stamp != a.clockMinute {
@@ -758,8 +772,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case components.ArtifactDecisionMsg:
-		// applyArtifactDecision resolves any waiting plan review itself.
-		a.applyArtifactDecision(m.Path, m.Approved, m.Reason)
+		// applyArtifactDecision resolves any waiting plan review itself and
+		// may launch the approved/rejected plan's follow-up run: its cmd
+		// arms the agent event listener and must be executed, not dropped.
+		if cmd := a.applyArtifactDecision(m.Path, m.Approved, m.Reason); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case components.ArtifactCommentMsg:
 		a.applyArtifactComment(m.Path, m.Text)
 	case planReviewRequestedMsg:
@@ -774,7 +792,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case artifactEditorDoneMsg:
 		a.handleArtifactEditorDone(m)
 	case sessionTitledMsg:
-		a.applySessionTitle(m)
+		if cmd := a.applySessionTitle(m); cmd != nil {
+			cmds = append(cmds, cmd)
+		}
 	case components.SessionRenamedMsg:
 		if m.Session != nil && strings.TrimSpace(m.Title) != "" {
 			if err := a.renameStoredSession(m.Session, m.Title); err != nil {

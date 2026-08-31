@@ -12,6 +12,7 @@ import (
 
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/config"
+	"github.com/iSundram/Automergent/internal/tui/commands"
 	"github.com/iSundram/Automergent/internal/tui/components"
 )
 
@@ -240,8 +241,11 @@ func buildEffortItems(a *App) []components.PaletteItem {
 	if currentEffort == "" {
 		currentEffort = pc.ThinkingLevel
 	}
+	// Effort levels come from the active model's models.dev catalog entry
+	// (reasoning_options.effort); models without effort control fall back
+	// to the provider's generic set.
 	var items []components.PaletteItem
-	for _, e := range []string{"minimal", "low", "medium", "high"} {
+	for _, e := range commands.EffortsForModel(a.Provider(), a.Model()) {
 		items = append(items, components.PaletteItem{
 			Label: e, Description: "Thinking effort", Value: e, Icon: "●", Category: "Effort",
 			Current: e == currentEffort,

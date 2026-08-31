@@ -125,6 +125,10 @@ func (a *App) tipContext() tips.Context {
 	// resting state.
 	if tip := a.activeCommandTip(); tip != "" {
 		ctx.CommandTip = tip
+	} else if a.uiState() == tips.StateIdle {
+		// Otherwise, while idle, the line rotates through every command's
+		// tip and then the coding facts.
+		ctx.IdleTip = a.idleTipText()
 	}
 	return ctx
 }

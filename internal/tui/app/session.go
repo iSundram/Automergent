@@ -42,6 +42,13 @@ func (a *App) runAgentTurn(displayPrompt, agentPrompt, command string) tea.Cmd {
 	a.streamedReply = false
 	a.runChars = 0
 	a.runStart = time.Now()
+	// Snapshot the session's cumulative usage so the run summary can report
+	// THIS run's real token cost (provider-reported) instead of a char-based
+	// output-only estimate.
+	a.runBaseIn, a.runBaseOut = 0, 0
+	if a.sess != nil {
+		a.runBaseIn, a.runBaseOut = a.sess.TotalInputTokens, a.sess.TotalOutputTokens
+	}
 	a.spin.SetMeta("")
 	a.lastRunSummary = ""
 	a.activeTool = ""
@@ -237,7 +244,7 @@ func (a *App) restoreSession(s *session.Session) error {
 	}
 	a.stats.InputTokens = s.TotalInputTokens
 	a.stats.OutputTokens = s.TotalOutputTokens
-	a.header.SetTokens(s.TotalInputTokens + s.TotalOutputTokens)
+	a.header.SetTotalTokens(s.TotalInputTokens + s.TotalOutputTokens)
 	a.updateActiveTokens()
 	if calc := a.ag.AdaptiveCalculator(); calc != nil {
 		a.header.SetAdaptiveWeight(calc.Weight())

@@ -2053,10 +2053,15 @@ func (a *Agent) answerDirectQuestion(ctx context.Context, question string) error
 		return err
 	}
 
-	text, _, _, err := a.drainStream(resp, true)
+	text, _, usage, err := a.drainStream(resp, true)
 	if err != nil {
 		return err
 	}
+
+	// Record usage like the phase loop does: this is a real provider
+	// request, and the session totals (header Σ, run summary ↑/↓) must
+	// reflect it.
+	a.sess.AddUsage(usage)
 
 	// Record the answer so it survives compaction and session resume.
 	msg := ai.NewTextMessage(ai.RoleAssistant, text)

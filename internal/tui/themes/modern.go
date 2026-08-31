@@ -16,7 +16,8 @@ func Modern() *Theme {
 		AccentAlt:     lipgloss.Color("#d4d4d4"),
 		Green:         lipgloss.Color("#a6e3a1"), // Catppuccin Green for good visibility
 		Red:           lipgloss.Color("#f38ba8"), // Catppuccin Red
-		Yellow:        lipgloss.Color("#f9e2af"), // Catppuccin Yellow
+		Yellow:        lipgloss.Color("#f9e2af"),
+		Orange:        lipgloss.Color("#fab387"), // Catppuccin Yellow
 		Blue:          lipgloss.Color("#89b4fa"), // Catppuccin Blue
 		Magenta:       lipgloss.Color("#cba6f7"), // Catppuccin Magenta
 		Cyan:          lipgloss.Color("#89dceb"), // Catppuccin Cyan

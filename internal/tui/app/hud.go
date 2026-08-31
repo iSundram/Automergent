@@ -55,6 +55,9 @@ func (a *App) updateActiveTokens() {
 	// The header's meter is the single source of truth for context usage
 	// (tokens + bar). The status bar no longer duplicates it.
 	a.header.SetActiveTokens(active)
+	// Cumulative session usage rides alongside: the real, provider-reported
+	// sum of every request so far (not the window estimate).
+	a.header.SetTotalTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
 
 	// HUD: pending-edit review counter.
 	if store := a.ag.EditReviewStore(); store != nil {

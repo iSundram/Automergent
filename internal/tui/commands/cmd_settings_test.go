@@ -141,7 +141,7 @@ func TestHandleEffort(t *testing.T) {
 			args:  []string{"invalid"},
 			setup: func(m *mockHost) {},
 			verify: func(m *mockHost, t *testing.T) {
-				if len(m.errorMessages) != 1 || !contains(m.errorMessages[0], "minimal|low|medium|high") {
+				if len(m.errorMessages) != 1 || !contains(m.errorMessages[0], "is not supported by") {
 					t.Fatalf("expected error for invalid effort, got: %v", m.errorMessages)
 				}
 			},

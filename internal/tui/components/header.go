@@ -18,6 +18,7 @@ type Header struct {
 	mode           string
 	phase          string // "init", "explore", "plan", "build"
 	activeTokens   int    // tokens in the current conversation (context usage)
+	totalTokens    int    // cumulative session usage: all requests, real provider-reported counts
 	maxTokens      int
 	adaptiveWeight float64 // learned token estimation weight (1.0 = perfect)
 	cost           float64 // session cost in USD
@@ -39,6 +40,7 @@ func (h *Header) SetMode(m string)            { h.mode = m }
 func (h *Header) SetPhase(p string)           { h.phase = p }
 func (h *Header) SetTokens(n int)             { h.activeTokens = n }
 func (h *Header) SetActiveTokens(n int)       { h.activeTokens = n }
+func (h *Header) SetTotalTokens(n int)        { h.totalTokens = n }
 func (h *Header) SetMaxTokens(n int)          { h.maxTokens = n }
 func (h *Header) SetAdaptiveWeight(w float64) { h.adaptiveWeight = w }
 func (h *Header) SetCost(usd float64)         { h.cost = usd }
@@ -121,7 +123,16 @@ func (h Header) View() string {
 		}
 		phaseLabel = " " + h.getPhaseStyle().Render(phaseText)
 	}
-	left := lipgloss.JoinHorizontal(lipgloss.Center, brand, phaseLabel)
+
+	// Total session usage: the cumulative, provider-reported token count
+	// across every request this session (distinct from the context bar's
+	// "how full is the window right now"). Σ marks it as a sum.
+	totalLabel := ""
+	if h.totalTokens > 0 && h.width > 90 {
+		totalLabel = " " + lipgloss.NewStyle().Foreground(h.styles.T.Muted).
+			Render(fmt.Sprintf("Σ %s", formatTokens(h.totalTokens)))
+	}
+	left := lipgloss.JoinHorizontal(lipgloss.Center, brand, phaseLabel, totalLabel)
 
 	// 2. Center Section: Provider & Model
 	providerIcon := h.getProviderIcon()
@@ -151,16 +162,11 @@ func (h Header) View() string {
 	// so the user has immediate context.
 	costStyle := lipgloss.NewStyle().Foreground(h.styles.T.Green)
 	usageInfo := costStyle.Render(fmt.Sprintf("$%.2f", h.cost))
-	// Effort chip: the thinking level the model is running at.
-	if e := strings.ToLower(strings.TrimSpace(h.effort)); e != "" && e != "medium" && h.width > 90 {
-		usageInfo += " " + lipgloss.NewStyle().Foreground(h.styles.T.Muted).Render("effort:"+e)
-	}
-	if h.adaptiveWeight > 0 {
-		weightStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)
-		if h.adaptiveWeight < 0.8 || h.adaptiveWeight > 1.2 {
-			weightStyle = lipgloss.NewStyle().Foreground(h.styles.T.Yellow)
-		}
-		usageInfo += " " + weightStyle.Render(fmt.Sprintf("w:%.2f", h.adaptiveWeight))
+	// Effort chip: the thinking level the model is running at. Always shown
+	// (even the default) so the user can see what they'll get; widened
+	// thresholds only gate it on very narrow terminals.
+	if e := strings.ToLower(strings.TrimSpace(h.effort)); e != "" && h.width > 60 {
+		usageInfo += " " + lipgloss.NewStyle().Foreground(h.styles.T.Muted).Render("effort:" + e)
 	}
 
 	barWidth := 0

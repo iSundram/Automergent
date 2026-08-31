@@ -255,8 +255,37 @@ func DefaultBackend(provider string) string {
 // explicit config wins, then project/location inference (for providers with
 // a "vertex" backend), then the catalog default. "default" is returned for
 // providers with a single implicit backend.
-func EffectiveBackend(provider string, pc ProviderConfig) string {
-	if pc.Backend != "" {
+// EffectiveEffort resolves the thinking effort for a provider: the
+// per-provider setting first (what /effort writes), then the global config
+// value, then the provider's default. This is what the header should display
+// and what the provider client ultimately sends.
+func EffectiveEffort(provider string, pc ProviderConfig, globalEffort string) string {
+	if pc.Effort != "" {
+		return pc.Effort
+	}
+	if pc.ThinkingLevel != "" {
+		return pc.ThinkingLevel
+	}
+	if globalEffort != "" {
+		return globalEffort
+	}
+	if spec, ok := ProviderSpecFor(provider); ok {
+		// First supported level above "low" as the sensible default; the
+		// provider clients default to "high" themselves when unset.
+		levels := spec.SupportedEfforts
+		for _, l := range levels {
+			if l == "high" {
+				return "high"
+			}
+		}
+		if len(levels) > 0 {
+			return levels[len(levels)/2]
+		}
+	}
+	return ""
+}
+
+func EffectiveBackend(provider string, pc ProviderConfig) string {	if pc.Backend != "" {
 		return pc.Backend
 	}
 	if spec, ok := ProviderSpecFor(provider); ok && len(spec.Backends) > 0 {

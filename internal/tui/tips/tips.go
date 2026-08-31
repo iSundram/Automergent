@@ -134,6 +134,11 @@ type Context struct {
 	// palette highlights a command or the prompt holds a typed "/command".
 	// It wins over the generic idle and palette lines.
 	CommandTip string
+	// IdleTip carries the rotating idle line: every command's one-line tip
+	// in turn ("tip: …"), then the coding facts ("fact: …"), looping. It
+	// wins over the static idle line only when set, so a nil rotator
+	// degrades to the resting hints.
+	IdleTip string
 }
 
 // hintTable maps each state to its footer hints. Ordering within a state is
@@ -267,6 +272,9 @@ func Info(s State, ctx Context) string {
 	}
 	switch s {
 	case StateIdle:
+		if ctx.IdleTip != "" {
+			return ctx.IdleTip
+		}
 		return "enter sends · / for commands · @ for files · shift+tab switches mode"
 
 	case StateRunning:

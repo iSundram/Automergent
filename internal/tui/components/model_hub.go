@@ -2,6 +2,7 @@ package components
 
 import (
 	"fmt"
+	"image/color"
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
@@ -50,6 +51,15 @@ type ModelItem struct {
 	Current      bool
 	Coding       bool
 	Effort       string
+	// Catalog metadata (models.dev): capabilities, effort levels, cutoffs,
+	// release date.
+	Reasoning   bool
+	Attachment  bool
+	Efforts     []string
+	Knowledge   string
+	Released    string
+	OutputLimit int
+	Custom      bool
 }
 
 type FailureAlert struct {
@@ -83,6 +93,7 @@ func (m *ModelHub) refreshModelList() {
 		return
 	}
 	live := m.host.AvailableModels()
+	pc := m.host.ProviderConfig(m.host.Provider())
 	var items []ModelItem
 	seen := make(map[string]bool)
 	for _, md := range live {
@@ -90,6 +101,7 @@ func (m *ModelHub) refreshModelList() {
 			continue
 		}
 		seen[md.ID] = true
+		_, custom := pc.Models[md.ID]
 		items = append(items, ModelItem{
 			ID:           md.ID,
 			Name:         md.Name,
@@ -99,6 +111,13 @@ func (m *ModelHub) refreshModelList() {
 			OutputPrice:  md.OutputPrice,
 			Current:      md.ID == m.host.Model(),
 			Coding:       true,
+			Reasoning:    md.Reasoning,
+			Attachment:   md.Attachment,
+			Efforts:      md.Efforts,
+			Knowledge:    md.Knowledge,
+			Released:     md.Released,
+			OutputLimit:  md.OutputLimit,
+			Custom:       custom,
 		})
 	}
 	m.modelList = items
@@ -118,7 +137,8 @@ func (m *ModelHub) filteredModels() []ModelItem {
 }
 
 func (m *ModelHub) maxVisibleItems() int {
-	const overhead = 8
+	// Overhead: rule, header, blank, detail pane (3 lines), footer, padding.
+	const overhead = 10
 	if m.height > 0 {
 		return max(1, m.height-overhead)
 	}
@@ -171,6 +191,47 @@ func (m *ModelHub) Update(msg tea.Msg) (*ModelHub, tea.Cmd) {
 			m.cursor = 0
 			m.scrollOffset = 0
 			return m, nil
+		case "i":
+			// The detail pane is always visible under the list; "i" prints
+			// the same information as a system message so it can be copied
+			// and survives closing the hub.
+			if items := m.filteredModels(); m.cursor >= 0 && m.cursor < len(items) && m.host != nil {
+				item := items[m.cursor]
+				var b strings.Builder
+				fmt.Fprintf(&b, "%s (%s) — provider %s", item.Name, item.ID, item.Provider)
+				if item.ContextLimit > 0 {
+					fmt.Fprintf(&b, "\nContext limit: %s", formatContextLimit(item.ContextLimit))
+				}
+				if item.OutputLimit > 0 {
+					fmt.Fprintf(&b, "\nMax output: %s", formatContextLimit(item.OutputLimit))
+				}
+				if item.InputPrice > 0 || item.OutputPrice > 0 {
+					fmt.Fprintf(&b, "\nPrice: $%.4g input / $%.4g output per 1M tokens", item.InputPrice, item.OutputPrice)
+				}
+				if item.Reasoning {
+					if len(item.Efforts) > 0 {
+						fmt.Fprintf(&b, "\nReasoning: yes — effort levels: %s", strings.Join(item.Efforts, " · "))
+					} else {
+						b.WriteString("\nReasoning: yes (no effort control listed)")
+					}
+				}
+				if item.Attachment {
+					b.WriteString("\nAttachments: images and files supported")
+				}
+				if item.Knowledge != "" {
+					fmt.Fprintf(&b, "\nKnowledge cutoff: %s", item.Knowledge)
+				}
+				if item.Released != "" {
+					fmt.Fprintf(&b, "\nReleased: %s", item.Released)
+				}
+				if item.Custom {
+					b.WriteString("\nSource: custom (user-registered)")
+				} else {
+					b.WriteString("\nSource: models.dev catalog")
+				}
+				m.host.AddSystemMessage(b.String())
+			}
+			return m, nil
 		case "up", "ctrl+p":
 			if m.cursor > 0 {
 				m.cursor--
@@ -214,8 +275,14 @@ func (m *ModelHub) cycleEffort() {
 	if m.cursor < 0 || m.cursor >= len(items) {
 		return
 	}
-	efforts := []string{"minimal", "low", "medium", "high", "max"}
-	current := items[m.cursor].Effort
+	item := items[m.cursor]
+	// Cycle through the levels this model actually accepts (models.dev
+	// catalog); fall back to a generic ladder when the model has none.
+	efforts := item.Efforts
+	if len(efforts) == 0 {
+		efforts = []string{"minimal", "low", "medium", "high", "max"}
+	}
+	current := item.Effort
 	idx := 0
 	for i, e := range efforts {
 		if e == current {
@@ -224,6 +291,9 @@ func (m *ModelHub) cycleEffort() {
 		}
 	}
 	m.effortCursor = (idx + 1) % len(efforts)
+	if m.host != nil {
+		m.host.SetStatus(fmt.Sprintf("Effort: %s (supported: %s)", efforts[m.effortCursor], strings.Join(efforts, " · ")))
+	}
 }
 
 func (m *ModelHub) ShowFailureAlert(modelID, provider string, count int, lastErrorCode string) {
@@ -291,10 +361,74 @@ func (m *ModelHub) renderMainView() string {
 		rows = append(rows, lipgloss.NewStyle().Foreground(m.styles.T.Muted).Italic(true).PaddingLeft(4).Render("No models available"))
 	}
 
-	footer := lipgloss.NewStyle().Foreground(m.styles.T.Muted).PaddingLeft(2).
-		MaxWidth(max(1, w-2)).Render("↑↓: navigate  •  enter: select  •  tab: cycle effort  •  a: toggle all/coding  •  esc: close")
+	var sections []string
+	sections = append(sections, strings.Join(rows, "\n"))
+	if detail := m.renderDetail(items, m.cursor); detail != "" {
+		sections = append(sections, "", detail)
+	}
 
-	return lipgloss.JoinVertical(lipgloss.Left, rule, header, "", strings.Join(rows, "\n"), "", footer)
+	footer := lipgloss.NewStyle().Foreground(m.styles.T.Muted).PaddingLeft(2).
+		MaxWidth(max(1, w-2)).Render("↑↓: navigate  •  enter: select  •  tab: cycle effort  •  a: toggle all/coding  •  i: model info  •  esc: close")
+
+	return lipgloss.JoinVertical(lipgloss.Left, rule, header, "", strings.Join(sections, "\n"), "", footer)
+}
+
+// renderDetail renders an "about" block for the model under the cursor,
+// fed by the models.dev catalog metadata carried on ModelItem.
+func (m *ModelHub) renderDetail(items []ModelItem, cursor int) string {
+	if cursor < 0 || cursor >= len(items) {
+		return ""
+	}
+	item := items[cursor]
+
+	var lines []string
+	title := lipgloss.NewStyle().Foreground(m.styles.T.Accent).Bold(true).Render(
+		fmt.Sprintf("%s — %s", item.Name, item.ID))
+	lines = append(lines, title)
+
+	var facts []string
+	facts = append(facts, fmt.Sprintf("context %s", formatContextLimit(item.ContextLimit)))
+	if item.OutputLimit > 0 {
+		facts = append(facts, fmt.Sprintf("output %s", formatContextLimit(item.OutputLimit)))
+	}
+	if item.InputPrice > 0 || item.OutputPrice > 0 {
+		facts = append(facts, fmt.Sprintf("$%.4g/$%.4g per 1M", item.InputPrice, item.OutputPrice))
+	}
+	if item.Reasoning {
+		if len(item.Efforts) > 0 {
+			// Full level names in the detail pane, colored by the same
+			// breadth rule as the list's ladder.
+			facts = append(facts, lipgloss.NewStyle().
+				Foreground(m.effortLadderColor(len(item.Efforts))).
+				Render("reasoning ("+strings.Join(item.Efforts, "/")+")"))
+		} else {
+			facts = append(facts, "reasoning")
+		}
+	}
+	if item.Attachment {
+		facts = append(facts, "attachments")
+	}
+	if item.Knowledge != "" {
+		facts = append(facts, "cutoff "+item.Knowledge)
+	}
+	if item.Released != "" {
+		facts = append(facts, "released "+item.Released)
+	}
+	if item.Custom {
+		facts = append(facts, "custom")
+	}
+	// The effort fact is already colored; wrap only the plain facts in the
+	// muted style so the ladder keeps its color, then join them.
+	muted := lipgloss.NewStyle().Foreground(m.styles.T.Muted)
+	for i, f := range facts {
+		if !strings.HasPrefix(f, "\x1b[") { // unstyled entries only
+			facts[i] = muted.Render(f)
+		}
+	}
+	lines = append(lines, strings.Join(facts, " · "))
+
+	return lipgloss.NewStyle().PaddingLeft(2).MaxWidth(max(1, m.width-2)).Render(
+		lipgloss.JoinVertical(lipgloss.Left, lines...))
 }
 
 func (m *ModelHub) renderFailureAlert() string {
@@ -345,6 +479,12 @@ func (m *ModelHub) renderModelItem(item ModelItem, selected bool) string {
 	if item.Coding {
 		badges = append(badges, lipgloss.NewStyle().Foreground(m.styles.T.Blue).Render("⚡ Coding"))
 	}
+	if item.Reasoning {
+		badges = append(badges, lipgloss.NewStyle().Foreground(m.styles.T.Blue).Render("✿ Reasoning"))
+	}
+	if item.Custom {
+		badges = append(badges, lipgloss.NewStyle().Foreground(m.styles.T.Muted).Render("⚙ Custom"))
+	}
 	if item.Effort != "" {
 		badges = append(badges, lipgloss.NewStyle().Foreground(m.styles.T.Muted).Render("⚡ "+item.Effort))
 	}
@@ -353,12 +493,66 @@ func (m *ModelHub) renderModelItem(item ModelItem, selected bool) string {
 		badgeStr = " " + strings.Join(badges, " ")
 	}
 	desc := fmt.Sprintf("Limit: %s", formatContextLimit(item.ContextLimit))
+	if item.InputPrice > 0 || item.OutputPrice > 0 {
+		desc += fmt.Sprintf("  $%.4g/$%.4g", item.InputPrice, item.OutputPrice)
+	}
 	nameSt := lipgloss.NewStyle().Foreground(m.styles.T.Text)
 	if selected {
 		nameSt = nameSt.Bold(true)
 	}
-	line := fmt.Sprintf("%s%s %s%s  %s", ind, icon, nameSt.Render(item.Name), badgeStr, lipgloss.NewStyle().Foreground(m.styles.T.Muted).Render(desc))
+	// The effort ladder renders directly after the name: the short codes
+	// of every level this model accepts (e.g. "lo·md·hi"), colored by the
+	// breadth of the ladder — 2 levels is a narrow choice (yellow), 3 is
+	// the typical ladder (green), 4+ is fine-grained control (orange).
+	ladder := ""
+	if len(item.Efforts) > 0 {
+		ladder = " " + lipgloss.NewStyle().Foreground(m.effortLadderColor(len(item.Efforts))).
+			Render("["+strings.Join(effortCodes(item.Efforts), "·")+"]")
+	}
+	line := fmt.Sprintf("%s%s %s%s%s  %s", ind, icon, nameSt.Render(item.Name), ladder, badgeStr, lipgloss.NewStyle().Foreground(m.styles.T.Muted).Render(desc))
 	return lipgloss.NewStyle().Width(m.width - 2).MaxWidth(m.width - 2).Render(line)
+}
+
+// effortCodes shortens each effort level to a two-letter code so even a
+// five-level ladder fits on one row: minimal→mi, low→lo, medium→md,
+// high→hi, max→mx. Unknown levels keep their first two letters.
+func effortCodes(efforts []string) []string {
+	codes := make([]string, len(efforts))
+	for i, e := range efforts {
+		switch e {
+		case "minimal":
+			codes[i] = "mi"
+		case "low":
+			codes[i] = "lo"
+		case "medium":
+			codes[i] = "md"
+		case "high":
+			codes[i] = "hi"
+		case "max":
+			codes[i] = "mx"
+		default:
+			if len(e) >= 2 {
+				codes[i] = strings.ToLower(e[:2])
+			} else {
+				codes[i] = strings.ToLower(e)
+			}
+		}
+	}
+	return codes
+}
+
+// effortLadderColor keys the ladder's color to its breadth: 2 levels
+// (yellow) is a limited choice, 3 (green) the typical ladder, 4+ (orange)
+// fine-grained control.
+func (m *ModelHub) effortLadderColor(levels int) color.Color {
+	switch {
+	case levels >= 4:
+		return m.styles.T.Orange
+	case levels == 3:
+		return m.styles.T.Green
+	default:
+		return m.styles.T.Yellow
+	}
 }
 
 func formatContextLimit(n int) string {

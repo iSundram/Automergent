@@ -335,7 +335,7 @@ func (a *App) newSession() {
 	a.stats.TotalCost = 0
 	a.stats.InputTokens = 0
 	a.stats.OutputTokens = 0
-	a.header.SetTokens(0)
+	a.header.SetTotalTokens(0)
 	a.statusBar.SetStatus("New session started")
 }
 

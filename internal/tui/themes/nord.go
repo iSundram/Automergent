@@ -17,6 +17,7 @@ func Nord() *Theme {
 		Green:         lipgloss.Color("#a3be8c"),
 		Red:           lipgloss.Color("#bf616a"),
 		Yellow:        lipgloss.Color("#ebcb8b"),
+		Orange:        lipgloss.Color("#d08770"),
 		Blue:          lipgloss.Color("#81a1c1"),
 		Magenta:       lipgloss.Color("#b48ead"),
 		Cyan:          lipgloss.Color("#88c0d0"),

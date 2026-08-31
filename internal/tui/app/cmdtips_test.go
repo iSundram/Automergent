@@ -43,11 +43,18 @@ func TestNoCommandTipForPlainText(t *testing.T) {
 	if got := app.infoLine.Text(); strings.Contains(got, "·") && strings.HasPrefix(got, "just") {
 		t.Fatalf("plain text must not produce a command tip: %q", got)
 	}
-	// The state remains idle with the standard line.
-	if app.infoLine.Text() != tips.Info(tips.StateIdle, tips.Context{}) &&
-		!strings.Contains(app.infoLine.Text(), "enter sends") {
-		t.Fatalf("expected the idle line, got %q", app.infoLine.Text())
+	// The state remains idle: either the static hints or a rotating tip:/fact:
+	// entry — never a tip derived from the typed text.
+	got := app.infoLine.Text()
+	if !strings.Contains(got, "enter sends") && !isRotatingIdleLine(got) {
+		t.Fatalf("expected the idle line, got %q", got)
 	}
+}
+
+// isRotatingIdleLine reports whether the text is one of the idle rotator's
+// entries (a per-command tip or a coding fact).
+func isRotatingIdleLine(text string) bool {
+	return strings.HasPrefix(text, "tip: /") || strings.HasPrefix(text, "fact: ")
 }
 
 func TestTipContextCommandTipWins(t *testing.T) {
@@ -68,9 +75,14 @@ func TestIncompleteCommandNameShowsNoTipWhilePrefixTyping(t *testing.T) {
 	app := newTestApp(t)
 	app.input.SetValue("/sess")
 	app.refreshChrome()
-	// "sess" is not a registered command yet (no argument position, no
-	// exact match), so the idle line stays.
-	if !strings.Contains(app.infoLine.Text(), "enter sends") {
-		t.Fatalf("incomplete command must keep the idle line, got %q", app.infoLine.Text())
+	// "sess" is not a registered command yet (no argument position, no exact
+	// match), so the idle line stays: either the static hints or a rotating
+	// entry — never a tip for the incomplete word.
+	got := app.infoLine.Text()
+	if !strings.Contains(got, "enter sends") && !isRotatingIdleLine(got) {
+		t.Fatalf("incomplete command must keep the idle line, got %q", got)
+	}
+	if isRotatingIdleLine(got) && strings.Contains(got, "/sess") {
+		t.Fatalf("incomplete command must not resolve to a tip: %q", got)
 	}
 }

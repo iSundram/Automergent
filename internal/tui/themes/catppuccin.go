@@ -17,6 +17,7 @@ func Catppuccin() *Theme {
 		Green:         lipgloss.Color("#a6e3a1"),
 		Red:           lipgloss.Color("#f38ba8"),
 		Yellow:        lipgloss.Color("#f9e2af"),
+		Orange:        lipgloss.Color("#fab387"),
 		Blue:          lipgloss.Color("#89b4fa"),
 		Magenta:       lipgloss.Color("#cba6f7"),
 		Cyan:          lipgloss.Color("#89dceb"),

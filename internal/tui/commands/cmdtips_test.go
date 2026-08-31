@@ -5,19 +5,19 @@ import (
 	"testing"
 )
 
-func TestTipFilesCoverEveryCommand(t *testing.T) {
+func TestTipsCoverEveryCommand(t *testing.T) {
 	r := Default()
 	for _, cmd := range r.List() {
 		ct, ok := r.Tip(cmd.Name)
 		if !ok {
-			t.Errorf("command %q has no tips file (tips/%s.md)", cmd.Name, cmd.Name)
+			t.Errorf("command %q has no registered tip (tips/%s.go)", cmd.Name, cmd.Name)
 			continue
 		}
 		if strings.TrimSpace(ct.Tip) == "" {
-			t.Errorf("tips/%s.md is missing its tip: line", cmd.Name)
+			t.Errorf("tips/%s.go is missing its Tip field", cmd.Name)
 		}
 		if strings.TrimSpace(ct.Body) == "" {
-			t.Errorf("tips/%s.md is missing its comprehensive body", cmd.Name)
+			t.Errorf("tips/%s.go is missing its comprehensive Body", cmd.Name)
 		}
 	}
 }
@@ -36,23 +36,21 @@ func TestTipResolvesAliases(t *testing.T) {
 	}
 }
 
-func TestParseTipFile(t *testing.T) {
-	ct := parseTipFile("demo", "tip: short hint\npersonalized: uses {model}\n---\n# Body\n\nGuidance here.\n")
-	if ct.Tip != "short hint" {
-		t.Fatalf("tip parsed wrong: %q", ct.Tip)
+func TestInfolineTipPrefersPersonalized(t *testing.T) {
+	ct, ok := Default().Tip("compact")
+	if !ok {
+		t.Fatal("compact has no tip")
 	}
-	if ct.Personalized != "uses {model}" {
-		t.Fatalf("personalized parsed wrong: %q", ct.Personalized)
+	if ct.Personalized == "" {
+		t.Fatal("compact tip has no personalized variant to exercise")
 	}
-	if !strings.Contains(ct.Body, "Guidance here.") {
-		t.Fatalf("body parsed wrong: %q", ct.Body)
-	}
-
-	// Personalized wins for the infoline; tip is the fallback.
-	if ct.InfolineTip() != "uses {model}" {
+	if ct.InfolineTip() != ct.Personalized {
 		t.Fatalf("InfolineTip must prefer personalized, got %q", ct.InfolineTip())
 	}
-	if parseTipFile("x", "tip: only tip\n").InfolineTip() != "only tip" {
+	// A tip without a personalized variant falls back to the plain tip.
+	ct2 := ct
+	ct2.Personalized = ""
+	if ct2.InfolineTip() != ct2.Tip {
 		t.Fatal("InfolineTip must fall back to the plain tip")
 	}
 }

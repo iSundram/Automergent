@@ -48,8 +48,12 @@ func (a *Agent) executeDecomposition(ctx context.Context, d *promptpkg.Decomposi
 	// Run the prompt-system pipeline with intents DERIVED from the
 	// decomposition — no second LLM intent-identification call. The pipeline
 	// contributes the init file map and the task plan; a failure degrades to
-	// the decomposition's own routing.
-	if a.promptSystem != nil && a.provider != nil {
+	// the decomposition's own routing. Only run it when the decomposition
+	// actually routed WORK: for a direct answer (greetings, general
+	// questions) the task planner would only invent a junk task like
+	// "[answer] Respond to the user's greeting" and print it into the
+	// conversation.
+	if a.promptSystem != nil && a.provider != nil && len(d.ToTaskSpecs()) > 0 {
 		intents := promptpkg.IntentSetFromDecomposition(d)
 		if _, err := a.promptSystem.ProcessUserMessageWithIntents(ctx, intents, originalPrompt, a.workDir, a.getAvailableFiles()); err != nil {
 			a.Emit(EventStatus, "prompt pipeline degraded: "+err.Error())
@@ -250,10 +254,14 @@ func (a *Agent) answerDirectParts(ctx context.Context, parts []promptpkg.Decompo
 	if err != nil {
 		return err
 	}
-	text, _, _, err := a.drainStream(resp, true)
+	text, _, usage, err := a.drainStream(resp, true)
 	if err != nil {
 		return err
 	}
+	// Record usage like the phase loop does: the direct path is a real
+	// provider request, and without this the session totals (header Σ chip,
+	// run summary's ↑/↓) never move for direct answers.
+	a.sess.AddUsage(usage)
 	msg := ai.NewTextMessage(ai.RoleAssistant, text)
 	a.sess.AddMessage(msg)
 	a.recordToTranscript(msg)

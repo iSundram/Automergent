@@ -17,6 +17,7 @@ func Dracula() *Theme {
 		Green:         lipgloss.Color("#50fa7b"),
 		Red:           lipgloss.Color("#ff5555"),
 		Yellow:        lipgloss.Color("#f1fa8c"),
+		Orange:        lipgloss.Color("#ffb86c"),
 		Blue:          lipgloss.Color("#8be9fd"),
 		Magenta:       lipgloss.Color("#bd93f9"),
 		Cyan:          lipgloss.Color("#8be9fd"),

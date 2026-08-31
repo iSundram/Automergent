@@ -1,29 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 88" width="500" height="88" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 357 74" width="357" height="74" fill="none">
   <defs>
-    <style>
-      .brand-title {
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Plus Jakarta Sans', 'Inter', 'Segoe UI', sans-serif;
-        font-size: 40px;
-        font-weight: 800;
-        letter-spacing: -0.5px;
-      }
-      .brand-slogan {
-        font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
-        font-size: 10.5px;
-        font-weight: 600;
-        letter-spacing: 1.4px;
-      }
-    </style>
     <linearGradient id="iconBg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#2b2b2b" />
       <stop offset="100%" stop-color="#111111" />
     </linearGradient>
     <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.7" />
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.75" />
       <stop offset="50%" stop-color="#d4d4d4" stop-opacity="0.3" />
-      <stop offset="100%" stop-color="#2b2b2b" stop-opacity="0.8" />
+      <stop offset="100%" stop-color="#2b2b2b" stop-opacity="0.85" />
     </linearGradient>
-    <linearGradient id="textSilver" x1="0%" y1="0%" x2="100%" y2="0%">
+    <linearGradient id="silverGrad" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#ffffff" />
       <stop offset="60%" stop-color="#d4d4d4" />
       <stop offset="100%" stop-color="#b3b3b3" />
@@ -34,26 +20,24 @@
     </filter>
   </defs>
 
-  <!-- Left Icon Badge -->
-  <g transform="translate(8, 8)">
-    <rect x="0" y="0" width="72" height="72" rx="18" fill="url(#iconBg)" stroke="url(#borderGrad)" stroke-width="1.75" />
-    <rect x="3" y="3" width="66" height="66" rx="15" fill="none" stroke="#2b2b2b" stroke-width="1" />
+  <!-- Left Icon Badge (60x60, centered vertically at y=7) -->
+  <g transform="translate(8, 7)">
+    <rect x="0" y="0" width="60" height="60" rx="16" fill="url(#iconBg)" stroke="url(#borderGrad)" stroke-width="1.75" />
+    <rect x="3" y="3" width="54" height="54" rx="13" fill="none" stroke="#2b2b2b" stroke-width="1" />
     
-    <!-- Chevron / Input -->
-    <path d="M 21 24 L 36 36 L 21 48" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" />
+    <!-- Chevron -->
+    <path d="M 18 20 L 30 30 L 18 40" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" />
     
-    <!-- Upper Branch -->
-    <path d="M 42 22 L 56 36" stroke="#d4d4d4" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
-    <circle cx="42" cy="22" r="3.5" fill="#ffffff" />
+    <!-- Upper Node -->
+    <path d="M 36 18 L 47 30" stroke="#d4d4d4" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="36" cy="18" r="3" fill="#ffffff" />
     
     <!-- Lower Merge Line -->
-    <path d="M 36 50 L 56 50" stroke="#b3b3b3" stroke-width="4" stroke-linecap="round" />
-    <circle cx="56" cy="36" r="3.5" fill="#ffffff" />
+    <path d="M 30 42 L 47 42" stroke="#b3b3b3" stroke-width="3.5" stroke-linecap="round" />
+    <circle cx="47" cy="30" r="3" fill="#ffffff" />
   </g>
 
-  <!-- Seamless Unified Brand Wordmark -->
-  <text x="96" y="49" class="brand-title" fill="#ffffff">Auto<tspan fill="url(#textSilver)">mergent</tspan></text>
-  
-  <!-- Seamless Slogan (Single Text Line, No Offset Breaks) -->
-  <text x="98" y="69" class="brand-slogan" fill="#8c8c8c">AUTONOMOUS AGENT <tspan fill="#ffffff" font-weight="900">·</tspan> <tspan fill="#b3b3b3">AI CODING ENGINE</tspan></text>
+  <!-- Pure Vector Wordmark (Immune to Font Missing / Kerning Issues) -->
+  <path d="M 96 20 L 110 54 L 103 54 L 99.5 44 L 91 44 L 87.5 54 L 81 54 Z M 95 32.5 L 92.5 39 L 97.5 39 Z M 112 29 L 118 29 L 118 45.5 C 118 48.5 120 50 123 50 C 126 50 128 48.5 128 45.5 L 128 29 L 134 29 L 134 54 L 128.5 54 L 128.5 50.5 C 127 53 124.5 54.5 121.5 54.5 C 115.5 54.5 112 50.5 112 45 Z M 138.5 21 L 144.5 21 L 144.5 29 L 150 29 L 150 34.5 L 144.5 34.5 L 144.5 46 C 144.5 48.5 145.5 49.5 148 49.5 L 150 49.5 L 150 54.5 C 148.5 55 146 55 143.5 55 C 139 55 138.5 51 138.5 46 L 138.5 34.5 L 135 34.5 L 135 29 L 138.5 29 Z M 162 29.0 C 173 29.0 173 54.0 162 54.0 C 151 54.0 151 29.0 162 29.0 Z M 162 34.0 C 156.5 34.0 156.5 49.0 162 49.0 C 167.5 49.0 167.5 34.0 162 34.0 Z" fill="#ffffff" />
+  <path d="M 179 29 L 185 29 L 185 33 C 187 30.5 190 28.5 194 28.5 C 197.5 28.5 200 30.5 201 33.5 C 203 30.5 206 28.5 210 28.5 C 215 28.5 217.5 32 217.5 38 L 217.5 54 L 211.5 54 L 211.5 39.5 C 211.5 36.5 210 34.5 207.5 34.5 C 204.5 34.5 202.5 36.5 202.5 40.5 L 202.5 54 L 196.5 54 L 196.5 39.5 C 196.5 36.5 195 34.5 192.5 34.5 C 189.5 34.5 187.5 36.5 187.5 40.5 L 187.5 54 L 179 54 Z M 219 41.5 C 219 34 224 28.5 229.5 28.5 C 236 28.5 240 34 240 41 L 224.5 41 C 225 46 227.5 49.5 229.5 49.5 C 234.5 49.5 237 48 238.5 46 L 242.5 49 C 240 53 236 54.5 229.5 54.5 C 224 54.5 219 49 219 41.5 Z M 224.8 37 L 234.5 37 C 234 33.5 232 32.5 229.5 32.5 C 227 32.5 225.5 34.5 224.8 37 Z M 242 29 L 248 29 L 248 33.5 C 249.5 30.5 252.5 28.5 256 28.5 L 257 28.5 L 257 34.5 C 255.5 34 254 34 252.5 34 C 250 34 248 36.5 248 41 L 248 54 L 242 54 Z M 268.5 28.5 C 279.0 28.5 279.0 39 279.0 54 L 279.0 56 C 279.0 62.5 271.5 65.5 264.5 65.5 C 260.0 65.5 256.5 63.5 255.5 60.5 L 260.0 57.5 C 260.5 59 262.5 60.5 264.5 60.5 C 268.5 60.5 272.5 58.5 272.5 55 L 272.5 51.5 C 271.0 53.5 268.5 54.5 266.0 54.5 C 259.5 54.5 255.5 49 255.5 41.5 C 255.5 34 260.5 28.5 268.5 28.5 C 271.5 28.5 274.0 30 275.5 32.5 L 275.5 29 L 281.0 29 L 281.0 41.5 C 281.0 47.5 277.5 49.5 273.0 49.5 C 269.0 49.5 266.0 47.5 266.0 41.5 C 266.0 35.5 269.5 33.5 273.0 33.5 C 276.0 33.5 278.5 36 278.5 41.5 Z M 282 41.5 C 282 34 287 28.5 292.5 28.5 C 299 28.5 303 34 303 41 L 287.5 41 C 288 46 290.5 49.5 292.5 49.5 C 297.5 49.5 300 48 301.5 46 L 305.5 49 C 303 53 299 54.5 292.5 54.5 C 287 54.5 282 49 282 41.5 Z M 287.8 37 L 297.5 37 C 297 33.5 295 32.5 292.5 32.5 C 290 32.5 288.5 34.5 287.8 37 Z M 305 29 L 311 29 L 311 33 C 313 30.5 316 28.5 320 28.5 C 325 28.5 327.5 32 327.5 38 L 327.5 54 L 321.5 54 L 321.5 39.5 C 321.5 36.5 320 34.5 317.5 34.5 C 314.5 34.5 312.5 36.5 312.5 40.5 L 312.5 54 L 305 54 Z M 332.5 21 L 338.5 21 L 338.5 29 L 344 29 L 344 34.5 L 338.5 34.5 L 338.5 46 C 338.5 48.5 339.5 49.5 342 49.5 L 344 49.5 L 344 54.5 C 342.5 55 340 55 337.5 55 C 333 55 332.5 51 332.5 46 L 332.5 34.5 L 329 34.5 L 329 29 L 332.5 29 Z" fill="url(#silverGrad)" />
 </svg>

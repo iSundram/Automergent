@@ -214,22 +214,12 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		}
 		return a.waitForAgentEvent()
 	case agent.EventPhaseDone:
-		// One phase of a multi-phase arc finished; the run continues with
-		// the next one. Settle the phase's reply into the transcript like
-		// EventDone does, but keep the spinner and thinking state alive and
-		// KEEP LISTENING — the turn is not over and EventDone must remain
-		// the run's single terminal event.
+		// An intermediate phase finished while the run continues. Its text
+		// is transcript context, not a user-facing answer (the final phase
+		// renders the turn's reply): finalize any stray streaming block
+		// without echoing the phase text as a second answer.
 		a.conversation.RenderIfDirty()
-		text, _ := ev.Payload.(string)
-		if a.streamedReply {
-			a.conversation.FinalizeStreamingWithContent(text)
-		} else {
-			a.conversation.FinalizeStreaming()
-		}
-		if strings.TrimSpace(text) != "" && !a.streamedReply {
-			a.conversation.AddMessage("assistant", text, false)
-		}
-		// The next phase streams into a fresh block.
+		a.conversation.FinalizeStreaming()
 		a.streamedReply = false
 		a.statusBar.SetStatus("Phase complete — continuing…")
 		return a.waitForAgentEvent()
@@ -251,15 +241,21 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		}
 		a.layout() // Reclaim space from spinner
 		// Post-run summary lives where the spinner was: the conversation's
-		// run line settles to "✓ Done (2s • ↓ 20 tokens)" below the reply,
+		// run line settles to "✓ Done (2s • ↑ 18.2k ↓ 214)" below the reply,
 		// the way Claude Code leaves its spinner row's readout behind. The
-		// status bar carries only the settled duration in its HUD.
+		// arrows are the run's REAL usage — provider-reported input (↑) and
+		// output (↓) tokens, not a char-based estimate.
 		if !a.runStart.IsZero() {
 			d := time.Since(a.runStart)
 			a.runStart = time.Time{}
 			summary := fmt.Sprintf("✓ Done (%s", formatDuration(d))
-			if toks := estimateTokens(a.runChars); toks > 0 {
-				summary += fmt.Sprintf(" • ↓ %s tokens", compactTokenCount(toks))
+			if a.sess != nil {
+				if in := a.sess.TotalInputTokens - a.runBaseIn; in > 0 {
+					summary += fmt.Sprintf(" • ↑ %s", compactTokenCount(in))
+				}
+				if out := a.sess.TotalOutputTokens - a.runBaseOut; out > 0 {
+					summary += fmt.Sprintf(" • ↓ %s", compactTokenCount(out))
+				}
 			}
 			a.lastRunSummary = summary + ")"
 			// The run's report lives in the spinner slot now; the bar just
@@ -275,7 +271,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.stats.TotalCost = cost
 			a.header.SetCost(cost)
 		}
-		a.header.SetTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
+		a.header.SetTotalTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
 		if calc := a.ag.AdaptiveCalculator(); calc != nil {
 			a.header.SetAdaptiveWeight(calc.Weight())
 		}
@@ -310,7 +306,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		a.statusBar.SetStatus("Context compacted")
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
-		a.header.SetTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
+		a.header.SetTotalTokens(a.sess.TotalInputTokens + a.sess.TotalOutputTokens)
 		if calc := a.ag.AdaptiveCalculator(); calc != nil {
 			a.header.SetAdaptiveWeight(calc.Weight())
 		}
