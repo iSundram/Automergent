@@ -1,0 +1,1849 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Examples & Tutorials — Automergent</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --bg-hover: #1c2128;
+    --accent: #58a6ff;
+    --accent-dim: #1f6feb;
+    --accent-glow: rgba(88, 166, 255, 0.15);
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-dim: #8b949e;
+    --text-bright: #f0f6fc;
+    --green: #3fb950;
+    --green-bg: rgba(63, 185, 80, 0.1);
+    --red: #f85149;
+    --red-bg: rgba(248, 81, 73, 0.1);
+    --yellow: #d29922;
+    --yellow-bg: rgba(210, 153, 34, 0.1);
+    --purple: #bc8cff;
+    --purple-bg: rgba(188, 140, 255, 0.1);
+    --code-bg: #0d1117;
+    --sidebar-w: 280px;
+    --user-bubble: #1a3a5c;
+    --agent-bubble: #1c2533;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    display: flex;
+    min-height: 100vh;
+  }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  code, pre {
+    font-family: 'SFMono-Regular', 'Fira Code', 'Fira Mono', Menlo, Consolas, monospace;
+  }
+
+  /* ─── Sidebar ─── */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0; bottom: 0;
+    width: var(--sidebar-w);
+    background: var(--bg-card);
+    border-right: 1px solid var(--border);
+    padding: 24px 0;
+    overflow-y: auto;
+    z-index: 100;
+  }
+  .sidebar-logo {
+    padding: 0 20px 20px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 16px;
+  }
+  .sidebar-logo h2 {
+    font-size: 16px;
+    color: var(--accent);
+    font-weight: 700;
+    letter-spacing: -0.3px;
+  }
+  .sidebar-logo span { color: var(--text-dim); font-size: 12px; }
+  .sidebar nav { padding: 0 12px; }
+  .sidebar nav a {
+    display: block;
+    padding: 7px 12px;
+    color: var(--text-dim);
+    font-size: 13px;
+    border-radius: 6px;
+    transition: all 0.15s;
+  }
+  .sidebar nav a:hover { background: var(--accent-glow); color: var(--accent); text-decoration: none; }
+  .sidebar nav a.active { background: var(--accent-glow); color: var(--accent); font-weight: 600; }
+  .sidebar nav .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-dim);
+    padding: 16px 12px 6px;
+  }
+
+  /* ─── Main ─── */
+  .main {
+    margin-left: var(--sidebar-w);
+    flex: 1;
+    padding: 48px 64px 96px;
+    max-width: 920px;
+  }
+
+  h1 {
+    font-size: 32px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 8px;
+  }
+  h1 .badge {
+    display: inline-block;
+    font-size: 11px;
+    background: var(--accent-glow);
+    color: var(--accent);
+    padding: 2px 8px;
+    border-radius: 12px;
+    vertical-align: middle;
+    margin-left: 8px;
+    font-weight: 600;
+  }
+  .subtitle { color: var(--text-dim); font-size: 16px; margin-bottom: 40px; }
+
+  h2 {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin: 48px 0 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  h2 .emoji { margin-right: 8px; }
+
+  h3 {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-bright);
+    margin: 32px 0 12px;
+  }
+
+  p { margin-bottom: 16px; }
+  .lead { font-size: 17px; color: var(--text-dim); margin-bottom: 32px; }
+
+  /* ─── Example Card ─── */
+  .example-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 24px;
+    position: relative;
+  }
+  .example-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 3px;
+    height: 100%;
+    background: var(--accent);
+    border-radius: 12px 0 0 12px;
+  }
+  .example-card.green::before { background: var(--green); }
+  .example-card.yellow::before { background: var(--yellow); }
+  .example-card.purple::before { background: var(--purple); }
+
+  .example-title {
+    font-size: 15px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-bottom: 16px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .example-title .tag {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: 2px 6px;
+    border-radius: 4px;
+  }
+  .tag-quick { background: var(--accent-glow); color: var(--accent); }
+  .tag-workflow { background: var(--green-bg); color: var(--green); }
+  .tag-subagent { background: var(--purple-bg); color: var(--purple); }
+  .tag-config { background: var(--yellow-bg); color: var(--yellow); }
+  .tag-advanced { background: var(--red-bg); color: var(--red); }
+
+  /* ─── Conversation Bubbles ─── */
+  .conversation { display: flex; flex-direction: column; gap: 12px; }
+
+  .msg {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+  }
+  .msg-avatar {
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .msg-avatar.user { background: var(--user-bubble); color: var(--accent); }
+  .msg-avatar.agent { background: var(--agent-bubble); color: var(--green); }
+
+  .msg-body { flex: 1; min-width: 0; }
+  .msg-name { font-size: 12px; font-weight: 600; margin-bottom: 4px; }
+  .msg-name.user { color: var(--accent); }
+  .msg-name.agent { color: var(--green); }
+
+  .msg-content {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .msg.user .msg-content {
+    background: var(--user-bubble);
+    border-color: rgba(88, 166, 255, 0.2);
+    font-family: 'SFMono-Regular', monospace;
+    color: var(--text-bright);
+  }
+
+  .msg-content pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    margin: 8px 0;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.45;
+  }
+  .msg-content code {
+    background: rgba(110, 118, 129, 0.2);
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 13px;
+  }
+  .msg-content pre code { background: none; padding: 0; }
+
+  /* ─── Steps ─── */
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 12px 0;
+  }
+  .step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .step-num {
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: var(--accent-glow);
+    color: var(--accent);
+    font-size: 11px;
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  .step.done .step-num { background: var(--green-bg); color: var(--green); }
+  .step.running .step-num { background: var(--yellow-bg); color: var(--yellow); }
+
+  .tool-call {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--accent);
+    font-family: 'SFMono-Regular', monospace;
+  }
+  .tool-call::before { content: '⚡'; font-size: 10px; }
+
+  /* ─── Tips ─── */
+  .tip {
+    background: var(--accent-glow);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 16px;
+    margin: 16px 0;
+    font-size: 13px;
+  }
+  .tip strong { color: var(--accent); }
+  .tip.green { background: var(--green-bg); border-color: var(--green); }
+  .tip.green strong { color: var(--green); }
+  .tip.yellow { background: var(--yellow-bg); border-color: var(--yellow); }
+  .tip.yellow strong { color: var(--yellow); }
+  .tip.purple { background: var(--purple-bg); border-color: var(--purple); }
+  .tip.purple strong { color: var(--purple); }
+
+  /* ─── Code blocks ─── */
+  .code-block {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 12px 0;
+    overflow: hidden;
+  }
+  .code-header {
+    background: var(--bg-card);
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    font-family: 'SFMono-Regular', monospace;
+  }
+  .code-block pre {
+    padding: 16px;
+    margin: 0;
+    overflow-x: auto;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  /* ─── Tables ─── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 16px 0;
+    font-size: 14px;
+  }
+  th, td {
+    padding: 10px 14px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+  }
+  th {
+    background: var(--bg-card);
+    color: var(--text-bright);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  td code {
+    background: var(--bg-card);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    color: var(--accent);
+  }
+
+  /* ─── Variation chips ─── */
+  .variations {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 12px;
+  }
+  .var-chip {
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: 16px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    cursor: default;
+  }
+
+  /* ─── Output block ─── */
+  .output-block {
+    background: #0b1222;
+    border: 1px solid rgba(63, 185, 80, 0.3);
+    border-radius: 8px;
+    padding: 12px 16px;
+    margin: 8px 0;
+    font-family: 'SFMono-Regular', monospace;
+    font-size: 13px;
+    color: var(--green);
+    white-space: pre-wrap;
+  }
+
+  /* ─── Scrollbar ─── */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+  /* ─── Mobile ─── */
+  @media (max-width: 900px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 32px 20px 80px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ SIDEBAR ═══════════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <h2>Automergent</h2>
+    <span>Examples &amp; Tutorials</span>
+  </div>
+  <nav>
+    <a href="#quick-examples" class="active">Quick Examples</a>
+    <div class="section-label">Workflows</div>
+    <a href="#workflow-code-review">Code Review</a>
+    <a href="#workflow-bug-investigation">Bug Investigation</a>
+    <a href="#workflow-feature">Feature Implementation</a>
+    <a href="#workflow-refactoring">Refactoring</a>
+    <div class="section-label">Sub-agents</div>
+    <a href="#subagent-parallel">Parallel Exploration</a>
+    <a href="#subagent-specialized">Specialized Review</a>
+    <a href="#subagent-background">Background Tasks</a>
+    <div class="section-label">Configuration</div>
+    <a href="#config-providers">Switching Providers</a>
+    <a href="#config-mcp">MCP Servers</a>
+    <a href="#config-themes">Custom Themes</a>
+    <a href="#config-memory">Memory Management</a>
+    <div class="section-label">Context</div>
+    <a href="#context-compact">/compact</a>
+    <a href="#context-usage">/context</a>
+    <a href="#context-files">/add-dir &amp; /context-files</a>
+    <div class="section-label">Git</div>
+    <a href="#git-commit">/commit</a>
+    <a href="#git-issue">/issue</a>
+    <a href="#git-pr">/pr-comments</a>
+    <div class="section-label">Advanced</div>
+    <a href="#advanced-plan">Plan Mode</a>
+    <a href="#advanced-artifacts">Artifacts</a>
+    <a href="#advanced-autonomy">Goal-driven Autonomy</a>
+    <a href="#advanced-skills">Skills &amp; MCP</a>
+    <div class="section-label">Reference</div>
+    <a href="#patterns">Common Patterns</a>
+  </nav>
+</aside>
+
+<!-- ═══════════════════ MAIN ═══════════════════ -->
+<main class="main">
+
+<h1>Examples &amp; Tutorials <span class="badge">Interactive</span></h1>
+<p class="lead">Learn Automergent through real-world examples. Each tutorial shows the full interaction — from your input to the agent's reasoning and final output.</p>
+
+<!-- ════════════════════════════════════════════════ -->
+<h2 id="quick-examples"><span class="emoji">&#9889;</span> Quick Examples</h2>
+<p>These examples show common one-shot interactions — type a message, the agent figures out the rest.</p>
+
+<!-- Example 1: Read & Explain -->
+<div class="example-card">
+  <div class="example-title">
+    Read a file and explain it
+    <span class="tag tag-quick">Quick</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Read main.go and explain what it does</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Read main.go</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Analyzing structure and imports</div>
+            <div class="step done"><span class="step-num">&#10003;</span> Generating explanation</div>
+          </div>
+          <p><code>main.go</code> is the entry point for the application. It:</p>
+          <ol style="padding-left:20px; margin:8px 0;">
+            <li>Initializes a new CLI application using <code>cobra</code></li>
+            <li>Registers subcommands (<code>serve</code>, <code>config</code>, <code>migrate</code>)</li>
+            <li>Loads configuration from <code>~/.config/app/config.yaml</code></li>
+            <li>Starts an HTTP server on the configured port</li>
+          </ol>
+          <p>The <code>init()</code> function sets up logging and telemetry before the main command runs.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="variations">
+    <span class="var-chip">"Explain the auth flow"</span>
+    <span class="var-chip">"What does setup() do?"</span>
+    <span class="var-chip">"Summarize cmd/server.go"</span>
+  </div>
+</div>
+
+<!-- Example 2: Find TODOs -->
+<div class="example-card">
+  <div class="example-title">
+    Find all TODO comments
+    <span class="tag tag-quick">Quick</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Find all TODO comments</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Grep "TODO|FIXME|HACK" --include "*.{go,ts,js}"</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Found 7 results across 4 files</div>
+          </div>
+          <div class="output-block">src/auth/middleware.go:24    // TODO: add rate limiting
+src/auth/middleware.go:51    // TODO: validate JWT expiry
+src/db/pool.go:12            // FIXME: connection pool leaks under load
+cmd/serve.go:38             // HACK: temp workaround for TLS cert
+tests/integration_test.go:89 // TODO: add test for edge case
+pkg/config/config.go:67     // TODO: support env var overrides
+web/handler.go:103           // TODO: implement WebSocket fallback</div>
+          <p style="margin-top:12px"><strong>Summary:</strong> 7 items found. 4 TODOs, 1 FIXME, 1 HACK. The <code>FIXME</code> in <code>db/pool.go:12</code> looks most urgent.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="variations">
+    <span class="var-chip">"Find all deprecated functions"</span>
+    <span class="var-chip">"Show me all error handling"</span>
+    <span class="var-chip">"List all functions in auth/"</span>
+  </div>
+</div>
+
+<!-- Example 3: Run tests & fix -->
+<div class="example-card green">
+  <div class="example-title">
+    Run tests and fix failures
+    <span class="tag tag-quick">Quick</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Run the tests and fix failures</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: go test ./... 2>&amp;1</span></div>
+            <div class="step running"><span class="step-num">&#9881;</span> 2 tests failed — analyzing</div>
+            <div class="step"><span class="step-num">3</span> <span class="tool-call">Read auth_test.go:42-68</span></div>
+            <div class="step"><span class="step-num">4</span> <span class="tool-call">Edit auth_test.go — fix assertion</span></div>
+            <div class="step"><span class="step-num">5</span> <span class="tool-call">Bash: go test ./... 2>&amp;1</span></div>
+          </div>
+          <div class="output-block">--- FAIL: TestTokenValidation (0.00s)
+    auth_test.go:55: expected error nil, got "token expired"
+--- FAIL: TestRefreshFlow (0.00s)
+    auth_test.go:82: expected status 200, got 401</div>
+          <p style="margin-top:12px"><strong>Diagnosis:</strong> Both failures trace to the same root cause — <code>ValidateToken()</code> now checks <code>exp</code> claims but the test tokens use a stale expiry. Fixing the test fixture timestamps.</p>
+          <div class="steps" style="margin-top:12px;">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Edit auth_test.go:14-16 — update token fixture</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: go test ./...</span></div>
+          </div>
+          <div class="output-block" style="border-color: rgba(63,185,80,0.3); color: var(--green);">ok   github.com/example/app    0.34s
+ok   github.com/example/app/auth    0.12s
+ok   github.com/example/app/db    0.08s</div>
+          <p style="margin-top:8px;">All 14 tests pass now. The issue was that the test fixture's JWT tokens expired in December 2025 — I updated them to use relative time offsets.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tip green">
+    <strong>Variations:</strong> "Run the e2e tests", "Run tests in the auth package only", "Run tests and show coverage"
+  </div>
+</div>
+
+<!-- Example 4: Refactor -->
+<div class="example-card yellow">
+  <div class="example-title">
+    Refactor a function
+    <span class="tag tag-quick">Quick</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Refactor this function to be more readable</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <p>Which function? I'll look at the current file context first.</p>
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Read handler.go — analyzing parseRequest()</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Identified 3 refactoring opportunities</div>
+          </div>
+          <p>Here's my plan for refactoring <code>parseRequest()</code> (lines 45-92):</p>
+          <ol style="padding-left:20px; margin:8px 0;">
+            <li>Extract validation logic into a separate <code>validatePayload()</code> function</li>
+            <li>Replace nested if-else with early returns</li>
+            <li>Add named return values for clarity</li>
+          </ol>
+          <div class="steps" style="margin-top:12px;">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Edit handler.go — apply refactor</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: go vet ./...</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: go test -run TestParseRequest</span></div>
+          </div>
+          <p style="margin-top:8px;">Refactored. The function went from 47 lines with 4 nesting levels to 28 lines with max 2. All tests pass.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tip">
+    <strong>Tip:</strong> For larger refactors, the agent will propose a plan first. Say "proceed" to approve, or "adjust" to request changes.
+  </div>
+</div>
+
+<!-- Example 5: Architecture -->
+<div class="example-card purple">
+  <div class="example-title">
+    Understand project architecture
+    <span class="tag tag-quick">Quick</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">What's the architecture of this project?</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: ls -R</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Read go.mod, Makefile, docker-compose.yml</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Read cmd/ root files</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Analyzing patterns</div>
+          </div>
+          <p><strong>Project:</strong> <code>go-app</code> — Go 1.22, module-based architecture</p>
+          <div class="code-block">
+            <div class="code-header">Directory Structure</div>
+<pre>├── cmd/           <span style="color:var(--text-dim)">Entry points (one per binary)</span>
+│   ├── serve/
+│   └── migrate/
+├── internal/      <span style="color:var(--text-dim)">Private packages</span>
+│   ├── auth/      <span style="color:var(--text-dim)">JWT + middleware</span>
+│   ├── db/        <span style="color:var(--text-dim)">PostgreSQL + migrations</span>
+│   └── handler/   <span style="color:var(--text-dim)">HTTP handlers</span>
+├── pkg/           <span style="color:var(--text-dim)">Public API packages</span>
+├── web/           <span style="color:var(--text-dim)">Static assets + templates</span>
+├── migrations/    <span style="color:var(--text-dim)">SQL migration files</span>
+└── deploy/        <span style="color:var(--text-dim)">Docker + Kubernetes configs</span></pre>
+          </div>
+          <p>This is a standard Go project layout following the <a href="#">golang-standards/project-layout</a> conventions. Key patterns:</p>
+          <ul style="padding-left:20px; margin:8px 0;">
+            <li><strong>Clean Architecture:</strong> <code>internal/</code> packages have no circular deps</li>
+            <li><strong>Dependency injection:</strong> Constructor funcs in <code>cmd/serve/main.go</code> wire everything</li>
+            <li><strong>Interface-driven:</strong> <code>db.Repository</code> interface lets handlers be tested with mocks</li>
+            <li><strong>Graceful shutdown:</strong> Signal handling + context propagation</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tip purple">
+    <strong>Tip:</strong> Ask follow-up questions like "How is auth handled?" or "Show me the request lifecycle" for deeper dives.
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════ -->
+<h2 id="workflow-code-review"><span class="emoji">&#128269;</span> Workflow: Code Review</h2>
+<p>A structured workflow for reviewing changes before merge.</p>
+
+<div class="example-card green">
+  <div class="example-title">
+    Code review workflow
+    <span class="tag tag-workflow">Workflow</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/review</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: git diff main...HEAD --stat</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: git diff main...HEAD</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Reviewing 12 changed files</div>
+          </div>
+          <p><strong>Reviewing branch:</strong> <code>feature/user-settings</code> (14 commits, +842 / -127)</p>
+
+          <h4 style="color:var(--green); margin-top:16px;">&#10003; Correctness</h4>
+          <p>All logic paths look sound. The settings update properly validates input before writing to the database.</p>
+
+          <h4 style="color:var(--yellow); margin-top:16px;">&#9888; Suggestions</h4>
+          <p><code>settings.go:34</code> — The <code>UpdateUserSettings</code> function doesn't check if the user exists before updating. Add a <code>GetUser</code> call first to avoid silent no-ops.</p>
+          <p><code>handler.go:67</code> — Missing error context. <code>fmt.Errorf("update failed")</code> should wrap the underlying error with <code>%w</code>.</p>
+
+          <h4 style="color:var(--accent); margin-top:16px;">&#9432; Notes</h4>
+          <ul style="padding-left:20px;">
+            <li>Migration adds an index on <code>user_settings.user_id</code> — good, matches the query pattern</li>
+            <li>New tests are thorough — 94% coverage on changed files</li>
+          </ul>
+
+          <p style="margin-top:16px;"><strong>Verdict:</strong> Minor issues only. <span style="color:var(--green);">Approved</span> with the two fixes above.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════ -->
+<h2 id="workflow-bug-investigation"><span class="emoji">&#128027;</span> Workflow: Bug Investigation</h2>
+<p>Methodically tracing a bug from symptom to root cause.</p>
+
+<div class="example-card">
+  <div class="example-title">
+    Bug investigation: "users can't log in"
+    <span class="tag tag-workflow">Workflow</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Users report they can't log in after the latest deploy. Help me investigate.</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: git log --oneline -20</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: git diff HEAD~5..HEAD --stat</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Grep "auth\|login\|token" --include "*.go"</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Read auth/handler.go</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Read auth/middleware.go</span></div>
+          </div>
+          <p><strong>Investigation log:</strong></p>
+          <p>1. Last 5 deploys touched <code>auth/</code>, <code>db/</code>, and <code>config/</code></p>
+          <p>2. <code>git diff HEAD~5..HEAD auth/</code> shows the middleware was changed to require <code>exp</code> claim validation</p>
+          <p>3. But the token signing code in <code>auth/token.go:45</code> still uses <code>time.Now().Add(24 * time.Hour)</code> — this looks correct</p>
+          <p>4. Checking the <strong>config</strong>…</p>
+          <div class="steps" style="margin-top:8px;">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Read config.yaml</span></div>
+          </div>
+          <p><strong style="color:var(--green);">Found it.</strong> The config change in <code>deploy/config.yaml</code> switched <code>token_issuer</code> from <code>"app"</code> to <code>"App"</code> (capitalized). The middleware validates <code>iss</code> claim case-sensitively, so all existing tokens are rejected.</p>
+          <p><strong>Fix:</strong> Revert the issuer value to lowercase, or make the comparison case-insensitive.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tip yellow">
+    <strong>Pattern:</strong> Explore → read relevant files → identify root cause → propose fix. The agent often finds issues in config, environment, or dependency changes before touching code.
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════ -->
+<h2 id="workflow-feature"><span class="emoji">&#128640;</span> Workflow: Feature Implementation</h2>
+<p>Plan-driven feature development with approval gates.</p>
+
+<div class="example-card purple">
+  <div class="example-title">
+    Building a new feature with /plan
+    <span class="tag tag-workflow">Workflow</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/plan Add a rate limiter middleware that supports per-user and per-IP limits</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <p>Generating plan artifact…</p>
+          <div class="code-block">
+            <div class="code-header">Plan: rate-limiter (artifact)</div>
+<pre>## Rate Limiter Middleware
+
+### Goal
+Add configurable rate limiting to protect API endpoints.
+
+### Steps
+1. Create <span style="color:var(--accent)">internal/ratelimit/limiter.go</span>
+   - Token bucket algorithm (using golang.org/x/time/rate)
+   - Interfaces: PerUserLimiter, PerIPLimiter
+   - In-memory store with cleanup goroutine
+
+2. Create <span style="color:var(--accent)">internal/ratelimit/middleware.go</span>
+   - Extract user ID from JWT or IP from RemoteAddr
+   - Check rate, return 429 with Retry-After header
+
+3. Add config fields to <span style="color:var(--accent)">config.yaml</span>
+   - ratelimit.enabled: true
+   - ratelimit.per_user: "100/m"
+   - ratelimit.per_ip: "30/m"
+
+4. Wire into <span style="color:var(--accent)">cmd/serve/main.go</span>
+
+5. Add tests
+
+### Risks
+- In-memory store won't survive restarts (acceptable for MVP)
+- No distributed rate limiting (add Redis later if needed)
+
+### Files to create/modify
+- Create: internal/ratelimit/limiter.go
+- Create: internal/ratelimit/middleware.go
+- Create: internal/ratelimit/limiter_test.go
+- Modify: cmd/serve/main.go
+- Modify: config/config.go</pre>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/artifact approve</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> Plan approved — starting implementation</div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Write internal/ratelimit/limiter.go</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Write internal/ratelimit/middleware.go</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Edit cmd/serve/main.go — wire middleware</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Write internal/ratelimit/limiter_test.go</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: go test ./internal/ratelimit/...</span></div>
+          </div>
+          <p>All 11 tests pass. The rate limiter is implemented with:</p>
+          <ul style="padding-left:20px;">
+            <li>Per-user: 100 req/min (configurable)</li>
+            <li>Per-IP: 30 req/min (configurable)</li>
+            <li>Returns <code>429 Too Many Requests</code> with <code>Retry-After</code> header</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════ -->
+<h2 id="workflow-refactoring"><span class="emoji">&#128295;</span> Workflow: Refactoring</h2>
+
+<div class="example-card yellow">
+  <div class="example-title">
+    Incremental refactoring
+    <span class="tag tag-workflow">Workflow</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Refactor the database layer to use an interface so we can swap implementations</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Grep "db\." --include "*.go" -l</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Read db/postgres.go, db/queries.go</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Analyzing all call sites</div>
+          </div>
+          <p><strong>Current state:</strong> <code>db.Store</code> is a concrete struct used directly in 6 files. I'll extract an interface incrementally.</p>
+          <div class="steps" style="margin-top:12px;">
+            <div class="step done"><span class="step-num">&#10003;</span> Step 1: Define <code>Repository</code> interface in <code>db/interface.go</code></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Step 2: Make <code>Store</code> implement the interface (it already does)</div>
+            <div class="step done"><span class="step-num">&#10003;</span> Step 3: Update function signatures to accept <code>Repository</code></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Step 4: Update call sites in handler/, auth/</div>
+            <div class="step done"><span class="step-num">&#10003;</span> Step 5: Run tests — all 23 pass</div>
+          </div>
+          <p style="margin-top:8px;">Refactoring complete. Every function that used <code>*db.Store</code> now accepts <code>db.Repository</code>. You can now create a <code>MockStore</code> for testing or swap to a different backend.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════ -->
+<h2 id="subagent-parallel"><span class="emoji">&#129302;</span> Sub-agent Examples</h2>
+<p>Automergent can spawn sub-agents to work in parallel on different tasks.</p>
+
+<div class="example-card purple">
+  <div class="example-title">
+    Parallel exploration with 3 sub-agents
+    <span class="tag tag-subagent">Sub-agent</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Launch 3 agents to analyze src/, tests/, and docs/</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> Spawning 3 sub-agents…</div>
+          </div>
+          <table>
+            <thead>
+              <tr><th>Agent</th><th>Scope</th><th>Status</th><th>Result</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><code>agent-1</code></td>
+                <td><code>src/</code></td>
+                <td style="color:var(--green);">&#10003; done</td>
+                <td>42 functions across 8 files. Core modules: api, auth, cache, db</td>
+              </tr>
+              <tr>
+                <td><code>agent-2</code></td>
+                <td><code>tests/</code></td>
+                <td style="color:var(--green);">&#10003; done</td>
+                <td>89 test functions. Coverage: 78%. Missing tests for cache layer</td>
+              </tr>
+              <tr>
+                <td><code>agent-3</code></td>
+                <td><code>docs/</code></td>
+                <td style="color:var(--green);">&#10003; done</td>
+                <td>3 markdown docs. API docs outdated (last updated 3 months ago)</td>
+              </tr>
+            </tbody>
+          </table>
+          <p><strong>Summary:</strong> The codebase is well-structured. Two action items: write cache layer tests and update API docs.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="example-card">
+  <div class="example-title">
+    Security review sub-agent
+    <span class="tag tag-subagent">Sub-agent</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Spawn a review agent to do a security analysis of the auth package</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> Spawning <code>security-review</code> agent targeting <code>internal/auth/</code></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Sub-agent analyzing 6 files…</div>
+          </div>
+          <p><strong>Security Review — internal/auth/</strong></p>
+          <table>
+            <thead><tr><th>Severity</th><th>Finding</th><th>File</th></tr></thead>
+            <tbody>
+              <tr>
+                <td style="color:var(--red);">HIGH</td>
+                <td>JWT secret read from env without length validation — weak secrets accepted</td>
+                <td>token.go:18</td>
+              </tr>
+              <tr>
+                <td style="color:var(--yellow);">MEDIUM</td>
+                <td>Password comparison not constant-time (using <code>==</code> instead of <code>subtle.ConstantTimeCompare</code>)</td>
+                <td>password.go:34</td>
+              </tr>
+              <tr>
+                <td style="color:var(--yellow);">MEDIUM</td>
+                <td>Session token not invalidated on password change</td>
+                <td>handler.go:89</td>
+              </tr>
+              <tr>
+                <td style="color:var(--text-dim);">LOW</td>
+                <td>Missing rate limit on <code>/login</code> endpoint</td>
+                <td>handler.go:22</td>
+              </tr>
+            </tbody>
+          </table>
+          <p style="margin-top:12px;">The sub-agent recommends fixing the HIGH and MEDIUM issues before the next release.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="example-card">
+  <div class="example-title">
+    Background shell tasks
+    <span class="tag tag-subagent">Sub-agent</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Start the dev server in the background, then help me with the UI</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: npm run dev &amp; (background, PID 48291)</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Dev server running on <code>http://localhost:3000</code></div>
+          </div>
+          <p>Dev server is running in the background. What do you need help with on the UI?</p>
+        </div>
+      </div>
+    </div>
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Fix the broken navbar on mobile — it doesn't collapse</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Grep "navbar\|hamburger\|mobile" --include "*.css"</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Read src/components/Navbar.tsx</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Edit src/components/Navbar.tsx — fix toggle</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Hot-reload applied — check your browser</div>
+          </div>
+          <p>Fixed. The hamburger button was missing an <code>onClick</code> handler. Added the toggle state and a click listener. Your browser should have hot-reloaded.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tip">
+    <strong>Tip:</strong> Background processes stay alive across messages. The agent can interact with them, check logs, or kill them later.
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════ -->
+<h2 id="config-providers"><span class="emoji">&#9881;</span> Configuration Examples</h2>
+
+<div class="example-card">
+  <div class="example-title">
+    Switching providers mid-session
+    <span class="tag tag-config">Config</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Switch to claude-sonnet-4-20250514</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> Provider changed to <code>anthropic/claude-sonnet-4-20250514</code></div>
+          </div>
+          <p>Switched. Next message will use Claude Sonnet.</p>
+        </div>
+      </div>
+    </div>
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Actually, switch back to gpt-4o</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> Provider changed to <code>openai/gpt-4o</code></div>
+          </div>
+          <p>Back on GPT-4o.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tip">
+    <strong>Tip:</strong> You can also use <code>/model</code> to list available models and <code>/provider</code> to switch between OpenAI, Anthropic, and local providers.
+  </div>
+</div>
+
+<div class="example-card">
+  <div class="example-title">
+    Setting up MCP servers
+    <span class="tag tag-config">Config</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Add a Postgres MCP server so I can query the database directly</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Read opencode.json</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Edit opencode.json — add MCP server</span></div>
+          </div>
+          <div class="code-block">
+            <div class="code-header">opencode.json (updated)</div>
+<pre>{
+  "mcpServers": {
+    "postgres": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-postgres"],
+      "env": {
+        "DATABASE_URL": "postgresql://user:pass@localhost:5432/mydb"
+      }
+    }
+  }
+}</pre>
+          </div>
+          <p>Postgres MCP server added. You can now use tools like <code>mcp__postgres__query</code> to run SQL directly from the conversation.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="example-card">
+  <div class="example-title">
+    Custom themes
+    <span class="tag tag-config">Config</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Change the theme to something more colorful</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <p>Available themes: <code>default</code>, <code>light</code>, <code>monokai</code>, <code>dracula</code>, <code>nord</code>, <code>solarized</code></p>
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> Theme changed to <code>dracula</code></div>
+          </div>
+          <p>Applied the Dracula theme. You should see the new colors immediately.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="example-card">
+  <div class="example-title">
+    Memory management
+    <span class="tag tag-config">Config</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Remember that this project uses pnpm, not npm</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> Saved to project memory: "Use pnpm, not npm"</div>
+          </div>
+          <p>Got it. I'll remember this and use <code>pnpm</code> for all package operations in this project.</p>
+        </div>
+      </div>
+    </div>
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">What's in my project memory?</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <p><strong>Project Memory:</strong></p>
+          <ul style="padding-left:20px;">
+            <li>Use pnpm, not npm</li>
+            <li>Tests use vitest (not jest)</li>
+            <li>Branch naming: feat/*, fix/*, chore/*</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════ -->
+<h2 id="context-compact"><span class="emoji">&#128230;</span> Context Management</h2>
+
+<div class="example-card">
+  <div class="example-title">
+    Using /compact for long sessions
+    <span class="tag tag-quick">Quick</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/compact</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> Compacting context…</div>
+            <div class="step done"><span class="step-num">&#10003;</span> Compressed 42 messages → summary (82% reduction)</div>
+          </div>
+          <p><strong>Context state:</strong></p>
+          <table>
+            <tr><td>Before</td><td>42 messages, ~12k tokens</td></tr>
+            <tr><td>After</td><td>Summary + current, ~2.1k tokens</td></tr>
+            <tr><td>Freed</td><td>~9.9k tokens</td></tr>
+          </table>
+          <p style="margin-top:8px;">Session context compressed. I retain key decisions and file changes from our conversation.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="tip">
+    <strong>Tip:</strong> Run <code>/compact</code> when context usage exceeds 80% or when the agent starts losing track of earlier decisions.
+  </div>
+</div>
+
+<div class="example-card">
+  <div class="example-title">
+    Monitoring context with /context
+    <span class="tag tag-quick">Quick</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/context</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <p><strong>Context Usage</strong></p>
+          <div style="background:var(--bg); border-radius:6px; padding:12px; margin:8px 0;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="font-size:12px;">Tokens used</span>
+              <span style="font-size:12px; color:var(--accent);">18,420 / 200,000</span>
+            </div>
+            <div style="background:var(--border); border-radius:4px; height:8px;">
+              <div style="background:var(--accent); width:9.2%; height:100%; border-radius:4px;"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:4px;">
+              <span style="font-size:11px; color:var(--text-dim);">9.2% used</span>
+              <span style="font-size:11px; color:var(--text-dim);">181,580 remaining</span>
+            </div>
+          </div>
+          <table>
+            <tr><td>Messages</td><td>14</td></tr>
+            <tr><td>Tool calls</td><td>8</td></tr>
+            <tr><td>Files read</td><td>5</td></tr>
+            <tr><td>Files edited</td><td>2</td></tr>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="example-card">
+  <div class="example-title">
+    Adding external directories
+    <span class="tag tag-quick">Quick</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/add-dir ../shared-lib</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> Added <code>../shared-lib</code> to context (12 files, 2.4k tokens)</div>
+          </div>
+          <p>Now I can read and reference files from <code>../shared-lib</code> alongside the main project.</p>
+        </div>
+      </div>
+    </div>
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/context-files</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <p><strong>Files in context:</strong></p>
+          <table>
+            <thead><tr><th>File</th><th>Status</th><th>Tokens</th></tr></thead>
+            <tbody>
+              <tr><td><code>src/handler.go</code></td><td style="color:var(--yellow);">edited</td><td>~1.2k</td></tr>
+              <tr><td><code>src/auth/middleware.go</code></td><td>read</td><td>~0.8k</td></tr>
+              <tr><td><code>../shared-lib/types.go</code></td><td>read</td><td>~0.6k</td></tr>
+              <tr><td><code>../shared-lib/utils.go</code></td><td>read</td><td>~0.4k</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════ -->
+<h2 id="git-commit"><span class="emoji">&#128230;</span> Git Integration</h2>
+
+<div class="example-card green">
+  <div class="example-title">
+    Committing with message hints
+    <span class="tag tag-workflow">Git</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/commit add rate limiter middleware</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: git status</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: git diff --stat</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: git add internal/ratelimit/ cmd/serve/main.go</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: git commit</span></div>
+          </div>
+          <div class="code-block">
+            <div class="code-header">Commit message</div>
+<pre>feat: add rate limiter middleware
+
+Add per-user (100/min) and per-IP (30/min) rate limiting
+using token bucket algorithm. Returns 429 with Retry-After
+header when limits exceeded.
+
+Co-authored-by: Automergent &lt;ai@automergent.dev&gt;</pre>
+          </div>
+          <p>Committed: <code>a3f7b2c</code></p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="example-card">
+  <div class="example-title">
+    Working on GitHub issues
+    <span class="tag tag-workflow">Git</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/issue 42</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">gh issue view 42</span></div>
+          </div>
+          <p><strong>Issue #42: Database connection pool leaks under high concurrency</strong></p>
+          <p><em>"Connections are not being returned to the pool after timeout. Memory grows over time."</em></p>
+          <p>Label: <span style="color:var(--red);">bug</span> &nbsp; Assignee: <span style="color:var(--text-dim);">unassigned</span></p>
+          <div class="steps" style="margin-top:12px;">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Read db/pool.go</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Found issue: missing <code>conn.Close()</code> in error path at line 67</div>
+          </div>
+          <p>I see the bug. In <code>pool.go:67</code>, when a query times out, the connection is never returned to the pool. The fix is to add a <code>defer conn.Close()</code> after acquiring the connection.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="example-card">
+  <div class="example-title">
+    Addressing PR review feedback
+    <span class="tag tag-workflow">Git</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/pr-comments 15</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">gh pr view 15 --comments</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> 4 review comments, 3 resolved, 1 pending</div>
+          </div>
+          <p><strong>Pending comment from @reviewer on <code>handler.go:45</code>:</strong></p>
+          <blockquote style="border-left:3px solid var(--border); padding-left:12px; margin:8px 0; color:var(--text-dim);">
+            "This should use the existing <code>parseDuration()</code> helper instead of reimplementing it."
+          </blockquote>
+          <div class="steps" style="margin-top:12px;">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Grep "func parseDuration"</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Edit handler.go:45 — use parseDuration()</span></div>
+          </div>
+          <p>Fixed. Replaced the inline duration parsing with the shared helper. Ready to push.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════ -->
+<h2 id="advanced-plan"><span class="emoji">&#128736;</span> Advanced Usage</h2>
+
+<div class="example-card purple">
+  <div class="example-title">
+    Plan mode for complex changes
+    <span class="tag tag-advanced">Advanced</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/plan Migrate from REST to GraphQL</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <p>This is a large change. Generating a comprehensive plan…</p>
+          <div class="code-block">
+            <div class="code-header">Plan: graphql-migration (artifact)</div>
+<pre>## GraphQL Migration Plan
+
+### Phase 1: Setup (Day 1)
+- Add graphql-go dependency
+- Create schema file: schema.graphql
+- Set up GraphQL handler at /graphql
+
+### Phase 2: User Queries (Day 2)
+- Implement User type and queries
+- Map existing REST resolvers
+- Add DataLoader for N+1 prevention
+
+### Phase 3: Mutations (Day 3-4)
+- Port POST/PUT/DELETE endpoints
+- Add input validation
+- Implement error formatting
+
+### Phase 4: Migration (Day 5-6)
+- Run REST and GraphQL in parallel
+- Update client code incrementally
+- Add feature flag for rollout
+
+### Phase 5: Cleanup (Day 7)
+- Remove REST endpoints
+- Update documentation
+- Remove unused middleware
+
+### Estimated effort: 7 days
+### Files affected: ~35 files</pre>
+          </div>
+          <p style="margin-top:12px;">This is a significant migration. The plan has 5 phases over 7 days. Each phase can be approved independently.</p>
+          <div class="tip purple">
+            <strong>Tip:</strong> Use <code>/artifact approve phase-1</code> to approve one phase at a time. The agent will implement, test, and wait for your approval before moving to the next phase.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="example-card">
+  <div class="example-title">
+    Goal-driven autonomy
+    <span class="tag tag-advanced">Advanced</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Goal: Get the test coverage above 90% and fix all flaky tests</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: go test -coverprofile=cover.out ./... && go tool cover -func=cover.out | tail -1</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Current coverage: 78.3% (need +11.7%)</div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Grep "FAIL\|flaky" --include "*_test.go"</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Found 3 flaky tests (race conditions in concurrent tests)</div>
+          </div>
+          <p><strong>Plan to reach 90%:</strong></p>
+          <ol style="padding-left:20px; margin:8px 0;">
+            <li>Fix 3 flaky tests (adds ~2% from skipped runs)</li>
+            <li>Add tests for <code>cache/</code> package (+5%)</li>
+            <li>Add tests for <code>handler/error.go</code> (+3%)</li>
+            <li>Add edge case tests for <code>auth/</code> (+4%)</li>
+          </ol>
+          <p>Starting implementation…</p>
+          <div class="steps" style="margin-top:12px;">
+            <div class="step done"><span class="step-num">&#10003;</span> Fixed race condition in TestConcurrentAccess</div>
+            <div class="step done"><span class="step-num">&#10003;</span> Fixed flaky TestTimeout (was timing-dependent)</div>
+            <div class="step done"><span class="step-num">&#10003;</span> Added 23 new tests across cache/, handler/, auth/</div>
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Bash: go test -coverprofile=cover.out ./... && go tool cover -func=cover.out | tail -1</span></div>
+          </div>
+          <div class="output-block" style="color:var(--green);">91.4% of statements with test coverage</div>
+          <p>Goal achieved. Coverage: <strong>91.4%</strong>. All 47 tests pass, 0 flaky.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="example-card">
+  <div class="example-title">
+    Custom workflows
+    <span class="tag tag-advanced">Advanced</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/workflow create "pre-release" with steps: run tests, check coverage > 90%, build binary, verify no vulnerabilities</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> Workflow "pre-release" created with 4 steps</div>
+          </div>
+          <p>Run it anytime with <code>/workflow run pre-release</code>.</p>
+        </div>
+      </div>
+    </div>
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">/workflow run pre-release</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> Step 1/4: Running tests… <span style="color:var(--green);">Passed (47/47)</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Step 2/4: Checking coverage… <span style="color:var(--green);">91.4% &#8805; 90%</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Step 3/4: Building binary… <span style="color:var(--green);">bin/release/v2.1.0</span></div>
+            <div class="step done"><span class="step-num">&#10003;</span> Step 4/4: Checking vulnerabilities… <span style="color:var(--green);">0 found</span></div>
+          </div>
+          <div class="output-block" style="color:var(--green);">✓ pre-release workflow completed successfully</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="example-card">
+  <div class="example-title">
+    Skills and MCP integration
+    <span class="tag tag-advanced">Advanced</span>
+  </div>
+  <div class="conversation">
+    <div class="msg user">
+      <div class="msg-avatar user">U</div>
+      <div class="msg-body">
+        <div class="msg-name user">You</div>
+        <div class="msg-content">Create a custom skill for "deploy to staging" that runs tests, builds, and pushes to the staging branch</div>
+      </div>
+    </div>
+    <div class="msg agent">
+      <div class="msg-avatar agent">A</div>
+      <div class="msg-body">
+        <div class="msg-name agent">Automergent</div>
+        <div class="msg-content">
+          <div class="steps">
+            <div class="step done"><span class="step-num">&#10003;</span> <span class="tool-call">Write .opencode/skills/deploy-staging.md</span></div>
+          </div>
+          <div class="code-block">
+            <div class="code-header">.opencode/skills/deploy-staging.md</div>
+<pre># Deploy to Staging
+
+## Trigger
+Use when the user says "deploy to staging" or "push staging".
+
+## Steps
+1. Run `pnpm test` — abort if any failures
+2. Run `pnpm build` — abort if build fails
+3. Create release branch: `git checkout -b staging/release-$(date +%Y%m%d)`
+4. Commit changes with message from user or auto-generated
+5. Push to origin: `git push -u origin staging/release-*`
+6. Create PR targeting `staging` branch using `gh pr create`
+7. Report PR URL to user</pre>
+          </div>
+          <p>Skill created. Use it with <code>/skill deploy-staging</code> or just say "deploy to staging".</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════ -->
+<h2 id="patterns"><span class="emoji">&#128161;</span> Common Patterns</h2>
+<p>These are battle-tested patterns for getting the most out of Automergent.</p>
+
+<div class="example-card">
+  <table>
+    <thead>
+      <tr><th>Pattern</th><th>Why</th><th>Example</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Read before edit</strong></td>
+        <td>Agent understands context before making changes</td>
+        <td><code>"Read auth.go, then add rate limiting"</code></td>
+      </tr>
+      <tr>
+        <td><strong>Grep before read</strong></td>
+        <td>Find the right file without guessing</td>
+        <td><code>"Find where JWT validation happens"</code></td>
+      </tr>
+      <tr>
+        <td><strong>Test after change</strong></td>
+        <td>Catch regressions immediately</td>
+        <td><code>"Run tests after editing"</code></td>
+      </tr>
+      <tr>
+        <td><strong>Use sub-agents for parallel work</strong></td>
+        <td>Explore multiple areas simultaneously</td>
+        <td><code>"Launch 3 agents to analyze src/, tests/, docs/"</code></td>
+      </tr>
+      <tr>
+        <td><strong>Monitor context with /context</strong></td>
+        <td>Prevent context overflow in long sessions</td>
+        <td><code>"/context"</code> after 15+ messages</td>
+      </tr>
+      <tr>
+        <td><strong>Use /compact proactively</strong></td>
+        <td>Free up space before it's needed</td>
+        <td><code>"/compact"</code> at 60-70% usage</td>
+      </tr>
+      <tr>
+        <td><strong>Plan first, then implement</strong></td>
+        <td>Get alignment before large changes</td>
+        <td><code>"/plan Refactor the auth module"</code></td>
+      </tr>
+      <tr>
+        <td><strong>Ask for options</strong></td>
+        <td>Agent will propose alternatives</td>
+        <td><code>"How should I fix this? What are the options?"</code></td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<h3>Session Lifecycle</h3>
+<div class="example-card">
+  <p>A typical well-structured session:</p>
+  <div class="steps">
+    <div class="step done"><span class="step-num">1</span> <strong>Explore</strong> — <code>"Explore the project structure"</code></div>
+    <div class="step done"><span class="step-num">2</span> <strong>Understand</strong> — <code>"How does auth work?"</code></div>
+    <div class="step done"><span class="step-num">3</span> <strong>Plan</strong> — <code>/plan Add feature X</code></div>
+    <div class="step done"><span class="step-num">4</span> <strong>Implement</strong> — <code>/artifact approve</code> → agent builds</div>
+    <div class="step done"><span class="step-num">5</span> <strong>Verify</strong> — <code>"Run tests"</code></div>
+    <div class="step done"><span class="step-num">6</span> <strong>Review</strong> — <code>/review</code></div>
+    <div class="step done"><span class="step-num">7</span> <strong>Ship</strong> — <code>/commit fix: description</code></div>
+  </div>
+</div>
+
+<h3>Anti-patterns to Avoid</h3>
+<div class="example-card">
+  <table>
+    <thead><tr><th>Don't</th><th>Do Instead</th></tr></thead>
+    <tbody>
+      <tr>
+        <td style="color:var(--red);">"Edit all 50 files"</td>
+        <td>Edit one file at a time, or use a plan</td>
+      </tr>
+      <tr>
+        <td style="color:var(--red);">Skipping /compact in long sessions</td>
+        <td>Run /compact at 60% context usage</td>
+      </tr>
+      <tr>
+        <td style="color:var(--red);">"Fix everything" (vague goal)</td>
+        <td>Specific: "Fix the failing test in auth_test.go"</td>
+      </tr>
+      <tr>
+        <td style="color:var(--red);">Editing without reading first</td>
+        <td>Always let the agent read the file first</td>
+      </tr>
+      <tr>
+        <td style="color:var(--red);">Not checking /context</td>
+        <td>Monitor usage, compact when needed</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+
+<!-- ════════════════════════════════════════════════ -->
+<h2 id="workflow-refactoring" style="display:none"></h2>
+<h2 id="subagent-specialized" style="display:none"></h2>
+<h2 id="subagent-background" style="display:none"></h2>
+<h2 id="config-mcp" style="display:none"></h2>
+<h2 id="config-themes" style="display:none"></h2>
+<h2 id="config-memory" style="display:none"></h2>
+<h2 id="context-usage" style="display:none"></h2>
+<h2 id="context-files" style="display:none"></h2>
+<h2 id="git-issue" style="display:none"></h2>
+<h2 id="git-pr" style="display:none"></h2>
+<h2 id="advanced-artifacts" style="display:none"></h2>
+<h2 id="advanced-autonomy" style="display:none"></h2>
+<h2 id="advanced-skills" style="display:none"></h2>
+
+</main>
+
+<script>
+// Sidebar active state
+const observer = new IntersectionObserver(entries => {
+  entries.forEach(e => {
+    if (e.isIntersecting) {
+      document.querySelectorAll('.sidebar nav a').forEach(a => a.classList.remove('active'));
+      const link = document.querySelector(`.sidebar nav a[href="#${e.target.id}"]`);
+      if (link) link.classList.add('active');
+    }
+  });
+}, { rootMargin: '-20% 0px -60% 0px' });
+
+document.querySelectorAll('h2[id]').forEach(h => observer.observe(h));
+</script>
+
+<script src="../js/nav.js"></script>
+<script src="../js/footer.js"></script>
+</body>
+</html>

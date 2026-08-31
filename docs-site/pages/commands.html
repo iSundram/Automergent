@@ -1,0 +1,1226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Commands Reference - Automergent</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #e6edf3;
+    --text-muted: #8b949e; --accent: #58a6ff; --accent-dim: #1f3a5f;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922; --purple: #bc8cff;
+    --orange: #f0883e; --sidebar-w: 260px; --row-alt: #1c2128;
+  }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.6;
+    display: flex; min-height: 100vh;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Sidebar */
+  .sidebar {
+    position: fixed; top: 0; left: 0; width: var(--sidebar-w); height: 100vh;
+    background: var(--card); border-right: 1px solid var(--border);
+    overflow-y: auto; padding: 24px 16px; z-index: 100;
+  }
+  .sidebar h2 {
+    font-size: 15px; color: var(--accent); margin-bottom: 16px;
+    letter-spacing: 0.5px; text-transform: uppercase; font-weight: 600;
+  }
+  .sidebar .cat-label {
+    font-size: 11px; text-transform: uppercase; color: var(--text-muted);
+    margin: 14px 0 6px 0; letter-spacing: 0.8px; font-weight: 600;
+  }
+  .sidebar ul { list-style: none; }
+  .sidebar li a {
+    display: block; padding: 3px 8px; font-size: 13px; color: var(--text-muted);
+    border-radius: 4px; font-family: 'SFMono-Regular', Consolas, monospace;
+  }
+  .sidebar li a:hover { background: var(--accent-dim); color: var(--accent); text-decoration: none; }
+
+  /* Main content */
+  .main { margin-left: var(--sidebar-w); flex: 1; padding: 40px 48px 80px; max-width: 960px; }
+  h1 { font-size: 32px; margin-bottom: 8px; }
+  h1 span { color: var(--accent); }
+  .subtitle { color: var(--text-muted); margin-bottom: 32px; font-size: 15px; }
+  h2 {
+    font-size: 22px; margin: 48px 0 16px; padding-bottom: 8px;
+    border-bottom: 1px solid var(--border); color: var(--accent);
+  }
+  h3 {
+    font-size: 16px; margin: 28px 0 10px; color: var(--text);
+    font-family: 'SFMono-Regular', Consolas, monospace;
+  }
+  h3 code { background: var(--card); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); }
+
+  /* Tables */
+  table {
+    width: 100%; border-collapse: collapse; margin: 8px 0 24px;
+    font-size: 14px;
+  }
+  th {
+    text-align: left; background: #1c2128; color: var(--text-muted);
+    padding: 8px 12px; font-size: 12px; text-transform: uppercase;
+    letter-spacing: 0.5px; border-bottom: 2px solid var(--border);
+  }
+  td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  tr:nth-child(even) td { background: var(--row-alt); }
+  tr:hover td { background: #1f2937; }
+  code {
+    font-family: 'SFMono-Regular', Consolas, monospace; font-size: 13px;
+    background: #1c2128; padding: 2px 6px; border-radius: 3px;
+    color: var(--accent); border: 1px solid var(--border);
+  }
+  .cmd-name { color: var(--green); font-weight: 600; }
+  .cmd-desc { color: var(--text-muted); }
+  .cmd-example { color: var(--yellow); }
+  .cmd-related a { font-size: 12px; }
+
+  /* Keyboard section */
+  .kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 12px 0 32px; }
+  .kb-card {
+    background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px;
+  }
+  .kb-card h4 { font-size: 14px; color: var(--accent); margin-bottom: 10px; }
+  .kb-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
+  .kb-key {
+    font-family: 'SFMono-Regular', Consolas, monospace; background: #21262d;
+    padding: 1px 8px; border-radius: 4px; border: 1px solid var(--border); color: var(--text);
+  }
+  .kb-action { color: var(--text-muted); }
+
+  /* Badges */
+  .badge {
+    display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 10px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+    vertical-align: middle; margin-left: 4px;
+  }
+  .badge-new { background: #1f3a5f; color: var(--accent); }
+  .badge-pro { background: #3b2f1e; color: var(--orange); }
+
+  .toc-link {
+    font-family: 'SFMono-Regular', Consolas, monospace; font-size: 13px;
+    display: inline-block; background: var(--card); border: 1px solid var(--border);
+    padding: 6px 12px; border-radius: 6px; margin: 4px 4px 4px 0; color: var(--accent);
+  }
+  .toc-link:hover { background: var(--accent-dim); text-decoration: none; }
+
+  @media (max-width: 800px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 24px 16px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Sidebar TOC -->
+<nav class="sidebar">
+  <h2>Commands</h2>
+
+  <div class="cat-label">Session</div>
+  <ul>
+    <li><a href="#new">/new</a></li>
+    <li><a href="#sessions">/sessions</a></li>
+    <li><a href="#resume">/resume</a></li>
+    <li><a href="#rename">/rename</a></li>
+    <li><a href="#branch">/branch</a></li>
+    <li><a href="#quit">/quit</a></li>
+  </ul>
+
+  <div class="cat-label">Model &amp; Provider</div>
+  <ul>
+    <li><a href="#model">/model</a></li>
+    <li><a href="#provider">/provider</a></li>
+    <li><a href="#provider-test">/provider test</a></li>
+    <li><a href="#provider-fallback">/provider fallback</a></li>
+    <li><a href="#provider-api-key">/provider api-key</a></li>
+    <li><a href="#provider-base-url">/provider base-url</a></li>
+    <li><a href="#api-key">/api-key</a></li>
+    <li><a href="#base-url">/base-url</a></li>
+    <li><a href="#effort">/effort</a></li>
+  </ul>
+
+  <div class="cat-label">Approval Modes</div>
+  <ul>
+    <li><a href="#mode">/mode</a></li>
+    <li><a href="#permissions">/permissions</a></li>
+    <li><a href="#permissions-add">/permissions add</a></li>
+    <li><a href="#permissions-remove">/permissions remove</a></li>
+    <li><a href="#permissions-clear">/permissions clear</a></li>
+  </ul>
+
+  <div class="cat-label">Context &amp; Memory</div>
+  <ul>
+    <li><a href="#context">/context</a></li>
+    <li><a href="#context-detail">/context detail</a></li>
+    <li><a href="#compact">/compact</a></li>
+    <li><a href="#context-files">/context-files</a></li>
+    <li><a href="#memory">/memory</a></li>
+    <li><a href="#memory-add">/memory add</a></li>
+    <li><a href="#memory-remove">/memory remove</a></li>
+    <li><a href="#memory-clear">/memory clear</a></li>
+    <li><a href="#dream">/dream</a></li>
+    <li><a href="#add-dir">/add-dir</a></li>
+    <li><a href="#directory">/directory</a></li>
+  </ul>
+
+  <div class="cat-label">Planning &amp; Artifacts</div>
+  <ul>
+    <li><a href="#plan">/plan</a></li>
+    <li><a href="#plan-copy">/plan copy</a></li>
+    <li><a href="#artifact">/artifact</a></li>
+    <li><a href="#goal">/goal</a></li>
+    <li><a href="#goal-control">/goal pause|resume|continue|clear</a></li>
+  </ul>
+
+  <div class="cat-label">Code Review</div>
+  <ul>
+    <li><a href="#review">/review</a></li>
+    <li><a href="#review-mode">/review-mode</a></li>
+    <li><a href="#security-review">/security-review</a></li>
+    <li><a href="#diff">/diff</a></li>
+  </ul>
+
+  <div class="cat-label">Build &amp; Test</div>
+  <ul>
+    <li><a href="#build">/build</a></li>
+    <li><a href="#test">/test</a></li>
+    <li><a href="#run">/run</a></li>
+    <li><a href="#lsp">/lsp</a></li>
+    <li><a href="#lsp-all">/lsp all</a></li>
+  </ul>
+
+  <div class="cat-label">Git &amp; GitHub</div>
+  <ul>
+    <li><a href="#commit">/commit</a></li>
+    <li><a href="#issue">/issue</a></li>
+    <li><a href="#pr-comments">/pr-comments</a></li>
+    <li><a href="#search">/search</a></li>
+  </ul>
+
+  <div class="cat-label">Inspection</div>
+  <ul>
+    <li><a href="#doctor">/doctor</a></li>
+    <li><a href="#env">/env</a></li>
+    <li><a href="#version">/version</a></li>
+    <li><a href="#config">/config</a></li>
+    <li><a href="#error">/error</a></li>
+    <li><a href="#error-clear">/error clear</a></li>
+    <li><a href="#stats">/stats</a></li>
+    <li><a href="#cost">/cost</a></li>
+    <li><a href="#recap">/recap</a></li>
+    <li><a href="#summary">/summary</a></li>
+    <li><a href="#tldr">/tldr</a></li>
+    <li><a href="#export">/export</a></li>
+  </ul>
+
+  <div class="cat-label">UI &amp; Display</div>
+  <ul>
+    <li><a href="#theme">/theme</a></li>
+    <li><a href="#keybindings">/keybindings</a></li>
+    <li><a href="#help">/help</a></li>
+    <li><a href="#commands">/commands</a></li>
+    <li><a href="#tree">/tree</a></li>
+    <li><a href="#cancel">/cancel</a></li>
+  </ul>
+
+  <div class="cat-label">Skills &amp; Extensions</div>
+  <ul>
+    <li><a href="#skills">/skills</a></li>
+    <li><a href="#mcp">/mcp</a></li>
+    <li><a href="#mcp-tools">/mcp tools</a></li>
+    <li><a href="#mcp-toggle">/mcp enable|disable</a></li>
+    <li><a href="#mcp-add">/mcp add</a></li>
+    <li><a href="#workflow">/workflow</a></li>
+    <li><a href="#agents">/agents</a></li>
+    <li><a href="#feedback">/feedback</a></li>
+  </ul>
+
+  <div class="cat-label">Keyboard Shortcuts</div>
+  <ul>
+    <li><a href="#shortcuts-default">Default</a></li>
+    <li><a href="#shortcuts-vim">Vim</a></li>
+    <li><a href="#shortcuts-emacs">Emacs</a></li>
+  </ul>
+</nav>
+
+<!-- Main Content -->
+<div class="main">
+  <h1><span>Automergent</span> Commands Reference</h1>
+  <p class="subtitle">Complete reference for all 62+ slash commands. Type <code>/</code> in the terminal to see suggestions.</p>
+
+  <h2>Quick Navigation</h2>
+  <div>
+    <a class="toc-link" href="#session-mgmt">Session</a>
+    <a class="toc-link" href="#model-provider">Model &amp; Provider</a>
+    <a class="toc-link" href="#approval-modes">Approval Modes</a>
+    <a class="toc-link" href="#context-memory">Context &amp; Memory</a>
+    <a class="toc-link" href="#planning-artifacts">Planning &amp; Artifacts</a>
+    <a class="toc-link" href="#code-review">Code Review</a>
+    <a class="toc-link" href="#build-test">Build &amp; Test</a>
+    <a class="toc-link" href="#git-github">Git &amp; GitHub</a>
+    <a class="toc-link" href="#inspection">Inspection</a>
+    <a class="toc-link" href="#ui-display">UI &amp; Display</a>
+    <a class="toc-link" href="#skills-extensions">Skills &amp; Extensions</a>
+    <a class="toc-link" href="#keyboard-shortcuts">Keyboard Shortcuts</a>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- SESSION MANAGEMENT -->
+  <!-- ============================================================ -->
+  <h2 id="session-mgmt">Session Management</h2>
+
+  <table id="new">
+    <tr><th colspan="4">/new — Start a New Session</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/new [name]</code></td>
+      <td class="cmd-desc">Create a fresh session. Optionally provide a name to identify it later.</td>
+      <td class="cmd-example"><code>/new auth-refactor</code></td>
+      <td class="cmd-related"><a href="#sessions">/sessions</a> <a href="#resume">/resume</a></td>
+    </tr>
+  </table>
+
+  <table id="sessions">
+    <tr><th colspan="4">/sessions — List All Sessions</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/sessions</code></td>
+      <td class="cmd-desc">Display all saved sessions with names, dates, and message counts.</td>
+      <td class="cmd-example"><code>/sessions</code></td>
+      <td class="cmd-related"><a href="#resume">/resume</a></td>
+    </tr>
+  </table>
+
+  <table id="resume">
+    <tr><th colspan="4">/resume — Resume a Session</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/resume [id|name]</code></td>
+      <td class="cmd-desc">Load a previous session by ID or name. Without arguments, shows a picker.</td>
+      <td class="cmd-example"><code>/resume auth-refactor</code></td>
+      <td class="cmd-related"><a href="#sessions">/sessions</a> <a href="#branch">/branch</a></td>
+    </tr>
+  </table>
+
+  <table id="rename">
+    <tr><th colspan="4">/rename — Rename Current Session</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/rename &lt;new-name&gt;</code></td>
+      <td class="cmd-desc">Give the current session a memorable name.</td>
+      <td class="cmd-example"><code>/rename oauth2-impl</code></td>
+      <td class="cmd-related"><a href="#sessions">/sessions</a></td>
+    </tr>
+  </table>
+
+  <table id="branch">
+    <tr><th colspan="4">/branch — Branch a Session</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/branch [name]</code></td>
+      <td class="cmd-desc">Create a fork of the current session to explore alternative approaches without losing history.</td>
+      <td class="cmd-example"><code>/branch alt-approach</code></td>
+      <td class="cmd-related"><a href="#resume">/resume</a> <a href="#sessions">/sessions</a></td>
+    </tr>
+  </table>
+
+  <table id="quit">
+    <tr><th colspan="4">/quit — Exit Automergent</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/quit</code></td>
+      <td class="cmd-desc">Save the current session and exit the application.</td>
+      <td class="cmd-example"><code>/quit</code></td>
+      <td class="cmd-related"><a href="#sessions">/sessions</a></td>
+    </tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <!-- AI MODEL & PROVIDER -->
+  <!-- ============================================================ -->
+  <h2 id="model-provider">AI Model &amp; Provider</h2>
+
+  <table id="model">
+    <tr><th colspan="4">/model — Switch AI Model</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/model [model-name]</code></td>
+      <td class="cmd-desc">Change the active AI model. Without arguments, shows available models and current selection.</td>
+      <td class="cmd-example"><code>/model gpt-4o</code> <code>/model claude-sonnet-4-20250514</code></td>
+      <td class="cmd-related"><a href="#provider">/provider</a> <a href="#effort">/effort</a></td>
+    </tr>
+  </table>
+
+  <table id="provider">
+    <tr><th colspan="4">/provider — Manage Providers</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/provider [name]</code></td>
+      <td class="cmd-desc">List or switch AI providers (openai, anthropic, google, azure, etc.).</td>
+      <td class="cmd-example"><code>/provider anthropic</code></td>
+      <td class="cmd-related"><a href="#model">/model</a> <a href="#api-key">/api-key</a></td>
+    </tr>
+  </table>
+
+  <table id="provider-test">
+    <tr><th colspan="4">/provider test — Test Provider Connection</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/provider test [provider]</code></td>
+      <td class="cmd-desc">Verify API connectivity and credentials for the specified or active provider.</td>
+      <td class="cmd-example"><code>/provider test openai</code></td>
+      <td class="cmd-related"><a href="#provider">/provider</a> <a href="#doctor">/doctor</a></td>
+    </tr>
+  </table>
+
+  <table id="provider-fallback">
+    <tr><th colspan="4">/provider fallback — Configure Fallback Chain</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/provider fallback [chain]</code></td>
+      <td class="cmd-desc">Set the fallback order when a provider is unavailable. Chain is comma-separated.</td>
+      <td class="cmd-example"><code>/provider fallback openai,anthropic,google</code></td>
+      <td class="cmd-related"><a href="#provider">/provider</a></td>
+    </tr>
+  </table>
+
+  <table id="provider-api-key">
+    <tr><th colspan="4">/provider api-key — Set Provider API Key</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/provider api-key &lt;provider&gt; &lt;key&gt;</code></td>
+      <td class="cmd-desc">Store an API key for a specific provider. Key is encrypted at rest.</td>
+      <td class="cmd-example"><code>/provider api-key openai sk-...</code></td>
+      <td class="cmd-related"><a href="#api-key">/api-key</a> <a href="#provider">/provider</a></td>
+    </tr>
+  </table>
+
+  <table id="provider-base-url">
+    <tr><th colspan="4">/provider base-url — Set Provider Base URL</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/provider base-url &lt;provider&gt; &lt;url&gt;</code></td>
+      <td class="cmd-desc">Override the API endpoint for a provider (useful for proxies or local models).</td>
+      <td class="cmd-example"><code>/provider base-url openai http://localhost:8080/v1</code></td>
+      <td class="cmd-related"><a href="#base-url">/base-url</a> <a href="#provider">/provider</a></td>
+    </tr>
+  </table>
+
+  <table id="api-key">
+    <tr><th colspan="4">/api-key — Quick API Key</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/api-key [key]</code></td>
+      <td class="cmd-desc">Shorthand to set the API key for the current provider. Reads from stdin if no argument.</td>
+      <td class="cmd-example"><code>/api-key sk-ant-...</code></td>
+      <td class="cmd-related"><a href="#provider-api-key">/provider api-key</a> <a href="#provider">/provider</a></td>
+    </tr>
+  </table>
+
+  <table id="base-url">
+    <tr><th colspan="4">/base-url — Quick Base URL</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/base-url [url]</code></td>
+      <td class="cmd-desc">Shorthand to set the API base URL for the current provider.</td>
+      <td class="cmd-example"><code>/base-url http://127.0.0.1:11434</code></td>
+      <td class="cmd-related"><a href="#provider-base-url">/provider base-url</a></td>
+    </tr>
+  </table>
+
+  <table id="effort">
+    <tr><th colspan="4">/effort — Set Reasoning Effort</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/effort &lt;low|medium|high&gt;</code></td>
+      <td class="cmd-desc">Adjust the reasoning depth. Higher effort = more thorough but slower and more expensive.</td>
+      <td class="cmd-example"><code>/effort high</code> <code>/effort low</code></td>
+      <td class="cmd-related"><a href="#model">/model</a> <a href="#cost">/cost</a></td>
+    </tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <!-- APPROVAL MODES -->
+  <!-- ============================================================ -->
+  <h2 id="approval-modes">Approval Modes</h2>
+
+  <table id="mode">
+    <tr><th colspan="4">/mode — Switch Approval Mode</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/mode [mode]</code></td>
+      <td class="cmd-desc">Toggle between approval modes: <code>full-auto</code>, <code>semi-auto</code>, <code>plan</code>, <code>ask</code>. Without arguments, shows current mode.</td>
+      <td class="cmd-example"><code>/mode full-auto</code> <code>/mode semi-auto</code></td>
+      <td class="cmd-related"><a href="#permissions">/permissions</a></td>
+    </tr>
+  </table>
+
+  <table id="permissions">
+    <tr><th colspan="4">/permissions — Manage Permissions</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/permissions [scope]</code></td>
+      <td class="cmd-desc">View or set per-command permission overrides. Use <code>global</code>, <code>project</code>, or <code>session</code> scope.</td>
+      <td class="cmd-example"><code>/permissions</code> <code>/permissions project</code></td>
+      <td class="cmd-related"><a href="#permissions-add">/permissions add</a> <a href="#mode">/mode</a></td>
+    </tr>
+  </table>
+
+  <table id="permissions-add">
+    <tr><th colspan="4">/permissions add — Allow a Command</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/permissions add &lt;pattern&gt;</code></td>
+      <td class="cmd-desc">Auto-approve matching commands without prompting. Supports glob patterns.</td>
+      <td class="cmd-example"><code>/permissions add "git commit*"</code></td>
+      <td class="cmd-related"><a href="#permissions-remove">/permissions remove</a></td>
+    </tr>
+  </table>
+
+  <table id="permissions-remove">
+    <tr><th colspan="4">/permissions remove — Revoke a Permission</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/permissions remove &lt;pattern&gt;</code></td>
+      <td class="cmd-desc">Remove an auto-approval rule. The command will require manual approval again.</td>
+      <td class="cmd-example"><code>/permissions remove "git commit*"</code></td>
+      <td class="cmd-related"><a href="#permissions-add">/permissions add</a></td>
+    </tr>
+  </table>
+
+  <table id="permissions-clear">
+    <tr><th colspan="4">/permissions clear — Reset Permissions</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/permissions clear [scope]</code></td>
+      <td class="cmd-desc">Remove all permission overrides for the given scope (or all scopes).</td>
+      <td class="cmd-example"><code>/permissions clear session</code></td>
+      <td class="cmd-related"><a href="#permissions">/permissions</a></td>
+    </tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <!-- CONTEXT & MEMORY -->
+  <!-- ============================================================ -->
+  <h2 id="context-memory">Context &amp; Memory</h2>
+
+  <table id="context">
+    <tr><th colspan="4">/context — View Context Window</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/context</code></td>
+      <td class="cmd-desc">Display current context window usage: tokens consumed, remaining, and breakdown by source.</td>
+      <td class="cmd-example"><code>/context</code></td>
+      <td class="cmd-related"><a href="#compact">/compact</a> <a href="#context-detail">/context detail</a></td>
+    </tr>
+  </table>
+
+  <table id="context-detail">
+    <tr><th colspan="4">/context detail — Detailed Context Breakdown</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/context detail</code></td>
+      <td class="cmd-desc">Show a detailed breakdown of context usage per file, memory, and system prompt.</td>
+      <td class="cmd-example"><code>/context detail</code></td>
+      <td class="cmd-related"><a href="#context">/context</a> <a href="#compact">/compact</a></td>
+    </tr>
+  </table>
+
+  <table id="compact">
+    <tr><th colspan="4">/compact — Compact Context</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/compact [instruction]</code></td>
+      <td class="cmd-desc">Summarize and compress the conversation to free up context space. Optional instruction guides what to preserve.</td>
+      <td class="cmd-example"><code>/compact keep the auth discussion</code></td>
+      <td class="cmd-related"><a href="#context">/context</a> <a href="#tldr">/tldr</a></td>
+    </tr>
+  </table>
+
+  <table id="context-files">
+    <tr><th colspan="4">/context-files — List Context Files</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/context-files</code></td>
+      <td class="cmd-desc">Show all files currently loaded into context and their token counts.</td>
+      <td class="cmd-example"><code>/context-files</code></td>
+      <td class="cmd-related"><a href="#context">/context</a> <a href="#add-dir">/add-dir</a></td>
+    </tr>
+  </table>
+
+  <table id="memory">
+    <tr><th colspan="4">/memory — View Memory Entries</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/memory</code></td>
+      <td class="cmd-desc">Display all persistent memory entries that persist across sessions.</td>
+      <td class="cmd-example"><code>/memory</code></td>
+      <td class="cmd-related"><a href="#memory-add">/memory add</a> <a href="#memory-remove">/memory remove</a></td>
+    </tr>
+  </table>
+
+  <table id="memory-add">
+    <tr><th colspan="4">/memory add — Add Memory Entry</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/memory add &lt;text&gt;</code></td>
+      <td class="cmd-desc">Store a persistent note that will be included in future sessions automatically.</td>
+      <td class="cmd-example"><code>/memory add "Use PostgreSQL, never MySQL"</code></td>
+      <td class="cmd-related"><a href="#memory">/memory</a> <a href="#memory-remove">/memory remove</a></td>
+    </tr>
+  </table>
+
+  <table id="memory-remove">
+    <tr><th colspan="4">/memory remove — Remove Memory Entry</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/memory remove &lt;text|id&gt;</code></td>
+      <td class="cmd-desc">Delete a memory entry by partial text match or index number.</td>
+      <td class="cmd-example"><code>/memory remove 2</code></td>
+      <td class="cmd-related"><a href="#memory-add">/memory add</a></td>
+    </tr>
+  </table>
+
+  <table id="memory-clear">
+    <tr><th colspan="4">/memory clear — Clear All Memory</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/memory clear</code></td>
+      <td class="cmd-desc">Delete all persistent memory entries. Requires confirmation.</td>
+      <td class="cmd-example"><code>/memory clear</code></td>
+      <td class="cmd-related"><a href="#memory">/memory</a></td>
+    </tr>
+  </table>
+
+  <table id="dream">
+    <tr><th colspan="4">/dream — Dream Mode</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/dream [prompt]</code></td>
+      <td class="cmd-desc">Enter a creative exploration mode where the AI can brainstorm, prototype, and iterate freely without approval gates.</td>
+      <td class="cmd-example"><code>/dream redesign the dashboard with a sidebar layout</code></td>
+      <td class="cmd-related"><a href="#mode">/mode</a> <a href="#plan">/plan</a></td>
+    </tr>
+  </table>
+
+  <table id="add-dir">
+    <tr><th colspan="4">/add-dir — Add Directory to Context</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/add-dir &lt;path&gt;</code></td>
+      <td class="cmd-desc">Include additional directories in the AI's context for cross-module awareness.</td>
+      <td class="cmd-example"><code>/add-dir ../shared-lib</code></td>
+      <td class="cmd-related"><a href="#directory">/directory</a> <a href="#context-files">/context-files</a></td>
+    </tr>
+  </table>
+
+  <table id="directory">
+    <tr><th colspan="4">/directory — View Current Directories</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/directory</code></td>
+      <td class="cmd-desc">List all directories currently included in context.</td>
+      <td class="cmd-example"><code>/directory</code></td>
+      <td class="cmd-related"><a href="#add-dir">/add-dir</a> <a href="#context-files">/context-files</a></td>
+    </tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <!-- PLANNING & ARTIFACTS -->
+  <!-- ============================================================ -->
+  <h2 id="planning-artifacts">Planning &amp; Artifacts</h2>
+
+  <table id="plan">
+    <tr><th colspan="4">/plan — Generate Execution Plan</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/plan [goal]</code></td>
+      <td class="cmd-desc">Generate a step-by-step execution plan before making changes. Without a goal, plans based on the last message.</td>
+      <td class="cmd-example"><code>/plan implement OAuth2 login flow</code></td>
+      <td class="cmd-related"><a href="#plan-copy">/plan copy</a> <a href="#goal">/goal</a></td>
+    </tr>
+  </table>
+
+  <table id="plan-copy">
+    <tr><th colspan="4">/plan copy — Copy Plan to Clipboard</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/plan copy</code></td>
+      <td class="cmd-desc">Copy the current execution plan to clipboard for sharing or documentation.</td>
+      <td class="cmd-example"><code>/plan copy</code></td>
+      <td class="cmd-related"><a href="#plan">/plan</a> <a href="#export">/export</a></td>
+    </tr>
+  </table>
+
+  <table id="artifact">
+    <tr><th colspan="4">/artifact — Manage Artifacts</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/artifact [list|show|export]</code></td>
+      <td class="cmd-desc">View or export generated artifacts (files, docs, configs) created during the session.</td>
+      <td class="cmd-example"><code>/artifact list</code> <code>/artifact export</code></td>
+      <td class="cmd-related"><a href="#plan">/plan</a> <a href="#export">/export</a></td>
+    </tr>
+  </table>
+
+  <table id="goal">
+    <tr><th colspan="4">/goal — Set Session Goal</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/goal &lt;description&gt;</code></td>
+      <td class="cmd-desc">Define a high-level goal that guides the AI's decisions and helps track progress.</td>
+      <td class="cmd-example"><code>/goal migrate from REST to GraphQL</code></td>
+      <td class="cmd-related"><a href="#goal-control">/goal pause|resume|continue|clear</a> <a href="#plan">/plan</a></td>
+    </tr>
+  </table>
+
+  <table id="goal-control">
+    <tr><th colspan="4">/goal pause|resume|continue|clear — Goal Controls</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/goal pause</code></td>
+      <td class="cmd-desc">Pause goal tracking without clearing the goal.</td>
+      <td class="cmd-example"><code>/goal pause</code></td>
+      <td class="cmd-related"><a href="#goal">/goal</a></td>
+    </tr>
+    <tr>
+      <td><code>/goal resume</code></td>
+      <td class="cmd-desc">Resume a paused goal.</td>
+      <td class="cmd-example"><code>/goal resume</code></td>
+      <td class="cmd-related"><a href="#goal">/goal</a></td>
+    </tr>
+    <tr>
+      <td><code>/goal continue</code></td>
+      <td class="cmd-desc">Same as resume — continue tracking the active goal.</td>
+      <td class="cmd-example"><code>/goal continue</code></td>
+      <td class="cmd-related"><a href="#goal">/goal</a></td>
+    </tr>
+    <tr>
+      <td><code>/goal clear</code></td>
+      <td class="cmd-desc">Remove the current goal entirely.</td>
+      <td class="cmd-example"><code>/goal clear</code></td>
+      <td class="cmd-related"><a href="#goal">/goal</a></td>
+    </tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <!-- CODE REVIEW -->
+  <!-- ============================================================ -->
+  <h2 id="code-review">Code Review</h2>
+
+  <table id="review">
+    <tr><th colspan="4">/review — Review Code Changes</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/review [scope]</code></td>
+      <td class="cmd-desc">Review uncommitted changes or a specific commit. Analyzes code quality, bugs, and suggestions.</td>
+      <td class="cmd-example"><code>/review</code> <code>/review HEAD~3</code></td>
+      <td class="cmd-related"><a href="#review-mode">/review-mode</a> <a href="#diff">/diff</a></td>
+    </tr>
+  </table>
+
+  <table id="review-mode">
+    <tr><th colspan="4">/review-mode — Set Review Depth</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/review-mode &lt;quick|standard|deep&gt;</code></td>
+      <td class="cmd-desc">Configure how thorough code reviews are. Deep includes security, performance, and style analysis.</td>
+      <td class="cmd-example"><code>/review-mode deep</code></td>
+      <td class="cmd-related"><a href="#review">/review</a> <a href="#security-review">/security-review</a></td>
+    </tr>
+  </table>
+
+  <table id="security-review">
+    <tr><th colspan="4">/security-review — Security Audit</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/security-review [scope]</code></td>
+      <td class="cmd-desc">Focused security audit looking for vulnerabilities, injection risks, auth flaws, and data leaks.</td>
+      <td class="cmd-example"><code>/security-review src/auth/</code></td>
+      <td class="cmd-related"><a href="#review">/review</a> <a href="#review-mode">/review-mode</a></td>
+    </tr>
+  </table>
+
+  <table id="diff">
+    <tr><th colspan="4">/diff — Show Changes</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/diff [ref]</code></td>
+      <td class="cmd-desc">Display unified diff of uncommitted changes or vs a specific git ref.</td>
+      <td class="cmd-example"><code>/diff</code> <code>/diff main</code></td>
+      <td class="cmd-related"><a href="#review">/review</a> <a href="#commit">/commit</a></td>
+    </tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <!-- BUILD & TEST -->
+  <!-- ============================================================ -->
+  <h2 id="build-test">Build &amp; Test</h2>
+
+  <table id="build">
+    <tr><th colspan="4">/build — Run Build</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/build [target]</code></td>
+      <td class="cmd-desc">Run the project's build command. Detects package manager and framework automatically.</td>
+      <td class="cmd-example"><code>/build</code> <code>/build prod</code></td>
+      <td class="cmd-related"><a href="#test">/test</a> <a href="#run">/run</a></td>
+    </tr>
+  </table>
+
+  <table id="test">
+    <tr><th colspan="4">/test — Run Tests</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/test [filter]</code></td>
+      <td class="cmd-desc">Run test suite. Optional filter matches test names. Auto-detects framework (jest, vitest, pytest, etc.).</td>
+      <td class="cmd-example"><code>/test</code> <code>/test auth</code></td>
+      <td class="cmd-related"><a href="#build">/build</a> <a href="#run">/run</a></td>
+    </tr>
+  </table>
+
+  <table id="run">
+    <tr><th colspan="4">/run — Execute Command</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/run &lt;command&gt;</code></td>
+      <td class="cmd-desc">Execute an arbitrary shell command with output capture. Use <code>!</code> prefix as shorthand.</td>
+      <td class="cmd-example"><code>/run npm start</code> <code>!ls -la</code></td>
+      <td class="cmd-related"><a href="#build">/build</a> <a href="#test">/test</a></td>
+    </tr>
+  </table>
+
+  <table id="lsp">
+    <tr><th colspan="4">/lsp — Check LSP Diagnostics</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/lsp [file]</code></td>
+      <td class="cmd-desc">Show LSP errors and warnings for a file or the current file. Highlights type errors, lint issues, etc.</td>
+      <td class="cmd-example"><code>/lsp</code> <code>/lsp src/app.ts</code></td>
+      <td class="cmd-related"><a href="#lsp-all">/lsp all</a></td>
+    </tr>
+  </table>
+
+  <table id="lsp-all">
+    <tr><th colspan="4">/lsp all — All LSP Diagnostics</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/lsp all</code></td>
+      <td class="cmd-desc">Aggregate LSP diagnostics across all open files and the workspace.</td>
+      <td class="cmd-example"><code>/lsp all</code></td>
+      <td class="cmd-related"><a href="#lsp">/lsp</a> <a href="#doctor">/doctor</a></td>
+    </tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <!-- GIT & GITHUB -->
+  <!-- ============================================================ -->
+  <h2 id="git-github">Git &amp; GitHub</h2>
+
+  <table id="commit">
+    <tr><th colspan="4">/commit — Create Git Commit</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/commit [message]</code></td>
+      <td class="cmd-desc">Stage all changes and commit with a generated or provided message. Follows conventional commits.</td>
+      <td class="cmd-example"><code>/commit</code> <code>/commit "feat: add OAuth2 flow"</code></td>
+      <td class="cmd-related"><a href="#diff">/diff</a> <a href="#pr-comments">/pr-comments</a></td>
+    </tr>
+  </table>
+
+  <table id="issue">
+    <tr><th colspan="4">/issue — Create GitHub Issue</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/issue [title]</code></td>
+      <td class="cmd-desc">Create a GitHub issue from the current context. Auto-fills title, body, and labels.</td>
+      <td class="cmd-example"><code>/issue login timeout in production</code></td>
+      <td class="cmd-related"><a href="#pr-comments">/pr-comments</a> <a href="#commit">/commit</a></td>
+    </tr>
+  </table>
+
+  <table id="pr-comments">
+    <tr><th colspan="4">/pr-comments — Review PR Comments</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/pr-comments [pr#]</code></td>
+      <td class="cmd-desc">Fetch and display review comments from a pull request. Can address feedback interactively.</td>
+      <td class="cmd-example"><code>/pr-comments 42</code></td>
+      <td class="cmd-related"><a href="#review">/review</a> <a href="#commit">/commit</a></td>
+    </tr>
+  </table>
+
+  <table id="search">
+    <tr><th colspan="4">/search — Search Codebase</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/search &lt;query&gt;</code></td>
+      <td class="cmd-desc">Search for files, functions, or patterns across the codebase with context-aware results.</td>
+      <td class="cmd-example"><code>/search handleAuth</code></td>
+      <td class="cmd-related"><a href="#context-files">/context-files</a> <a href="#add-dir">/add-dir</a></td>
+    </tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <!-- INSPECTION -->
+  <!-- ============================================================ -->
+  <h2 id="inspection">Inspection</h2>
+
+  <table id="doctor">
+    <tr><th colspan="4">/doctor — Health Check</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/doctor</code></td>
+      <td class="cmd-desc">Run diagnostics: verify API keys, provider connectivity, LSP servers, git status, and config validity.</td>
+      <td class="cmd-example"><code>/doctor</code></td>
+      <td class="cmd-related"><a href="#provider-test">/provider test</a> <a href="#config">/config</a></td>
+    </tr>
+  </table>
+
+  <table id="env">
+    <tr><th colspan="4">/env — Show Environment</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/env</code></td>
+      <td class="cmd-desc">Display environment info: OS, shell, node version, git version, PATH entries relevant to tools.</td>
+      <td class="cmd-example"><code>/env</code></td>
+      <td class="cmd-related"><a href="#version">/version</a> <a href="#doctor">/doctor</a></td>
+    </tr>
+  </table>
+
+  <table id="version">
+    <tr><th colspan="4">/version — Show Version</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/version</code></td>
+      <td class="cmd-desc">Display Automergent version, build info, and changelog link.</td>
+      <td class="cmd-example"><code>/version</code></td>
+      <td class="cmd-related"><a href="#doctor">/doctor</a> <a href="#env">/env</a></td>
+    </tr>
+  </table>
+
+  <table id="config">
+    <tr><th colspan="4">/config — View/Edit Configuration</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/config [key] [value]</code></td>
+      <td class="cmd-desc">View all config or get/set a specific key. Config is stored in <code>.automergent/config.json</code>.</td>
+      <td class="cmd-example"><code>/config</code> <code>/config theme dark</code></td>
+      <td class="cmd-related"><a href="#theme">/theme</a> <a href="#doctor">/doctor</a></td>
+    </tr>
+  </table>
+
+  <table id="error">
+    <tr><th colspan="4">/error — View Error Log</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/error</code></td>
+      <td class="cmd-desc">Display recent errors, warnings, and failed commands from the current session.</td>
+      <td class="cmd-example"><code>/error</code></td>
+      <td class="cmd-related"><a href="#error-clear">/error clear</a> <a href="#doctor">/doctor</a></td>
+    </tr>
+  </table>
+
+  <table id="error-clear">
+    <tr><th colspan="4">/error clear — Clear Error Log</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/error clear</code></td>
+      <td class="cmd-desc">Clear the error log for the current session.</td>
+      <td class="cmd-example"><code>/error clear</code></td>
+      <td class="cmd-related"><a href="#error">/error</a></td>
+    </tr>
+  </table>
+
+  <table id="stats">
+    <tr><th colspan="4">/stats — Session Statistics</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/stats</code></td>
+      <td class="cmd-desc">Display session metrics: messages, tokens, tool calls, duration, and files modified.</td>
+      <td class="cmd-example"><code>/stats</code></td>
+      <td class="cmd-related"><a href="#cost">/cost</a> <a href="#recap">/recap</a></td>
+    </tr>
+  </table>
+
+  <table id="cost">
+    <tr><th colspan="4">/cost — Show Cost Estimate</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/cost</code></td>
+      <td class="cmd-desc">Estimate API cost based on tokens used and current model pricing.</td>
+      <td class="cmd-example"><code>/cost</code></td>
+      <td class="cmd-related"><a href="#stats">/stats</a> <a href="#effort">/effort</a></td>
+    </tr>
+  </table>
+
+  <table id="recap">
+    <tr><th colspan="4">/recap — Session Recap</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/recap</code></td>
+      <td class="cmd-desc">Generate a summary of everything accomplished in the current session: changes, decisions, and next steps.</td>
+      <td class="cmd-example"><code>/recap</code></td>
+      <td class="cmd-related"><a href="#summary">/summary</a> <a href="#tldr">/tldr</a></td>
+    </tr>
+  </table>
+
+  <table id="summary">
+    <tr><th colspan="4">/summary — Generate Summary</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/summary [prompt]</code></td>
+      <td class="cmd-desc">AI-generated summary of conversation progress. Custom prompt guides the summary focus.</td>
+      <td class="cmd-example"><code>/summary focus on architecture decisions</code></td>
+      <td class="cmd-related"><a href="#recap">/recap</a> <a href="#tldr">/tldr</a></td>
+    </tr>
+  </table>
+
+  <table id="tldr">
+    <tr><th colspan="4">/tldr — Quick TL;DR</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/tldr</code></td>
+      <td class="cmd-desc">One-paragraph ultra-concise summary of the session. Great for sharing with teammates.</td>
+      <td class="cmd-example"><code>/tldr</code></td>
+      <td class="cmd-related"><a href="#recap">/recap</a> <a href="#summary">/summary</a></td>
+    </tr>
+  </table>
+
+  <table id="export">
+    <tr><th colspan="4">/export — Export Session</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/export [format]</code></td>
+      <td class="cmd-desc">Export the full session as markdown, JSON, or HTML. Defaults to markdown.</td>
+      <td class="cmd-example"><code>/export</code> <code>/export json</code></td>
+      <td class="cmd-related"><a href="#recap">/recap</a> <a href="#plan-copy">/plan copy</a></td>
+    </tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <!-- UI & DISPLAY -->
+  <!-- ============================================================ -->
+  <h2 id="ui-display">UI &amp; Display</h2>
+
+  <table id="theme">
+    <tr><th colspan="4">/theme — Change Theme</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/theme [name]</code></td>
+      <td class="cmd-desc">Switch between themes: <code>dark</code>, <code>light</code>, <code>mono</code>, <code>high-contrast</code>. Without arguments, cycles themes.</td>
+      <td class="cmd-example"><code>/theme light</code></td>
+      <td class="cmd-related"><a href="#config">/config</a></td>
+    </tr>
+  </table>
+
+  <table id="keybindings">
+    <tr><th colspan="4">/keybindings — View Keybindings</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/keybindings [vim|emacs|default]</code></td>
+      <td class="cmd-desc">Show or switch keybinding preset. Supports default, vim, and emacs modes.</td>
+      <td class="cmd-example"><code>/keybindings vim</code></td>
+      <td class="cmd-related"><a href="#keyboard-shortcuts">Keyboard Shortcuts</a></td>
+    </tr>
+  </table>
+
+  <table id="help">
+    <tr><th colspan="4">/help — Show Help</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/help [command]</code></td>
+      <td class="cmd-desc">Display help for a specific command or list all commands. Press <code>?</code> as a shortcut.</td>
+      <td class="cmd-example"><code>/help</code> <code>/help model</code></td>
+      <td class="cmd-related"><a href="#commands">/commands</a></td>
+    </tr>
+  </table>
+
+  <table id="commands">
+    <tr><th colspan="4">/commands — List All Commands</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/commands [filter]</code></td>
+      <td class="cmd-desc">Browse all available commands. Optional filter matches command names.</td>
+      <td class="cmd-example"><code>/commands git</code></td>
+      <td class="cmd-related"><a href="#help">/help</a></td>
+    </tr>
+  </table>
+
+  <table id="tree">
+    <tr><th colspan="4">/tree — Show File Tree</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/tree [path] [--depth N]</code></td>
+      <td class="cmd-desc">Display directory tree. Supports depth limiting and filtering by extension.</td>
+      <td class="cmd-example"><code>/tree src/ --depth 3</code></td>
+      <td class="cmd-related"><a href="#directory">/directory</a> <a href="#add-dir">/add-dir</a></td>
+    </tr>
+  </table>
+
+  <table id="cancel">
+    <tr><th colspan="4">/cancel — Cancel Current Operation</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/cancel</code></td>
+      <td class="cmd-desc">Interrupt the current AI generation or tool execution. Press <code>Esc</code> as a shortcut.</td>
+      <td class="cmd-example"><code>/cancel</code></td>
+      <td class="cmd-related"><a href="#quit">/quit</a></td>
+    </tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <!-- SKILLS & EXTENSIONS -->
+  <!-- ============================================================ -->
+  <h2 id="skills-extensions">Skills &amp; Extensions</h2>
+
+  <table id="skills">
+    <tr><th colspan="4">/skills — Manage Skills</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/skills [list|enable|disable|info]</code></td>
+      <td class="cmd-desc">Browse, enable, or disable built-in and custom skills that extend AI capabilities.</td>
+      <td class="cmd-example"><code>/skills list</code> <code>/skills enable code-review</code></td>
+      <td class="cmd-related"><a href="#mcp">/mcp</a> <a href="#workflow">/workflow</a></td>
+    </tr>
+  </table>
+
+  <table id="mcp">
+    <tr><th colspan="4">/mcp — MCP Server Management</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/mcp [list|status]</code></td>
+      <td class="cmd-desc">View connected MCP (Model Context Protocol) servers and their status.</td>
+      <td class="cmd-example"><code>/mcp list</code> <code>/mcp status</code></td>
+      <td class="cmd-related"><a href="#mcp-tools">/mcp tools</a> <a href="#mcp-add">/mcp add</a></td>
+    </tr>
+  </table>
+
+  <table id="mcp-tools">
+    <tr><th colspan="4">/mcp tools — List MCP Tools</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/mcp tools [server]</code></td>
+      <td class="cmd-desc">List all tools exposed by connected MCP servers. Filter by server name.</td>
+      <td class="cmd-example"><code>/mcp tools</code> <code>/mcp tools filesystem</code></td>
+      <td class="cmd-related"><a href="#mcp">/mcp</a> <a href="#mcp-enable">/mcp enable|disable</a></td>
+    </tr>
+  </table>
+
+  <table id="mcp-enable">
+    <tr><th colspan="4">/mcp enable|disable — Toggle MCP Servers</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/mcp enable &lt;server&gt;</code></td>
+      <td class="cmd-desc">Connect to and activate an MCP server.</td>
+      <td class="cmd-example"><code>/mcp enable filesystem</code></td>
+      <td class="cmd-related"><a href="#mcp">/mcp</a></td>
+    </tr>
+    <tr>
+      <td><code>/mcp disable &lt;server&gt;</code></td>
+      <td class="cmd-desc">Disconnect from an MCP server.</td>
+      <td class="cmd-example"><code>/mcp disable filesystem</code></td>
+      <td class="cmd-related"><a href="#mcp">/mcp</a></td>
+    </tr>
+  </table>
+
+  <table id="mcp-add">
+    <tr><th colspan="4">/mcp add — Add MCP Server</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/mcp add &lt;name&gt; &lt;command&gt;</code></td>
+      <td class="cmd-desc">Register a new MCP server by providing its name and launch command. Stored in config.</td>
+      <td class="cmd-example"><code>/mcp add github npx @modelcontextprotocol/server-github</code></td>
+      <td class="cmd-related"><a href="#mcp">/mcp</a> <a href="#mcp-tools">/mcp tools</a></td>
+    </tr>
+  </table>
+
+  <table id="workflow">
+    <tr><th colspan="4">/workflow — Execute Workflow</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/workflow [name]</code></td>
+      <td class="cmd-desc">Run a predefined multi-step workflow (e.g., <code>deploy</code>, <code>release</code>, <code>lint-fix</code>). Without arguments, lists available workflows.</td>
+      <td class="cmd-example"><code>/workflow deploy</code></td>
+      <td class="cmd-related"><a href="#plan">/plan</a> <a href="#skills">/skills</a></td>
+    </tr>
+  </table>
+
+  <table id="agents">
+    <tr><th colspan="4">/agents — Manage Sub-Agents</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/agents [list|spawn|kill]</code></td>
+      <td class="cmd-desc">Manage parallel sub-agents that work on independent tasks simultaneously.</td>
+      <td class="cmd-example"><code>/agents list</code> <code>/agents spawn "write tests for auth"</code></td>
+      <td class="cmd-related"><a href="#workflow">/workflow</a> <a href="#skills">/skills</a></td>
+    </tr>
+  </table>
+
+  <table id="feedback">
+    <tr><th colspan="4">/feedback — Send Feedback</th></tr>
+    <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
+    <tr>
+      <td><code>/feedback [message]</code></td>
+      <td class="cmd-desc">Submit feedback, bug reports, or feature requests. Opens browser to the issue tracker.</td>
+      <td class="cmd-example"><code>/feedback the /plan command is great!</code></td>
+      <td class="cmd-related"><a href="#version">/version</a></td>
+    </tr>
+  </table>
+
+  <!-- ============================================================ -->
+  <!-- KEYBOARD SHORTCUTS -->
+  <!-- ============================================================ -->
+  <h2 id="keyboard-shortcuts">Keyboard Shortcuts</h2>
+
+  <div class="kb-grid">
+    <div class="kb-card" id="shortcuts-default">
+      <h4>Default Keybindings</h4>
+      <div class="kb-row"><span class="kb-key">Ctrl+C / Ctrl+Q</span><span class="kb-action">Quit</span></div>
+      <div class="kb-row"><span class="kb-key">Esc</span><span class="kb-action">Cancel current operation</span></div>
+      <div class="kb-row"><span class="kb-key">Ctrl+D</span><span class="kb-action">Show diff</span></div>
+      <div class="kb-row"><span class="kb-key">Ctrl+L</span><span class="kb-action">Check LSP diagnostics</span></div>
+      <div class="kb-row"><span class="kb-key">Ctrl+S</span><span class="kb-action">List sessions</span></div>
+      <div class="kb-row"><span class="kb-key">Ctrl+N</span><span class="kb-action">New session</span></div>
+      <div class="kb-row"><span class="kb-key">Ctrl+U</span><span class="kb-action">Clear input line</span></div>
+      <div class="kb-row"><span class="kb-key">Up / Down</span><span class="kb-action">Scroll output</span></div>
+      <div class="kb-row"><span class="kb-key">Y / N</span><span class="kb-action">Confirm / Deny prompts</span></div>
+      <div class="kb-row"><span class="kb-key">Shift+Tab</span><span class="kb-action">Cycle approval modes</span></div>
+      <div class="kb-row"><span class="kb-key">?</span><span class="kb-action">Show help</span></div>
+      <div class="kb-row"><span class="kb-key">! prefix</span><span class="kb-action">Quick shell command</span></div>
+    </div>
+
+    <div class="kb-card" id="shortcuts-vim">
+      <h4>Vim Keybindings</h4>
+      <div class="kb-row"><span class="kb-key">k</span><span class="kb-action">Scroll up</span></div>
+      <div class="kb-row"><span class="kb-key">j</span><span class="kb-action">Scroll down</span></div>
+      <div class="kb-row"><span class="kb-key">Ctrl+U</span><span class="kb-action">Page up</span></div>
+      <div class="kb-row"><span class="kb-key">Ctrl+D</span><span class="kb-action">Page down</span></div>
+      <div class="kb-row"><span class="kb-key">q</span><span class="kb-action">Quit</span></div>
+      <div class="kb-row"><span class="kb-key">: /</span><span class="kb-action">Enter command mode</span></div>
+    </div>
+
+    <div class="kb-card" id="shortcuts-emacs">
+      <h4>Emacs Keybindings</h4>
+      <div class="kb-row"><span class="kb-key">Ctrl+P</span><span class="kb-action">Scroll up</span></div>
+      <div class="kb-row"><span class="kb-key">Ctrl+N</span><span class="kb-action">Scroll down</span></div>
+      <div class="kb-row"><span class="kb-key">Alt+V</span><span class="kb-action">Page up</span></div>
+      <div class="kb-row"><span class="kb-key">Ctrl+V</span><span class="kb-action">Page down</span></div>
+      <div class="kb-row"><span class="kb-key">Ctrl+K</span><span class="kb-action">Clear input line</span></div>
+      <div class="kb-row"><span class="kb-key">Ctrl+G</span><span class="kb-action">Cancel operation</span></div>
+    </div>
+  </div>
+
+  <div style="margin-top: 48px; padding: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); font-size: 13px;">
+    <strong style="color: var(--accent);">Tip:</strong> Type <code>/</code> at any time to see autocomplete suggestions. Use <code>Tab</code> to cycle through options. All commands support <code>--help</code> for additional flags.
+  </div>
+
+</div>
+<script src="../js/nav.js"></script>
+<script src="../js/footer.js"></script>
+</body>
+</html>

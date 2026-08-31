@@ -1,0 +1,1992 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Configuration Reference — Automergent</title>
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji';
+            background-color: #0d1117;
+            color: #e6edf3;
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        .page-wrapper {
+            display: flex;
+            min-height: 100vh;
+        }
+
+        /* ── Sidebar ── */
+        .sidebar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 280px;
+            height: 100vh;
+            background: #161b22;
+            border-right: 1px solid #21262d;
+            overflow-y: auto;
+            padding: 24px 0;
+            z-index: 100;
+        }
+
+        .sidebar-logo {
+            padding: 0 20px 20px;
+            border-bottom: 1px solid #21262d;
+            margin-bottom: 16px;
+        }
+
+        .sidebar-logo a {
+            text-decoration: none;
+            color: #e6edf3;
+            font-size: 18px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .sidebar-logo a span { color: #58a6ff; }
+
+        .sidebar nav { padding: 0 12px; }
+
+        .sidebar nav a {
+            display: block;
+            padding: 6px 12px;
+            color: #8b949e;
+            text-decoration: none;
+            font-size: 13px;
+            border-radius: 6px;
+            transition: all 0.15s;
+        }
+
+        .sidebar nav a:hover { color: #e6edf3; background: #21262d; }
+        .sidebar nav a.active { color: #58a6ff; background: rgba(88,166,255,0.08); }
+
+        .sidebar nav .nav-section {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #484f58;
+            padding: 16px 12px 6px;
+        }
+
+        /* ── Main Content ── */
+        .main-content {
+            margin-left: 280px;
+            flex: 1;
+            max-width: 960px;
+            padding: 48px 56px 96px;
+        }
+
+        h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; color: #e6edf3; }
+        .subtitle { color: #8b949e; font-size: 16px; margin-bottom: 40px; }
+
+        h2 {
+            font-size: 22px;
+            font-weight: 600;
+            color: #e6edf3;
+            margin-top: 56px;
+            margin-bottom: 16px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #21262d;
+        }
+
+        h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #e6edf3;
+            margin-top: 32px;
+            margin-bottom: 12px;
+        }
+
+        p, li { font-size: 15px; color: #e6edf3; }
+        p { margin-bottom: 16px; }
+        ul, ol { margin-bottom: 16px; padding-left: 24px; }
+        li { margin-bottom: 6px; }
+
+        a { color: #58a6ff; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 13px;
+            background: #1c2129;
+            padding: 2px 6px;
+            border-radius: 4px;
+            color: #79c0ff;
+        }
+
+        pre {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 8px;
+            padding: 20px 24px;
+            overflow-x: auto;
+            margin-bottom: 24px;
+            position: relative;
+        }
+
+        pre code {
+            background: transparent;
+            padding: 0;
+            color: #e6edf3;
+            font-size: 13px;
+            line-height: 1.55;
+        }
+
+        .code-label {
+            position: absolute;
+            top: 8px;
+            right: 12px;
+            font-size: 11px;
+            color: #484f58;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* ── YAML Syntax Colors ── */
+        .yaml-key { color: #7ee787; }
+        .yaml-val { color: #a5d6ff; }
+        .yaml-str { color: #a5d6ff; }
+        .yaml-comment { color: #484f58; font-style: italic; }
+        .yaml-bool { color: #ff7b72; }
+        .yaml-num { color: #79c0ff; }
+        .yaml-null { color: #ff7b72; }
+
+        /* ── Tables ── */
+        .table-wrapper {
+            overflow-x: auto;
+            margin-bottom: 24px;
+            border: 1px solid #21262d;
+            border-radius: 8px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        thead th {
+            background: #161b22;
+            color: #8b949e;
+            font-weight: 600;
+            text-align: left;
+            padding: 12px 16px;
+            border-bottom: 1px solid #21262d;
+            white-space: nowrap;
+        }
+
+        tbody td {
+            padding: 10px 16px;
+            border-bottom: 1px solid #21262d;
+            vertical-align: top;
+        }
+
+        tbody tr:last-child td { border-bottom: none; }
+        tbody tr:hover { background: rgba(88,166,255,0.04); }
+
+        td code {
+            font-size: 12px;
+            background: #1c2129;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+
+        /* ── Callout Boxes ── */
+        .callout {
+            border-radius: 8px;
+            padding: 16px 20px;
+            margin-bottom: 24px;
+            border-left: 4px solid;
+            font-size: 14px;
+        }
+
+        .callout-info { background: rgba(88,166,255,0.08); border-color: #58a6ff; }
+        .callout-warn { background: rgba(210,153,34,0.08); border-color: #d29922; }
+        .callout-tip { background: rgba(63,185,80,0.08); border-color: #3fb950; }
+        .callout-danger { background: rgba(248,81,73,0.08); border-color: #f85149; }
+
+        .callout strong { color: #e6edf3; }
+
+        /* ── Config Section Card ── */
+        .config-section {
+            background: #161b22;
+            border: 1px solid #21262d;
+            border-radius: 8px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+
+        .config-section h3 {
+            margin-top: 0;
+            color: #58a6ff;
+            font-size: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .config-section h3::before {
+            content: '';
+            display: inline-block;
+            width: 3px;
+            height: 16px;
+            background: #58a6ff;
+            border-radius: 2px;
+        }
+
+        /* ── Tag / Badge ── */
+        .tag {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+
+        .tag-required { background: rgba(248,81,73,0.15); color: #f85149; }
+        .tag-optional { background: rgba(88,166,255,0.12); color: #58a6ff; }
+        .tag-default { background: rgba(63,185,80,0.12); color: #3fb950; }
+
+        /* ── Scrollbar ── */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #484f58; }
+
+        /* ── Responsive ── */
+        @media (max-width: 960px) {
+            .sidebar { display: none; }
+            .main-content { margin-left: 0; padding: 32px 24px 64px; }
+        }
+    </style>
+</head>
+<body>
+<div class="page-wrapper">
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     SIDEBAR
+     ═══════════════════════════════════════════════════════════════════════ -->
+<aside class="sidebar">
+    <div class="sidebar-logo"><a href="/"><span>⚡</span> Automergent</a></div>
+    <nav>
+        <div class="nav-section">Getting Started</div>
+        <a href="/">Overview</a>
+        <a href="/installation.html">Installation</a>
+        <a href="/quickstart.html">Quickstart</a>
+
+        <div class="nav-section">Reference</div>
+        <a href="/configuration.html" class="active">Configuration</a>
+        <a href="/cli-flags.html">CLI Flags</a>
+        <a href="/environment-variables.html">Environment Variables</a>
+        <a href="/providers.html">Providers</a>
+        <a href="/models.html">Models</a>
+
+        <div class="nav-section">Features</div>
+        <a href="/tools.html">Tools</a>
+        <a href="/modes.html">Modes</a>
+        <a href="/sessions.html">Sessions</a>
+        <a href="/context-management.html">Context Management</a>
+        <a href="/subagents.html">Sub-Agents</a>
+
+        <div class="nav-section">Advanced</div>
+        <a href="/security.html">Security</a>
+        <a href="/mcp.html">MCP Servers</a>
+        <a href="/lsp.html">LSP Integration</a>
+        <a href="/hooks.html">Hooks</a>
+        <a href="/debugging.html">Debugging</a>
+
+        <div class="nav-section">Customization</div>
+        <a href="/themes.html">Themes</a>
+        <a href="/keybindings.html">Keybindings</a>
+        <a href="/skills.html">Skills</a>
+    </nav>
+</aside>
+
+<!-- ═══════════════════════════════════════════════════════════════════════
+     MAIN CONTENT
+     ═══════════════════════════════════════════════════════════════════════ -->
+<main class="main-content">
+
+<h1>Configuration Reference</h1>
+<p class="subtitle">Complete reference for all Automergent configuration options, environment variables, and CLI flags.</p>
+
+<!-- ───────────────────────────────────────────────────────────────────────
+     1. CONFIG FILE LOCATIONS
+     ─────────────────────────────────────────────────────────────────────── -->
+<h2 id="config-locations">Config File Locations</h2>
+
+<p>Automergent uses a layered configuration system. Settings are loaded in order, with later sources overriding earlier ones:</p>
+
+<div class="config-section">
+    <h3>Configuration Layer Priority</h3>
+    <ol>
+        <li><strong>Hard-coded defaults</strong> — built into the binary</li>
+        <li><strong>Global config</strong> — <code>~/.automergent/config.yaml</code></li>
+        <li><strong>Project config</strong> — <code>.automergent/config.yaml</code> (overrides global)</li>
+        <li><strong>Environment variables</strong> — take precedence over file-based config</li>
+        <li><strong>CLI flags</strong> — highest precedence, override everything</li>
+    </ol>
+</div>
+
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr>
+                <th>Layer</th>
+                <th>Path</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><strong>Global</strong></td>
+                <td><code>~/.automergent/config.yaml</code></td>
+                <td>User-wide settings applied to all projects. Created on first run.</td>
+            </tr>
+            <tr>
+                <td><strong>Project</strong></td>
+                <td><code>.automergent/config.yaml</code></td>
+                <td>Project-specific overrides. Committed to version control for team-wide settings.</td>
+            </tr>
+            <tr>
+                <td><strong>Environment</strong></td>
+                <td>Shell environment</td>
+                <td><code>AUTOMERGENT_*</code> prefixed variables override file-based config. API keys are always env-first.</td>
+            </tr>
+            <tr>
+                <td><strong>CLI Flags</strong></td>
+                <td>Command line</td>
+                <td>One-shot overrides. Not persisted. Highest priority.</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="callout callout-info">
+    <strong>Note:</strong> The config file supports both YAML and JSON formats. YAML is the default and recommended format.
+    You can specify an alternate config file with <code>--config &lt;path&gt;</code>.
+</div>
+
+<!-- ───────────────────────────────────────────────────────────────────────
+     2. FULL CONFIG SCHEMA
+     ─────────────────────────────────────────────────────────────────────── -->
+<h2 id="config-schema">Full Config Schema</h2>
+
+<p>Below is every configuration option organized by section. Each option shows its type, default value, and constraints.</p>
+
+<!-- ═══ Core ═══ -->
+<div class="config-section">
+    <h3>Core</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>provider</code> <span class="tag tag-required">required</span></td>
+                    <td><code>string</code></td>
+                    <td><code>"google"</code></td>
+                    <td>AI provider. One of: <code>google-aistudio</code>, <code>google-vertex</code>, <code>custom</code>, or legacy aliases <code>google</code>, <code>openai</code>, <code>anthropic</code>, <code>deepseek</code>, <code>ollama</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>model</code> <span class="tag tag-required">required</span></td>
+                    <td><code>string</code></td>
+                    <td><code>"gemini-3.6-flash"</code></td>
+                    <td>Model identifier. Must be non-empty.</td>
+                </tr>
+                <tr>
+                    <td><code>mode</code> <span class="tag tag-required">required</span></td>
+                    <td><code>string</code></td>
+                    <td><code>"edit"</code></td>
+                    <td>Operating mode. One of: <code>edit</code>, <code>code</code>, <code>chat</code>, <code>agent</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>theme</code></td>
+                    <td><code>string</code></td>
+                    <td><code>"modern"</code></td>
+                    <td>UI theme. One of: <code>modern</code>, <code>catppuccin</code>, <code>dracula</code>, <code>nord</code>, <code>gruvbox</code>, <code>onedark</code>, <code>monokai</code>, <code>tokyonight</code>, <code>default</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>keybindings</code></td>
+                    <td><code>string</code></td>
+                    <td><code>"default"</code></td>
+                    <td>Keybinding preset. One of: <code>default</code>, <code>vim</code>, <code>emacs</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>layout</code></td>
+                    <td><code>string</code></td>
+                    <td><code>"default"</code></td>
+                    <td>UI layout mode. One of: <code>default</code>, <code>minimal</code>, <code>full</code>, <code>split</code>.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Session ═══ -->
+<div class="config-section">
+    <h3>Session</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>autoSave</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Automatically save session state at checkpoint intervals.</td>
+                </tr>
+                <tr>
+                    <td><code>checkpointInterval</code></td>
+                    <td><code>int</code></td>
+                    <td><code>5</code></td>
+                    <td>Interval in minutes between auto-checkpoints. Minimum: 1.</td>
+                </tr>
+                <tr>
+                    <td><code>sessionDir</code></td>
+                    <td><code>string</code></td>
+                    <td><code>~/.automergent/sessions</code></td>
+                    <td>Directory where session transcripts are stored.</td>
+                </tr>
+                <tr>
+                    <td><code>maxSessions</code></td>
+                    <td><code>int</code></td>
+                    <td><code>100</code></td>
+                    <td>Maximum number of sessions to retain. Oldest are pruned first.</td>
+                </tr>
+                <tr>
+                    <td><code>maxSessionAge</code></td>
+                    <td><code>duration</code></td>
+                    <td><em>unlimited</em></td>
+                    <td>Maximum age of sessions (e.g., <code>"30d"</code>, <code>"72h"</code>). Empty means no age limit.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Context ═══ -->
+<div class="config-section">
+    <h3>Context Management</h3>
+    <div class="callout callout-tip">
+        <strong>Tip:</strong> Automergent's context system manages a 1M-token ceiling. The <code>maxContextTokens</code> setting controls the soft limit per session; auto-compression kicks in when usage exceeds the configured thresholds.
+    </div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>maxContextTokens</code></td>
+                    <td><code>int</code></td>
+                    <td><code>128000</code></td>
+                    <td>Soft context window limit. Hard ceiling is 1,048,576 (1M). Larger values are clamped.</td>
+                </tr>
+                <tr>
+                    <td><code>maxToolOutputChars</code></td>
+                    <td><code>int</code></td>
+                    <td><code>32000</code></td>
+                    <td>Maximum characters retained from tool output before truncation.</td>
+                </tr>
+                <tr>
+                    <td><code>warnAtContextFraction</code></td>
+                    <td><code>float</code></td>
+                    <td><code>0.8</code></td>
+                    <td>Warn when context usage exceeds this fraction (0–1) of <code>maxContextTokens</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>autoCompressAt</code></td>
+                    <td><code>float</code></td>
+                    <td><code>0.9</code></td>
+                    <td>Automatically compress context when usage exceeds this fraction (0–1).</td>
+                </tr>
+                <tr>
+                    <td><code>compressionKeepRecent</code></td>
+                    <td><code>int</code></td>
+                    <td><code>10</code></td>
+                    <td>Number of most recent messages to preserve during auto-compression.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Model ═══ -->
+<div class="config-section">
+    <h3>Model</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>fastModel</code></td>
+                    <td><code>string</code></td>
+                    <td><em>empty (use main model)</em></td>
+                    <td>Cheaper model for read-only subagents (explore, review). Empty falls back to the primary model.</td>
+                </tr>
+                <tr>
+                    <td><code>thinkingBudget</code></td>
+                    <td><code>int</code></td>
+                    <td><em>provider default</em></td>
+                    <td>Override Gemini thinking token budget when &gt; 0.</td>
+                </tr>
+                <tr>
+                    <td><code>effort</code></td>
+                    <td><code>string</code></td>
+                    <td><em>provider default</em></td>
+                    <td>Thinking effort level. One of: <code>minimal</code>, <code>low</code>, <code>medium</code>, <code>high</code>, <code>max</code>.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ File Handling ═══ -->
+<div class="config-section">
+    <h3>File Handling</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>maxAutoReadFileSize</code></td>
+                    <td><code>int</code></td>
+                    <td><code>524288</code> (512 KB)</td>
+                    <td>Maximum file size in bytes for automatic reads. Larger files require explicit <code>read</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>maxTreeFiles</code></td>
+                    <td><code>int</code></td>
+                    <td><code>1000</code></td>
+                    <td>Maximum files shown in directory tree output.</td>
+                </tr>
+                <tr>
+                    <td><code>maxTreeDepth</code></td>
+                    <td><code>int</code></td>
+                    <td><code>10</code></td>
+                    <td>Maximum directory depth in tree output.</td>
+                </tr>
+                <tr>
+                    <td><code>excludePatterns</code></td>
+                    <td><code>[]string</code></td>
+                    <td><em>see below</em></td>
+                    <td>Glob patterns to exclude from tree/glob/search operations.</td>
+                </tr>
+                <tr>
+                    <td><code>contextFiles</code></td>
+                    <td><code>[]string</code></td>
+                    <td><em>empty</em></td>
+                    <td>Extra files to inject into context at session start (paths relative to project root).</td>
+                </tr>
+                <tr>
+                    <td><code>skillsDir</code></td>
+                    <td><code>string</code></td>
+                    <td><code>~/.automergent/skills</code></td>
+                    <td>Directory containing custom skill definitions.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p><strong>Default exclude patterns:</strong></p>
+    <pre><code><span class="yaml-comment"># Applied automatically unless overridden</span>
+<span class="yaml-key">excludePatterns</span>:
+  - <span class="yaml-str">".git"</span>
+  - <span class="yaml-str">"node_modules"</span>
+  - <span class="yaml-str">".venv"</span>
+  - <span class="yaml-str">"__pycache__"</span>
+  - <span class="yaml-str">"*.pyc"</span>
+  - <span class="yaml-str">"*.o"</span>
+  - <span class="yaml-str">"*.a"</span>
+  - <span class="yaml-str">"vendor"</span></code></pre>
+</div>
+
+<!-- ═══ Display ═══ -->
+<div class="config-section">
+    <h3>Display</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>noAnimation</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>false</code></td>
+                    <td>Disable TUI animations (useful for CI or slow terminals).</td>
+                </tr>
+                <tr>
+                    <td><code>noColor</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>false</code></td>
+                    <td>Disable ANSI color output entirely.</td>
+                </tr>
+                <tr>
+                    <td><code>noTui</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>false</code></td>
+                    <td>Run in non-interactive CLI-only mode. Never persisted to config file.</td>
+                </tr>
+                <tr>
+                    <td><code>output</code></td>
+                    <td><code>string</code></td>
+                    <td><code>"text"</code></td>
+                    <td>Output format for non-TUI mode.</td>
+                </tr>
+                <tr>
+                    <td><code>quiet</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>false</code></td>
+                    <td>Suppress non-essential output.</td>
+                </tr>
+                <tr>
+                    <td><code>verbose</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>false</code></td>
+                    <td>Enable verbose/detailed output.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Edit ═══ -->
+<div class="config-section">
+    <h3>Edit</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>editReview</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>false</code></td>
+                    <td>Route file mutations through pending-review flow. Proposals render in the diff pane and touch disk only on accept.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Security ═══ -->
+<div class="config-section">
+    <h3>Security</h3>
+    <div class="callout callout-danger">
+        <strong>Warning:</strong> Running Automergent as root or without a sandbox increases risk. Always use <code>requireGitForAutoModes: true</code> in production environments.
+    </div>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>security.sandbox</code></td>
+                    <td><code>string</code></td>
+                    <td><code>"auto"</code></td>
+                    <td>Sandbox mode. One of: <code>off</code>, <code>auto</code>, <code>strict</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>security.blockedWritePaths</code></td>
+                    <td><code>[]string</code></td>
+                    <td><em>see below</em></td>
+                    <td>Glob patterns for paths that cannot be written to.</td>
+                </tr>
+                <tr>
+                    <td><code>security.allowedWritePaths</code></td>
+                    <td><code>[]string</code></td>
+                    <td><em>empty</em></td>
+                    <td>Explicit allowlist of writable paths. When non-empty, only these paths may be modified.</td>
+                </tr>
+                <tr>
+                    <td><code>security.stripEnvVarPatterns</code></td>
+                    <td><code>[]string</code></td>
+                    <td><em>see below</em></td>
+                    <td>Environment variable patterns to strip from tool output (prevents secret leakage).</td>
+                </tr>
+                <tr>
+                    <td><code>security.requireGitForAutoModes</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Require a clean git working directory before enabling auto/accept-edits modes.</td>
+                </tr>
+                <tr>
+                    <td><code>security.rootRiskAcknowledged</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>false</code></td>
+                    <td>Acknowledge risk of running as root. Required to disable sandbox warnings.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p><strong>Default blocked write paths:</strong></p>
+    <pre><code><span class="yaml-key">security</span>:
+  <span class="yaml-key">blockedWritePaths</span>:
+    - <span class="yaml-str">".git/**"</span>
+    - <span class="yaml-str">"~/.ssh/**"</span>
+    - <span class="yaml-str">"~/.gnupg/**"</span>
+    - <span class="yaml-str">"~/.aws/**"</span>
+    - <span class="yaml-str">"~/.kube/**"</span></code></pre>
+    <p><strong>Default env var strip patterns:</strong></p>
+    <pre><code><span class="yaml-key">security</span>:
+  <span class="yaml-key">stripEnvVarPatterns</span>:
+    - <span class="yaml-str">"*_SECRET"</span>
+    - <span class="yaml-str">"*_PASSWORD"</span>
+    - <span class="yaml-str">"*_TOKEN"</span>
+    - <span class="yaml-str">"*_KEY"</span>
+    - <span class="yaml-str">"AWS_*"</span>
+    - <span class="yaml-str">"GEMINI_*"</span>
+    - <span class="yaml-str">"HTTP_PROXY"</span>
+    - <span class="yaml-str">"HTTPS_PROXY"</span>
+    - <span class="yaml-str">"ALL_PROXY"</span>
+    - <span class="yaml-str">"NO_PROXY"</span>
+    - <span class="yaml-str">"http_proxy"</span>
+    - <span class="yaml-str">"https_proxy"</span>
+    - <span class="yaml-str">"all_proxy"</span>
+    - <span class="yaml-str">"no_proxy"</span></code></pre>
+</div>
+
+<!-- ═══ Per-Tool ═══ -->
+<div class="config-section">
+    <h3>Per-Tool Configuration</h3>
+    <p>Individual tools can be enabled/disabled, given custom timeouts, and configured for confirmation behavior.</p>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>tools.&lt;name&gt;.enabled</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Enable or disable the tool entirely.</td>
+                </tr>
+                <tr>
+                    <td><code>tools.&lt;name&gt;.confirmationRequired</code></td>
+                    <td><code>string</code></td>
+                    <td><code>"always"</code></td>
+                    <td>Confirmation policy. One of: <code>always</code>, <code>write</code>, <code>never</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>tools.&lt;name&gt;.timeout</code></td>
+                    <td><code>duration</code></td>
+                    <td><code>"30s"</code></td>
+                    <td>Maximum execution time (e.g., <code>"5s"</code>, <code>"2m"</code>).</td>
+                </tr>
+                <tr>
+                    <td><code>tools.&lt;name&gt;.maxOutputBytes</code></td>
+                    <td><code>int</code></td>
+                    <td><em>varies by tool</em></td>
+                    <td>Maximum output bytes before truncation.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p><strong>Built-in tool defaults:</strong></p>
+    <pre><code><span class="yaml-key">tools</span>:
+  <span class="yaml-key">shell</span>:
+    <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+    <span class="yaml-key">confirmationRequired</span>: <span class="yaml-str">"always"</span>
+    <span class="yaml-key">timeout</span>: <span class="yaml-str">"30s"</span>
+    <span class="yaml-key">maxOutputBytes</span>: <span class="yaml-num">1048576</span>  <span class="yaml-comment"># 1 MB</span>
+  <span class="yaml-key">filesystem</span>:
+    <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+    <span class="yaml-key">confirmationRequired</span>: <span class="yaml-str">"write"</span>
+    <span class="yaml-key">maxOutputBytes</span>: <span class="yaml-num">524288</span>   <span class="yaml-comment"># 512 KB</span>
+  <span class="yaml-key">git</span>:
+    <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+    <span class="yaml-key">confirmationRequired</span>: <span class="yaml-str">"never"</span>
+  <span class="yaml-key">web</span>:
+    <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+    <span class="yaml-key">confirmationRequired</span>: <span class="yaml-str">"never"</span>
+    <span class="yaml-key">timeout</span>: <span class="yaml-str">"15s"</span></code></pre>
+</div>
+
+<!-- ═══ LSP ═══ -->
+<div class="config-section">
+    <h3>LSP Integration</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>lsp.enabled</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Enable Language Server Protocol integration.</td>
+                </tr>
+                <tr>
+                    <td><code>lsp.servers</code></td>
+                    <td><code>map[string]string</code></td>
+                    <td><em>empty</em></td>
+                    <td>Map of language → server command (e.g., <code>{"go": "gopls"}"</code>).</td>
+                </tr>
+                <tr>
+                    <td><code>lsp.startupTimeout</code></td>
+                    <td><code>duration</code></td>
+                    <td><code>"10s"</code></td>
+                    <td>Timeout for LSP server initialization.</td>
+                </tr>
+                <tr>
+                    <td><code>lsp.requestTimeout</code></td>
+                    <td><code>duration</code></td>
+                    <td><code>"5s"</code></td>
+                    <td>Timeout for individual LSP requests.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ MCP ═══ -->
+<div class="config-section">
+    <h3>MCP Servers</h3>
+    <p>Model Context Protocol (MCP) servers extend Automergent with custom tool providers.</p>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>mcp.servers.&lt;name&gt;.type</code></td>
+                    <td><code>string</code></td>
+                    <td>Server type: <code>"stdio"</code> or <code>"sse"</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>mcp.servers.&lt;name&gt;.command</code></td>
+                    <td><code>[]string</code></td>
+                    <td>Command + args for stdio servers (e.g., <code>["npx", "-y", "@modelcontextprotocol/server-filesystem"]</code>).</td>
+                </tr>
+                <tr>
+                    <td><code>mcp.servers.&lt;name&gt;.url</code></td>
+                    <td><code>string</code></td>
+                    <td>URL for SSE servers.</td>
+                </tr>
+                <tr>
+                    <td><code>mcp.servers.&lt;name&gt;.env</code></td>
+                    <td><code>map[string]string</code></td>
+                    <td>Environment variables passed to the server process.</td>
+                </tr>
+                <tr>
+                    <td><code>mcp.servers.&lt;name&gt;.auth</code></td>
+                    <td><code>string</code></td>
+                    <td>Authentication token for SSE servers.</td>
+                </tr>
+                <tr>
+                    <td><code>mcp.servers.&lt;name&gt;.timeout</code></td>
+                    <td><code>duration</code></td>
+                    <td>Connection timeout (e.g., <code>"30s"</code>).</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <pre><code><span class="yaml-key">mcp</span>:
+  <span class="yaml-key">servers</span>:
+    <span class="yaml-key">filesystem</span>:
+      <span class="yaml-key">type</span>: <span class="yaml-str">"stdio"</span>
+      <span class="yaml-key">command</span>:
+        - <span class="yaml-str">"npx"</span>
+        - <span class="yaml-str">"-y"</span>
+        - <span class="yaml-str">"@modelcontextprotocol/server-filesystem"</span>
+        - <span class="yaml-str">"/path/to/allowed/dir"</span>
+    <span class="yaml-key">remote-tools</span>:
+      <span class="yaml-key">type</span>: <span class="yaml-str">"sse"</span>
+      <span class="yaml-key">url</span>: <span class="yaml-str">"https://mcp.example.com/sse"</span>
+      <span class="yaml-key">auth</span>: <span class="yaml-str">"Bearer ${MCP_TOKEN}"</span>
+      <span class="yaml-key">timeout</span>: <span class="yaml-str">"30s"</span></code></pre>
+</div>
+
+<!-- ═══ Logging ═══ -->
+<div class="config-section">
+    <h3>Logging</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>log.level</code></td>
+                    <td><code>string</code></td>
+                    <td><code>"warn"</code></td>
+                    <td>Log verbosity. One of: <code>debug</code>, <code>info</code>, <code>warn</code>, <code>error</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>log.file</code></td>
+                    <td><code>string</code></td>
+                    <td><code>~/.automergent/automergent.log</code></td>
+                    <td>Path to the log file.</td>
+                </tr>
+                <tr>
+                    <td><code>log.maxSize</code></td>
+                    <td><code>size</code></td>
+                    <td><code>"50MB"</code></td>
+                    <td>Maximum log file size before rotation.</td>
+                </tr>
+                <tr>
+                    <td><code>log.maxBackups</code></td>
+                    <td><code>int</code></td>
+                    <td><code>3</code></td>
+                    <td>Maximum number of rotated log files to keep.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Providers ═══ -->
+<div class="config-section">
+    <h3>Providers</h3>
+    <p>Per-provider configuration. Keys are provider identifiers (e.g., <code>google-aistudio</code>, <code>openai</code>, <code>anthropic</code>).</p>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.apiKey</code></td>
+                    <td><code>string</code></td>
+                    <td>API key. Use <code>"${ENV_VAR}"</code> syntax for env var interpolation.</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.baseUrl</code></td>
+                    <td><code>string</code></td>
+                    <td>Custom API endpoint URL.</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.modelApiUrl</code></td>
+                    <td><code>string</code></td>
+                    <td>Endpoint path for fetching model lists (e.g., <code>"/v1/models"</code>).</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.defaultModel</code></td>
+                    <td><code>string</code></td>
+                    <td>Default model when none is configured.</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.orgId</code></td>
+                    <td><code>string</code></td>
+                    <td>Organization ID (OpenAI).</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.project</code></td>
+                    <td><code>string</code></td>
+                    <td>GCP project ID (Vertex AI).</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.location</code></td>
+                    <td><code>string</code></td>
+                    <td>GCP region (Vertex AI, e.g., <code>"us-central1"</code>).</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.apiType</code></td>
+                    <td><code>string</code></td>
+                    <td>API protocol: <code>"openai"</code>, <code>"anthropic"</code>, <code>"gemini"</code>, <code>"custom"</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.backend</code></td>
+                    <td><code>string</code></td>
+                    <td>Provider backend: <code>"aistudio"</code> or <code>"vertex"</code> (Google only).</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.effort</code></td>
+                    <td><code>string</code></td>
+                    <td>Default effort level for this provider.</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.thinkingLevel</code></td>
+                    <td><code>string</code></td>
+                    <td>Default thinking level for this provider.</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.temperature</code></td>
+                    <td><code>*float</code></td>
+                    <td>Sampling temperature (0.0–2.0). <code>null</code> uses provider default.</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.maxTokens</code></td>
+                    <td><code>int</code></td>
+                    <td>Maximum tokens in completion. 0 = provider default.</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.timeoutSeconds</code></td>
+                    <td><code>int</code></td>
+                    <td>Request timeout in seconds. 0 = provider default.</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.maxRetries</code></td>
+                    <td><code>int</code></td>
+                    <td>Maximum retry attempts on failure.</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.headers</code></td>
+                    <td><code>map[string]string</code></td>
+                    <td>Custom HTTP headers sent with requests.</td>
+                </tr>
+                <tr>
+                    <td><code>providers.&lt;name&gt;.models</code></td>
+                    <td><code>map[string]ModelConfig</code></td>
+                    <td>Per-model overrides (see below).</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <p><strong>Model-level config</strong> (under <code>providers.&lt;name&gt;.models.&lt;model&gt;</code>):</p>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>apiKey</code></td>
+                    <td><code>string</code></td>
+                    <td>Model-specific API key override.</td>
+                </tr>
+                <tr>
+                    <td><code>baseUrl</code></td>
+                    <td><code>string</code></td>
+                    <td>Model-specific endpoint override.</td>
+                </tr>
+                <tr>
+                    <td><code>displayName</code></td>
+                    <td><code>string</code></td>
+                    <td>Human-readable name for UI display.</td>
+                </tr>
+                <tr>
+                    <td><code>contextLimit</code></td>
+                    <td><code>int</code></td>
+                    <td>Context window size in tokens.</td>
+                </tr>
+                <tr>
+                    <td><code>inputPrice</code></td>
+                    <td><code>float</code></td>
+                    <td>Price per million input tokens.</td>
+                </tr>
+                <tr>
+                    <td><code>outputPrice</code></td>
+                    <td><code>float</code></td>
+                    <td>Price per million output tokens.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Git ═══ -->
+<div class="config-section">
+    <h3>Git</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>git.coAuthor</code></td>
+                    <td><code>string</code></td>
+                    <td><code>"ask"</code></td>
+                    <td>Co-author policy: <code>"always"</code>, <code>"never"</code>, or <code>"ask"</code>.</td>
+                </tr>
+                <tr>
+                    <td><code>git.coAuthorTrailer</code></td>
+                    <td><code>string</code></td>
+                    <td><code>"Co-authored-by: Automergent &lt;automergent-bot@users.noreply.github.com&gt;"</code></td>
+                    <td>Custom co-author trailer line appended to commits.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Diagnostics ═══ -->
+<div class="config-section">
+    <h3>Diagnostics</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>diagnostics.enabled</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Enable compiler/diagnostic error detection.</td>
+                </tr>
+                <tr>
+                    <td><code>diagnostics.showInRead</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Display diagnostics inline when reading files.</td>
+                </tr>
+                <tr>
+                    <td><code>diagnostics.blockOnError</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Block agent execution when a diagnostic error is detected.</td>
+                </tr>
+                <tr>
+                    <td><code>diagnostics.blockOnWarning</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>false</code></td>
+                    <td>Block agent execution when a diagnostic warning is detected.</td>
+                </tr>
+                <tr>
+                    <td><code>diagnostics.maxFileSizeBytes</code></td>
+                    <td><code>int64</code></td>
+                    <td><code>1048576</code> (1 MB)</td>
+                    <td>Maximum file size to parse for diagnostics.</td>
+                </tr>
+                <tr>
+                    <td><code>diagnostics.cacheDurationSec</code></td>
+                    <td><code>int</code></td>
+                    <td><code>30</code></td>
+                    <td>Duration in seconds to cache diagnostic results.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Cache ═══ -->
+<div class="config-section">
+    <h3>Cache</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>cache.prompt.enabled</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Enable provider prompt caching (saves tokens on repeated prompts).</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Privacy ═══ -->
+<div class="config-section">
+    <h3>Privacy</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>zeroDataRetention</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>false</code></td>
+                    <td>Request zero data retention from supported providers.</td>
+                </tr>
+                <tr>
+                    <td><code>telemetry</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Enable anonymous usage telemetry.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Debug ═══ -->
+<div class="config-section">
+    <h3>Debug</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>debug.enabled</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Enable debug mode for API request/response logging.</td>
+                </tr>
+                <tr>
+                    <td><code>debug.directory</code></td>
+                    <td><code>string</code></td>
+                    <td><code>~/.automergent/debug</code></td>
+                    <td>Directory to store debug logs.</td>
+                </tr>
+                <tr>
+                    <td><code>debug.saveRequests</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Save raw API request payloads.</td>
+                </tr>
+                <tr>
+                    <td><code>debug.saveResponses</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Save raw API response payloads.</td>
+                </tr>
+                <tr>
+                    <td><code>debug.maxFileSize</code></td>
+                    <td><code>int</code></td>
+                    <td><code>10</code></td>
+                    <td>Maximum debug log file size in MB. 0 = unlimited.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Provider Fallback ═══ -->
+<div class="config-section">
+    <h3>Provider Fallback</h3>
+    <p>Define fallback providers that are tried when the primary provider fails. Falls back in list order.</p>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>providerFallback</code></td>
+                    <td><code>[]FallbackProvider</code></td>
+                    <td>Ordered list of fallback providers.</td>
+                </tr>
+                <tr>
+                    <td><code>providerFallback[].provider</code></td>
+                    <td><code>string</code></td>
+                    <td>Fallback provider identifier.</td>
+                </tr>
+                <tr>
+                    <td><code>providerFallback[].model</code></td>
+                    <td><code>string</code></td>
+                    <td>Fallback model identifier.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <pre><code><span class="yaml-key">providerFallback</span>:
+  - <span class="yaml-key">provider</span>: <span class="yaml-str">"google-aistudio"</span>
+    <span class="yaml-key">model</span>: <span class="yaml-str">"gemini-3.6-flash"</span>
+  - <span class="yaml-key">provider</span>: <span class="yaml-str">"custom"</span>
+    <span class="yaml-key">model</span>: <span class="yaml-str">"deepseek-chat"</span></code></pre>
+</div>
+
+<!-- ═══ Notifications ═══ -->
+<div class="config-section">
+    <h3>Notifications</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>notifications.desktop</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>false</code></td>
+                    <td>Enable desktop notifications for task completion.</td>
+                </tr>
+                <tr>
+                    <td><code>notifications.bell</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Ring terminal bell on notification.</td>
+                </tr>
+                <tr>
+                    <td><code>notifications.contextWarning</code></td>
+                    <td><code>bool</code></td>
+                    <td><code>true</code></td>
+                    <td>Show warning when context window is nearly full.</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- ═══ Hooks ═══ -->
+<div class="config-section">
+    <h3>Hooks</h3>
+    <p>Lifecycle hooks run shell commands at specific points in the tool execution pipeline. Hooks receive context via environment variables: <code>AUTOMERGENT_TOOL_NAME</code>, <code>AUTOMERGENT_TOOL_ARGS</code>, <code>AUTOMERGENT_TOOL_RESULT</code>, <code>AUTOMERGENT_PROJECT_DIR</code>.</p>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>hooks.preToolUse</code></td>
+                    <td><code>[]Hook</code></td>
+                    <td>Commands executed <strong>before</strong> tool execution. Non-zero exit <strong>vetoes</strong> the tool call (stderr becomes the reason).</td>
+                </tr>
+                <tr>
+                    <td><code>hooks.postToolUse</code></td>
+                    <td><code>[]Hook</code></td>
+                    <td>Commands executed <strong>after</strong> tool execution. Failures are logged, never fatal.</td>
+                </tr>
+                <tr>
+                    <td><code>hooks.*[].name</code></td>
+                    <td><code>string</code></td>
+                    <td>Human-readable hook name (for logs).</td>
+                </tr>
+                <tr>
+                    <td><code>hooks.*[].command</code></td>
+                    <td><code>string</code></td>
+                    <td>Shell command to execute.</td>
+                </tr>
+                <tr>
+                    <td><code>hooks.*[].timeout</code></td>
+                    <td><code>duration</code></td>
+                    <td>Hook execution timeout (default: <code>"10s"</code>).</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    <pre><code><span class="yaml-key">hooks</span>:
+  <span class="yaml-key">preToolUse</span>:
+    - <span class="yaml-key">name</span>: <span class="yaml-str">"lint-check"</span>
+      <span class="yaml-key">command</span>: <span class="yaml-str">"npm run lint --quiet"</span>
+      <span class="yaml-key">timeout</span>: <span class="yaml-str">"30s"</span>
+  <span class="yaml-key">postToolUse</span>:
+    - <span class="yaml-key">name</span>: <span class="yaml-str">"notify-done"</span>
+      <span class="yaml-key">command</span>: <span class="yaml-str">"echo 'Tool completed' | pbcopy"</span></code></pre>
+</div>
+
+<!-- ═══ Timeouts ═══ -->
+<div class="config-section">
+    <h3>Timeouts</h3>
+    <div class="table-wrapper">
+        <table>
+            <thead>
+                <tr><th>Key</th><th>Type</th><th>Default</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code>confirmationTimeout</code></td>
+                    <td><code>duration</code></td>
+                    <td><code>"10m"</code></td>
+                    <td>Default timeout for user confirmation dialogs (e.g., tool execution approval).</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+
+<!-- ───────────────────────────────────────────────────────────────────────
+     3. ENVIRONMENT VARIABLES
+     ─────────────────────────────────────────────────────────────────────── -->
+<h2 id="env-vars">Environment Variables</h2>
+
+<p>Environment variables override file-based configuration. API keys are always resolved from environment variables first.</p>
+
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr><th>Variable</th><th>Used For</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>GOOGLE_API_KEY</code></td>
+                <td>Google AI Studio</td>
+                <td>API key for Gemini models via AI Studio. Higher priority than <code>GEMINI_API_KEY</code>.</td>
+            </tr>
+            <tr>
+                <td><code>GEMINI_API_KEY</code></td>
+                <td>Google AI Studio</td>
+                <td>Alias for Google API key. Used as fallback if <code>GOOGLE_API_KEY</code> is not set.</td>
+            </tr>
+            <tr>
+                <td><code>OPENAI_API_KEY</code></td>
+                <td>OpenAI</td>
+                <td>API key for GPT models via OpenAI.</td>
+            </tr>
+            <tr>
+                <td><code>ANTHROPIC_API_KEY</code></td>
+                <td>Anthropic</td>
+                <td>API key for Claude models via Anthropic.</td>
+            </tr>
+            <tr>
+                <td><code>AUTOMERGENT_PROVIDER</code></td>
+                <td>Core</td>
+                <td>Override the configured provider (e.g., <code>google-aistudio</code>, <code>openai</code>).</td>
+            </tr>
+            <tr>
+                <td><code>AUTOMERGENT_MODEL</code></td>
+                <td>Core</td>
+                <td>Override the configured model (e.g., <code>gemini-2.5-pro</code>).</td>
+            </tr>
+            <tr>
+                <td><code>AUTOMERGENT_MODE</code></td>
+                <td>Core</td>
+                <td>Override the operating mode (e.g., <code>edit</code>, <code>code</code>, <code>chat</code>, <code>agent</code>).</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+<div class="callout callout-info">
+    <strong>Note:</strong> Provider-specific API keys are always read from environment variables first, even when configured in the YAML file via <code>"${ENV_VAR}"</code> syntax. This ensures secrets are never persisted in config files.
+</div>
+
+
+<!-- ───────────────────────────────────────────────────────────────────────
+     4. CLI FLAGS
+     ─────────────────────────────────────────────────────────────────────── -->
+<h2 id="cli-flags">CLI Flags</h2>
+
+<p>CLI flags provide one-shot overrides. They have the highest precedence and are never persisted to config files.</p>
+
+<div class="table-wrapper">
+    <table>
+        <thead>
+            <tr><th>Flag</th><th>Argument</th><th>Description</th></tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td><code>--provider</code></td>
+                <td><code>&lt;name&gt;</code></td>
+                <td>AI provider to use.</td>
+            </tr>
+            <tr>
+                <td><code>--model</code></td>
+                <td><code>&lt;name&gt;</code></td>
+                <td>Model identifier.</td>
+            </tr>
+            <tr>
+                <td><code>--mode</code></td>
+                <td><code>&lt;mode&gt;</code></td>
+                <td>Operating mode (<code>edit</code>, <code>code</code>, <code>chat</code>, <code>agent</code>).</td>
+            </tr>
+            <tr>
+                <td><code>--prompt</code></td>
+                <td><code>&lt;text&gt;</code></td>
+                <td>Send a single prompt in non-interactive mode.</td>
+            </tr>
+            <tr>
+                <td><code>--output</code></td>
+                <td><code>&lt;format&gt;</code></td>
+                <td>Output format (<code>text</code>, <code>json</code>).</td>
+            </tr>
+            <tr>
+                <td><code>--no-tui</code></td>
+                <td><em>flag</em></td>
+                <td>Run in CLI-only mode without the terminal UI.</td>
+            </tr>
+            <tr>
+                <td><code>--stdin</code></td>
+                <td><em>flag</em></td>
+                <td>Read prompt from stdin.</td>
+            </tr>
+            <tr>
+                <td><code>--theme</code></td>
+                <td><code>&lt;name&gt;</code></td>
+                <td>UI theme to use.</td>
+            </tr>
+            <tr>
+                <td><code>--keybindings</code></td>
+                <td><code>&lt;preset&gt;</code></td>
+                <td>Keybinding preset (<code>default</code>, <code>vim</code>, <code>emacs</code>).</td>
+            </tr>
+            <tr>
+                <td><code>--config</code></td>
+                <td><code>&lt;path&gt;</code></td>
+                <td>Path to config file (overrides default locations).</td>
+            </tr>
+            <tr>
+                <td><code>--no-color</code></td>
+                <td><em>flag</em></td>
+                <td>Disable ANSI color output.</td>
+            </tr>
+            <tr>
+                <td><code>--session</code></td>
+                <td><code>&lt;id&gt;</code></td>
+                <td>Session ID to resume.</td>
+            </tr>
+            <tr>
+                <td><code>--resume</code></td>
+                <td><em>flag</em></td>
+                <td>Resume the most recent session.</td>
+            </tr>
+            <tr>
+                <td><code>--new</code></td>
+                <td><em>flag</em></td>
+                <td>Force a new session (don't resume).</td>
+            </tr>
+            <tr>
+                <td><code>--session-dir</code></td>
+                <td><code>&lt;path&gt;</code></td>
+                <td>Custom session storage directory.</td>
+            </tr>
+            <tr>
+                <td><code>--context-files</code></td>
+                <td><code>&lt;paths&gt;</code></td>
+                <td>Extra files to inject into context (comma-separated).</td>
+            </tr>
+            <tr>
+                <td><code>--images</code></td>
+                <td><code>&lt;paths&gt;</code></td>
+                <td>Image files to include as context.</td>
+            </tr>
+            <tr>
+                <td><code>--files</code></td>
+                <td><code>&lt;paths&gt;</code></td>
+                <td>Files to read into context at startup.</td>
+            </tr>
+            <tr>
+                <td><code>--no-context</code></td>
+                <td><em>flag</em></td>
+                <td>Disable automatic context gathering.</td>
+            </tr>
+            <tr>
+                <td><code>--no-sandbox</code></td>
+                <td><em>flag</em></td>
+                <td>Disable the sandbox (sets <code>sandbox: off</code>).</td>
+            </tr>
+            <tr>
+                <td><code>--sandbox</code></td>
+                <td><code>&lt;mode&gt;</code></td>
+                <td>Sandbox mode (<code>off</code>, <code>auto</code>, <code>strict</code>).</td>
+            </tr>
+            <tr>
+                <td><code>--quiet</code></td>
+                <td><em>flag</em></td>
+                <td>Suppress non-essential output.</td>
+            </tr>
+            <tr>
+                <td><code>--verbose</code></td>
+                <td><em>flag</em></td>
+                <td>Enable verbose output.</td>
+            </tr>
+            <tr>
+                <td><code>--no-animation</code></td>
+                <td><em>flag</em></td>
+                <td>Disable TUI animations.</td>
+            </tr>
+            <tr>
+                <td><code>--layout</code></td>
+                <td><code>&lt;mode&gt;</code></td>
+                <td>UI layout (<code>default</code>, <code>minimal</code>, <code>full</code>, <code>split</code>).</td>
+            </tr>
+            <tr>
+                <td><code>--base-url</code></td>
+                <td><code>&lt;url&gt;</code></td>
+                <td>Custom API endpoint URL for the active provider.</td>
+            </tr>
+            <tr>
+                <td><code>--api-key</code></td>
+                <td><code>&lt;key&gt;</code></td>
+                <td>API key for the active provider.</td>
+            </tr>
+        </tbody>
+    </table>
+</div>
+
+
+<!-- ───────────────────────────────────────────────────────────────────────
+     5. EXAMPLE CONFIGURATIONS
+     ─────────────────────────────────────────────────────────────────────── -->
+<h2 id="example-configs">Example Configurations</h2>
+
+<!-- ═══ Minimal ═══ -->
+<h3>Minimal Config</h3>
+<p>The simplest config — just set your provider and API key:</p>
+<pre><code><span class="code-label">config.yaml</span>
+<span class="yaml-comment"># Minimal configuration — everything else uses defaults</span>
+<span class="yaml-key">provider</span>: <span class="yaml-str">"google-aistudio"</span>
+<span class="yaml-key">model</span>: <span class="yaml-str">"gemini-3.6-flash"</span>
+<span class="yaml-key">mode</span>: <span class="yaml-str">"edit"</span>
+
+<span class="yaml-key">providers</span>:
+  <span class="yaml-key">google-aistudio</span>:
+    <span class="yaml-key">apiKey</span>: <span class="yaml-str">"${GEMINI_API_KEY}"</span></code></pre>
+
+<!-- ═══ Multi-Provider ═══ -->
+<h3>Multi-Provider Setup</h3>
+<p>Configure multiple providers with automatic fallback:</p>
+<pre><code><span class="code-label">config.yaml</span>
+<span class="yaml-comment"># Multi-provider setup with fallback chain</span>
+<span class="yaml-key">provider</span>: <span class="yaml-str">"google-aistudio"</span>
+<span class="yaml-key">model</span>: <span class="yaml-str">"gemini-2.5-pro"</span>
+<span class="yaml-key">mode</span>: <span class="yaml-str">"edit"</span>
+<span class="yaml-key">theme</span>: <span class="yaml-str">"catppuccin"</span>
+
+<span class="yaml-key">providers</span>:
+  <span class="yaml-key">google-aistudio</span>:
+    <span class="yaml-key">apiKey</span>: <span class="yaml-str">"${GEMINI_API_KEY}"</span>
+    <span class="yaml-key">temperature</span>: <span class="yaml-num">0.2</span>
+    <span class="yaml-key">maxRetries</span>: <span class="yaml-num">3</span>
+
+  <span class="yaml-key">google-vertex</span>:
+    <span class="yaml-key">project</span>: <span class="yaml-str">"my-gcp-project"</span>
+    <span class="yaml-key">location</span>: <span class="yaml-str">"us-central1"</span>
+    <span class="yaml-key">temperature</span>: <span class="yaml-num">0.2</span>
+
+  <span class="yaml-key">openai</span>:
+    <span class="yaml-key">apiKey</span>: <span class="yaml-str">"${OPENAI_API_KEY}"</span>
+    <span class="yaml-key">defaultModel</span>: <span class="yaml-str">"gpt-4o"</span>
+    <span class="yaml-key">temperature</span>: <span class="yaml-num">0.3</span>
+
+  <span class="yaml-key">anthropic</span>:
+    <span class="yaml-key">apiKey</span>: <span class="yaml-str">"${ANTHROPIC_API_KEY}"</span>
+    <span class="yaml-key">defaultModel</span>: <span class="yaml-str">"claude-sonnet-4-20250514"</span>
+
+<span class="yaml-key">fastModel</span>: <span class="yaml-str">"gemini-3.6-flash"</span>
+<span class="yaml-key">effort</span>: <span class="yaml-str">"medium"</span>
+
+<span class="yaml-key">providerFallback</span>:
+  - <span class="yaml-key">provider</span>: <span class="yaml-str">"google-aistudio"</span>
+    <span class="yaml-key">model</span>: <span class="yaml-str">"gemini-3.6-flash"</span>
+  - <span class="yaml-key">provider</span>: <span class="yaml-str">"anthropic"</span>
+    <span class="yaml-key">model</span>: <span class="yaml-str">"claude-3-5-haiku-20241022"</span></code></pre>
+
+<!-- ═══ Enterprise ═══ -->
+<h3>Enterprise Config with Security</h3>
+<p>Harden Automergent for production/enterprise environments:</p>
+<pre><code><span class="code-label">config.yaml</span>
+<span class="yaml-comment"># Enterprise configuration with strict security</span>
+<span class="yaml-key">provider</span>: <span class="yaml-str">"google-vertex"</span>
+<span class="yaml-key">model</span>: <span class="yaml-str">"gemini-2.5-pro"</span>
+<span class="yaml-key">mode</span>: <span class="yaml-str">"edit"</span>
+<span class="yaml-key">theme</span>: <span class="yaml-str">"default"</span>
+
+<span class="yaml-key">providers</span>:
+  <span class="yaml-key">google-vertex</span>:
+    <span class="yaml-key">project</span>: <span class="yaml-str">"enterprise-ai-project"</span>
+    <span class="yaml-key">location</span>: <span class="yaml-str">"us-central1"</span>
+    <span class="yaml-key">backend</span>: <span class="yaml-str">"vertex"</span>
+    <span class="yaml-key">maxRetries</span>: <span class="yaml-num">5</span>
+    <span class="yaml-key">timeoutSeconds</span>: <span class="yaml-num">120</span>
+    <span class="yaml-key">temperature</span>: <span class="yaml-num">0.1</span>
+    <span class="yaml-key">headers</span>:
+      <span class="yaml-key">X-Request-Source</span>: <span class="yaml-str">"automergent-enterprise"</span>
+
+<span class="yaml-comment"># Security hardening</span>
+<span class="yaml-key">security</span>:
+  <span class="yaml-key">sandbox</span>: <span class="yaml-str">"strict"</span>
+  <span class="yaml-key">requireGitForAutoModes</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">blockedWritePaths</span>:
+    - <span class="yaml-str">".git/**"</span>
+    - <span class="yaml-str">"~/.ssh/**"</span>
+    - <span class="yaml-str">"~/.gnupg/**"</span>
+    - <span class="yaml-str">"~/.aws/**"</span>
+    - <span class="yaml-str">"~/.kube/**"</span>
+    - <span class="yaml-str">"/etc/**"</span>
+    - <span class="yaml-str">"/var/**"</span>
+    - <span class="yaml-str">"/usr/**"</span>
+  <span class="yaml-key">allowedWritePaths</span>:
+    - <span class="yaml-str">"src/**"</span>
+    - <span class="yaml-str">"tests/**"</span>
+    - <span class="yaml-str">"docs/**"</span>
+  <span class="yaml-key">stripEnvVarPatterns</span>:
+    - <span class="yaml-str">"*_SECRET"</span>
+    - <span class="yaml-str">"*_PASSWORD"</span>
+    - <span class="yaml-str">"*_TOKEN"</span>
+    - <span class="yaml-str">"*_KEY"</span>
+    - <span class="yaml-str">"AWS_*"</span>
+    - <span class="yaml-str">"GCP_*"</span>
+
+<span class="yaml-comment"># Tool configuration</span>
+<span class="yaml-key">tools</span>:
+  <span class="yaml-key">shell</span>:
+    <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+    <span class="yaml-key">confirmationRequired</span>: <span class="yaml-str">"always"</span>
+    <span class="yaml-key">timeout</span>: <span class="yaml-str">"60s"</span>
+  <span class="yaml-key">filesystem</span>:
+    <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+    <span class="yaml-key">confirmationRequired</span>: <span class="yaml-str">"write"</span>
+
+<span class="yaml-comment"># Review all edits before applying</span>
+<span class="yaml-key">editReview</span>: <span class="yaml-bool">true</span>
+
+<span class="yaml-comment"># Diagnostics</span>
+<span class="yaml-key">diagnostics</span>:
+  <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">showInRead</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">blockOnError</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">blockOnWarning</span>: <span class="yaml-bool">true</span>
+
+<span class="yaml-comment"># Privacy</span>
+<span class="yaml-key">zeroDataRetention</span>: <span class="yaml-bool">true</span>
+<span class="yaml-key">telemetry</span>: <span class="yaml-bool">false</span>
+
+<span class="yaml-comment"># Git co-authoring</span>
+<span class="yaml-key">git</span>:
+  <span class="yaml-key">coAuthor</span>: <span class="yaml-str">"always"</span>
+  <span class="yaml-key">coAuthorTrailer</span>: <span class="yaml-str">"Co-authored-by: AI Assistant &lt;ai@company.com&gt;"</span>
+
+<span class="yaml-comment"># Hooks for CI integration</span>
+<span class="yaml-key">hooks</span>:
+  <span class="yaml-key">postToolUse</span>:
+    - <span class="yaml-key">name</span>: <span class="yaml-str">"lint"</span>
+      <span class="yaml-key">command</span>: <span class="yaml-str">"make lint"</span>
+      <span class="yaml-key">timeout</span>: <span class="yaml-str">"60s"</span></code></pre>
+
+<!-- ═══ Performance ═══ -->
+<h3>Performance Tuning</h3>
+<p>Optimize for large codebases and fast iteration:</p>
+<pre><code><span class="code-label">config.yaml</span>
+<span class="yaml-comment"># Performance-tuned configuration</span>
+<span class="yaml-key">provider</span>: <span class="yaml-str">"google-aistudio"</span>
+<span class="yaml-key">model</span>: <span class="yaml-str">"gemini-2.5-pro"</span>
+<span class="yaml-key">mode</span>: <span class="yaml-str">"code"</span>
+
+<span class="yaml-comment"># Maximize context for large codebases</span>
+<span class="yaml-key">maxContextTokens</span>: <span class="yaml-num">1000000</span>
+<span class="yaml-key">maxToolOutputChars</span>: <span class="yaml-num">64000</span>
+<span class="yaml-key">warnAtContextFraction</span>: <span class="yaml-num">0.85</span>
+<span class="yaml-key">autoCompressAt</span>: <span class="yaml-num">0.95</span>
+<span class="yaml-key">compressionKeepRecent</span>: <span class="yaml-num">20</span>
+
+<span class="yaml-comment"># File handling for large repos</span>
+<span class="yaml-key">maxAutoReadFileSize</span>: <span class="yaml-num">1048576</span>  <span class="yaml-comment"># 1 MB</span>
+<span class="yaml-key">maxTreeFiles</span>: <span class="yaml-num">5000</span>
+<span class="yaml-key">maxTreeDepth</span>: <span class="yaml-num">15</span>
+<span class="yaml-key">excludePatterns</span>:
+  - <span class="yaml-str">".git"</span>
+  - <span class="yaml-str">"node_modules"</span>
+  - <span class="yaml-str">"dist"</span>
+  - <span class="yaml-str">"build"</span>
+  - <span class="yaml-str">".next"</span>
+  - <span class="yaml-str">"target"</span>
+  - <span class="yaml-str">"vendor"</span>
+  - <span class="yaml-str">"*.min.js"</span>
+  - <span class="yaml-str">"*.min.css"</span>
+  - <span class="yaml-str">"*.bundle.js"</span>
+
+<span class="yaml-comment"># Provider tuning</span>
+<span class="yaml-key">providers</span>:
+  <span class="yaml-key">google-aistudio</span>:
+    <span class="yaml-key">apiKey</span>: <span class="yaml-str">"${GEMINI_API_KEY}"</span>
+    <span class="yaml-key">temperature</span>: <span class="yaml-num">0.3</span>
+    <span class="yaml-key">maxTokens</span>: <span class="yaml-num">8192</span>
+    <span class="yaml-key">maxRetries</span>: <span class="yaml-num">3</span>
+    <span class="yaml-key">timeoutSeconds</span>: <span class="yaml-num">60</span>
+
+<span class="yaml-key">fastModel</span>: <span class="yaml-str">"gemini-3.6-flash"</span>
+<span class="yaml-key">effort</span>: <span class="yaml-str">"low"</span>
+<span class="yaml-key">thinkingBudget</span>: <span class="yaml-num">4096</span>
+
+<span class="yaml-comment"># Disable features you don't need</span>
+<span class="yaml-key">notifications</span>:
+  <span class="yaml-key">desktop</span>: <span class="yaml-bool">false</span>
+  <span class="yaml-key">bell</span>: <span class="yaml-bool">false</span>
+  <span class="yaml-key">contextWarning</span>: <span class="yaml-bool">true</span>
+
+<span class="yaml-comment"># Keep sessions lightweight</span>
+<span class="yaml-key">autoSave</span>: <span class="yaml-bool">true</span>
+<span class="yaml-key">checkpointInterval</span>: <span class="yaml-num">3</span>
+<span class="yaml-key">maxSessions</span>: <span class="yaml-num">50</span>
+<span class="yaml-key">maxSessionAge</span>: <span class="yaml-str">"14d"</span>
+
+<span class="yaml-comment"># Prompt caching for repeated operations</span>
+<span class="yaml-key">cache</span>:
+  <span class="yaml-key">prompt</span>:
+    <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span></code></pre>
+
+<!-- ═══ Full Reference ═══ -->
+<h3>Full Example Config</h3>
+<p>A comprehensive config showing all available options with their defaults:</p>
+<pre><code><span class="code-label">config.yaml — Complete Reference</span>
+<span class="yaml-comment"># ─── Core ───────────────────────────────────────────────────────</span>
+<span class="yaml-key">provider</span>: <span class="yaml-str">"google-aistudio"</span>
+<span class="yaml-key">model</span>: <span class="yaml-str">"gemini-3.6-flash"</span>
+<span class="yaml-key">mode</span>: <span class="yaml-str">"edit"</span>
+<span class="yaml-key">theme</span>: <span class="yaml-str">"modern"</span>
+<span class="yaml-key">keybindings</span>: <span class="yaml-str">"default"</span>
+<span class="yaml-key">layout</span>: <span class="yaml-str">"default"</span>
+
+<span class="yaml-comment"># ─── Session ────────────────────────────────────────────────────</span>
+<span class="yaml-key">autoSave</span>: <span class="yaml-bool">true</span>
+<span class="yaml-key">checkpointInterval</span>: <span class="yaml-num">5</span>
+<span class="yaml-key">sessionDir</span>: <span class="yaml-str">"~/.automergent/sessions"</span>
+<span class="yaml-key">maxSessions</span>: <span class="yaml-num">100</span>
+<span class="yaml-key">maxSessionAge</span>: <span class="yaml-str">""</span>  <span class="yaml-comment"># no age limit</span>
+
+<span class="yaml-comment"># ─── Context ────────────────────────────────────────────────────</span>
+<span class="yaml-key">maxContextTokens</span>: <span class="yaml-num">128000</span>
+<span class="yaml-key">maxToolOutputChars</span>: <span class="yaml-num">32000</span>
+<span class="yaml-key">warnAtContextFraction</span>: <span class="yaml-num">0.8</span>
+<span class="yaml-key">autoCompressAt</span>: <span class="yaml-num">0.9</span>
+<span class="yaml-key">compressionKeepRecent</span>: <span class="yaml-num">10</span>
+
+<span class="yaml-comment"># ─── Model ──────────────────────────────────────────────────────</span>
+<span class="yaml-key">fastModel</span>: <span class="yaml-str">""</span>  <span class="yaml-comment"># empty = use main model</span>
+<span class="yaml-key">thinkingBudget</span>: <span class="yaml-num">0</span>  <span class="yaml-comment"># 0 = provider default</span>
+<span class="yaml-key">effort</span>: <span class="yaml-str">""</span>  <span class="yaml-comment"># minimal|low|medium|high|max</span>
+
+<span class="yaml-comment"># ─── File Handling ──────────────────────────────────────────────</span>
+<span class="yaml-key">maxAutoReadFileSize</span>: <span class="yaml-num">524288</span>  <span class="yaml-comment"># 512 KB</span>
+<span class="yaml-key">maxTreeFiles</span>: <span class="yaml-num">1000</span>
+<span class="yaml-key">maxTreeDepth</span>: <span class="yaml-num">10</span>
+<span class="yaml-key">excludePatterns</span>:
+  - <span class="yaml-str">".git"</span>
+  - <span class="yaml-str">"node_modules"</span>
+  - <span class="yaml-str">".venv"</span>
+  - <span class="yaml-str">"__pycache__"</span>
+  - <span class="yaml-str">"*.pyc"</span>
+  - <span class="yaml-str">"*.o"</span>
+  - <span class="yaml-str">"*.a"</span>
+  - <span class="yaml-str">"vendor"</span>
+<span class="yaml-key">contextFiles</span>: []
+<span class="yaml-key">skillsDir</span>: <span class="yaml-str">"~/.automergent/skills"</span>
+
+<span class="yaml-comment"># ─── Display ────────────────────────────────────────────────────</span>
+<span class="yaml-key">noAnimation</span>: <span class="yaml-bool">false</span>
+<span class="yaml-key">noColor</span>: <span class="yaml-bool">false</span>
+<span class="yaml-key">output</span>: <span class="yaml-str">"text"</span>
+<span class="yaml-key">quiet</span>: <span class="yaml-bool">false</span>
+<span class="yaml-key">verbose</span>: <span class="yaml-bool">false</span>
+
+<span class="yaml-comment"># ─── Edit ───────────────────────────────────────────────────────</span>
+<span class="yaml-key">editReview</span>: <span class="yaml-bool">false</span>
+
+<span class="yaml-comment"># ─── Security ───────────────────────────────────────────────────</span>
+<span class="yaml-key">security</span>:
+  <span class="yaml-key">sandbox</span>: <span class="yaml-str">"auto"</span>
+  <span class="yaml-key">requireGitForAutoModes</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">rootRiskAcknowledged</span>: <span class="yaml-bool">false</span>
+  <span class="yaml-key">blockedWritePaths</span>:
+    - <span class="yaml-str">".git/**"</span>
+    - <span class="yaml-str">"~/.ssh/**"</span>
+    - <span class="yaml-str">"~/.gnupg/**"</span>
+    - <span class="yaml-str">"~/.aws/**"</span>
+    - <span class="yaml-str">"~/.kube/**"</span>
+  <span class="yaml-key">allowedWritePaths</span>: []
+  <span class="yaml-key">stripEnvVarPatterns</span>:
+    - <span class="yaml-str">"*_SECRET"</span>
+    - <span class="yaml-str">"*_PASSWORD"</span>
+    - <span class="yaml-str">"*_TOKEN"</span>
+    - <span class="yaml-str">"*_KEY"</span>
+
+<span class="yaml-comment"># ─── Tools ──────────────────────────────────────────────────────</span>
+<span class="yaml-key">tools</span>:
+  <span class="yaml-key">shell</span>:
+    <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+    <span class="yaml-key">confirmationRequired</span>: <span class="yaml-str">"always"</span>
+    <span class="yaml-key">timeout</span>: <span class="yaml-str">"30s"</span>
+    <span class="yaml-key">maxOutputBytes</span>: <span class="yaml-num">1048576</span>
+  <span class="yaml-key">filesystem</span>:
+    <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+    <span class="yaml-key">confirmationRequired</span>: <span class="yaml-str">"write"</span>
+    <span class="yaml-key">maxOutputBytes</span>: <span class="yaml-num">524288</span>
+  <span class="yaml-key">git</span>:
+    <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+    <span class="yaml-key">confirmationRequired</span>: <span class="yaml-str">"never"</span>
+  <span class="yaml-key">web</span>:
+    <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+    <span class="yaml-key">confirmationRequired</span>: <span class="yaml-str">"never"</span>
+    <span class="yaml-key">timeout</span>: <span class="yaml-str">"15s"</span>
+
+<span class="yaml-comment"># ─── LSP ────────────────────────────────────────────────────────</span>
+<span class="yaml-key">lsp</span>:
+  <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">servers</span>: {}
+  <span class="yaml-key">startupTimeout</span>: <span class="yaml-str">"10s"</span>
+  <span class="yaml-key">requestTimeout</span>: <span class="yaml-str">"5s"</span>
+
+<span class="yaml-comment"># ─── MCP ────────────────────────────────────────────────────────</span>
+<span class="yaml-key">mcp</span>:
+  <span class="yaml-key">servers</span>: {}
+
+<span class="yaml-comment"># ─── Logging ────────────────────────────────────────────────────</span>
+<span class="yaml-key">log</span>:
+  <span class="yaml-key">level</span>: <span class="yaml-str">"warn"</span>
+  <span class="yaml-key">file</span>: <span class="yaml-str">"~/.automergent/automergent.log"</span>
+  <span class="yaml-key">maxSize</span>: <span class="yaml-str">"50MB"</span>
+  <span class="yaml-key">maxBackups</span>: <span class="yaml-num">3</span>
+
+<span class="yaml-comment"># ─── Providers ──────────────────────────────────────────────────</span>
+<span class="yaml-key">providers</span>:
+  <span class="yaml-key">google-aistudio</span>:
+    <span class="yaml-key">apiKey</span>: <span class="yaml-str">"${GEMINI_API_KEY}"</span>
+
+<span class="yaml-comment"># ─── Git ────────────────────────────────────────────────────────</span>
+<span class="yaml-key">git</span>:
+  <span class="yaml-key">coAuthor</span>: <span class="yaml-str">"ask"</span>
+  <span class="yaml-key">coAuthorTrailer</span>: <span class="yaml-str">"Co-authored-by: Automergent &lt;automergent-bot@users.noreply.github.com&gt;"</span>
+
+<span class="yaml-comment"># ─── Diagnostics ────────────────────────────────────────────────</span>
+<span class="yaml-key">diagnostics</span>:
+  <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">showInRead</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">blockOnError</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">blockOnWarning</span>: <span class="yaml-bool">false</span>
+  <span class="yaml-key">maxFileSizeBytes</span>: <span class="yaml-num">1048576</span>
+  <span class="yaml-key">cacheDurationSec</span>: <span class="yaml-num">30</span>
+
+<span class="yaml-comment"># ─── Cache ──────────────────────────────────────────────────────</span>
+<span class="yaml-key">cache</span>:
+  <span class="yaml-key">prompt</span>:
+    <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+
+<span class="yaml-comment"># ─── Privacy ────────────────────────────────────────────────────</span>
+<span class="yaml-key">zeroDataRetention</span>: <span class="yaml-bool">false</span>
+<span class="yaml-key">telemetry</span>: <span class="yaml-bool">true</span>
+<span class="yaml-key">noUpdateCheck</span>: <span class="yaml-bool">false</span>
+
+<span class="yaml-comment"># ─── Debug ──────────────────────────────────────────────────────</span>
+<span class="yaml-key">debug</span>:
+  <span class="yaml-key">enabled</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">directory</span>: <span class="yaml-str">"~/.automergent/debug"</span>
+  <span class="yaml-key">saveRequests</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">saveResponses</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">maxFileSize</span>: <span class="yaml-num">10</span>
+
+<span class="yaml-comment"># ─── Provider Fallback ──────────────────────────────────────────</span>
+<span class="yaml-key">providerFallback</span>: []
+
+<span class="yaml-comment"># ─── Notifications ──────────────────────────────────────────────</span>
+<span class="yaml-key">notifications</span>:
+  <span class="yaml-key">desktop</span>: <span class="yaml-bool">false</span>
+  <span class="yaml-key">bell</span>: <span class="yaml-bool">true</span>
+  <span class="yaml-key">contextWarning</span>: <span class="yaml-bool">true</span>
+
+<span class="yaml-comment"># ─── Hooks ──────────────────────────────────────────────────────</span>
+<span class="yaml-key">hooks</span>:
+  <span class="yaml-key">preToolUse</span>: []
+  <span class="yaml-key">postToolUse</span>: []
+
+<span class="yaml-comment"># ─── Timeouts ───────────────────────────────────────────────────</span>
+<span class="yaml-key">confirmationTimeout</span>: <span class="yaml-str">"10m"</span></code></pre>
+
+<!-- ───────────────────────────────────────────────────────────────────────
+     FOOTER
+     ─────────────────────────────────────────────────────────────────────── -->
+<div style="margin-top: 80px; padding-top: 24px; border-top: 1px solid #21262d; color: #484f58; font-size: 13px; text-align: center;">
+    <p>Automergent Configuration Reference &mdash; <a href="https://github.com/iSundram/Automergent">GitHub</a> &mdash; <a href="https://automergent.github.io">Docs</a></p>
+</div>
+
+</main>
+</div>
+<script src="../js/nav.js"></script>
+<script src="../js/footer.js"></script>
+</body>
+</html>

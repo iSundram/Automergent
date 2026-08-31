@@ -1,0 +1,1338 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Developer Guide — Automergent</title>
+  <link rel="stylesheet" href="../css/style.css">
+  <style>
+    .guide-header {
+      margin-bottom: 32px;
+    }
+    .guide-header h1 {
+      font-size: 2.5rem;
+      margin-bottom: 12px;
+    }
+    .guide-header p {
+      font-size: 1.1rem;
+      color: var(--text-secondary);
+      max-width: 700px;
+    }
+    .badge-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      border: 1px solid var(--border-primary);
+      background-color: var(--bg-tertiary);
+      color: var(--text-secondary);
+    }
+    .badge.badge-go {
+      color: #00add8;
+      border-color: #00add844;
+    }
+    .badge.badge-mit {
+      color: var(--accent-green);
+      border-color: var(--accent-green);
+    }
+    .badge.badge-charm {
+      color: var(--accent-purple);
+      border-color: var(--accent-purple);
+    }
+    .tree-block {
+      background-color: var(--bg-secondary);
+      border: 1px solid var(--border-primary);
+      border-radius: var(--radius-md);
+      padding: 20px 24px;
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      line-height: 1.7;
+      overflow-x: auto;
+      margin: 16px 0 24px;
+      color: var(--text-secondary);
+    }
+    .tree-block .dir {
+      color: var(--accent-blue);
+      font-weight: 600;
+    }
+    .tree-block .pkg {
+      color: var(--accent-green);
+    }
+    .tree-block .comment {
+      color: var(--text-tertiary);
+      font-style: italic;
+    }
+    .toc-sidebar {
+      position: sticky;
+      top: calc(var(--navbar-height) + 24px);
+      width: 260px;
+      flex-shrink: 0;
+      padding: 0 16px 0 0;
+      height: calc(100vh - var(--navbar-height) - 48px);
+      overflow-y: auto;
+      border-right: 1px solid var(--border-primary);
+      margin-right: 32px;
+    }
+    .toc-sidebar ul {
+      list-style: none;
+    }
+    .toc-sidebar > ul > li {
+      margin-bottom: 4px;
+    }
+    .toc-sidebar a {
+      display: block;
+      padding: 5px 10px;
+      font-size: 0.84rem;
+      color: var(--text-secondary);
+      border-radius: var(--radius-sm);
+      transition: all var(--transition-fast);
+      border-left: 2px solid transparent;
+      text-decoration: none;
+    }
+    .toc-sidebar a:hover {
+      color: var(--text-primary);
+      background-color: var(--bg-secondary);
+    }
+    .toc-sidebar a.active {
+      color: var(--accent-blue);
+      background-color: rgba(88, 166, 255, 0.08);
+      border-left-color: var(--accent-blue);
+      font-weight: 500;
+    }
+    .toc-sidebar .toc-h3 {
+      padding-left: 22px;
+      font-size: 0.8rem;
+    }
+    .guide-layout {
+      display: flex;
+      max-width: var(--max-content);
+      margin: 0 auto;
+      padding-top: var(--navbar-height);
+      min-height: 100vh;
+    }
+    .guide-content {
+      flex: 1;
+      min-width: 0;
+      padding: 40px 48px 80px;
+    }
+    .guide-content h2 {
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-top: 56px;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-primary);
+      letter-spacing: -0.01em;
+    }
+    .guide-content h2:first-child {
+      margin-top: 0;
+    }
+    .guide-content h3 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      margin-top: 32px;
+      margin-bottom: 12px;
+      color: var(--text-primary);
+    }
+    .guide-content h4 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-top: 24px;
+      margin-bottom: 8px;
+      color: var(--accent-blue);
+    }
+    .guide-content p {
+      margin-bottom: 14px;
+      color: var(--text-secondary);
+      line-height: 1.7;
+    }
+    .guide-content ul,
+    .guide-content ol {
+      margin-bottom: 14px;
+      padding-left: 24px;
+      color: var(--text-secondary);
+    }
+    .guide-content li {
+      margin-bottom: 5px;
+      line-height: 1.6;
+    }
+    .guide-content strong {
+      color: var(--text-primary);
+      font-weight: 600;
+    }
+    .guide-content code:not(pre code):not([class]) {
+      padding: 2px 6px;
+      background-color: var(--bg-tertiary);
+      border: 1px solid var(--border-secondary);
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-size: 0.85em;
+      color: var(--accent-blue);
+    }
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      background-color: var(--accent-blue);
+      color: #fff;
+      font-size: 0.75rem;
+      font-weight: 700;
+      margin-right: 8px;
+      flex-shrink: 0;
+    }
+    .step {
+      display: flex;
+      align-items: flex-start;
+      margin-bottom: 20px;
+    }
+    .step-body {
+      flex: 1;
+    }
+    .step-body p {
+      margin-top: 4px;
+    }
+    .guide-content hr {
+      border: none;
+      height: 1px;
+      background-color: var(--border-primary);
+      margin: 40px 0;
+    }
+    .param-table td:first-child {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--accent-green);
+      white-space: nowrap;
+    }
+    .param-table td:nth-child(2) {
+      font-family: var(--font-mono);
+      font-size: 0.85rem;
+      color: var(--accent-purple);
+    }
+    @media (max-width: 1024px) {
+      .toc-sidebar {
+        display: none;
+      }
+      .guide-content {
+        padding: 32px;
+      }
+    }
+    @media (max-width: 768px) {
+      .guide-content {
+        padding: 24px 16px;
+      }
+      .guide-header h1 {
+        font-size: 1.75rem;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- NAVBAR -->
+<nav class="navbar">
+  <div class="navbar-inner">
+    <a href="../index.html" class="navbar-logo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="4 17 10 11 4 5"></polyline>
+        <line x1="12" y1="19" x2="20" y2="19"></line>
+      </svg>
+      <span class="logo-accent">Auto</span>mergent
+    </a>
+    <ul class="navbar-links">
+      <li><a href="../index.html">Home</a></li>
+      <li><a href="getting-started.html">Getting Started</a></li>
+      <li><a href="developer-guide.html" class="active">Developer Guide</a></li>
+      <li><a href="architecture.html">Architecture</a></li>
+      <li><a href="tools-reference.html">Tools</a></li>
+      <li><a href="themes.html">Themes</a></li>
+    </ul>
+    <div class="navbar-actions">
+      <a href="https://github.com/iSundram/Automergent" title="GitHub">
+        <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<!-- LAYOUT -->
+<div class="guide-layout">
+
+  <!-- SIDEBAR TOC -->
+  <aside class="toc-sidebar">
+    <ul>
+      <li><a href="#overview" class="active">Project Overview</a></li>
+      <li><a href="#repo-structure">Repository Structure</a></li>
+      <li><a href="#building">Building</a></li>
+      <li><a href="#cicd">CI/CD Pipeline</a></li>
+      <li><a href="#testing">Testing</a></li>
+      <li><a href="#interfaces">Key Interfaces</a></li>
+      <li><a href="#add-tool">Adding a New Tool</a></li>
+      <li><a href="#add-provider">Adding a New Provider</a></li>
+      <li><a href="#add-theme">Adding a Theme</a></li>
+      <li><a href="#debug-mode">Debug Mode</a></li>
+    </ul>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <main class="guide-content">
+
+    <!-- HEADER -->
+    <div class="guide-header">
+      <h1>Developer Guide</h1>
+      <p>Everything you need to build, test, and contribute to Automergent — a terminal-native AI coding agent written in Go.</p>
+      <div class="badge-row">
+        <span class="badge badge-go">Go 1.25+</span>
+        <span class="badge badge-mit">MIT License</span>
+        <span class="badge badge-charm">Charm v2 Stack</span>
+        <span class="badge">CGO Enabled</span>
+        <span class="badge">43+ Tools</span>
+        <span class="badge">11 Themes</span>
+      </div>
+    </div>
+
+    <!-- ============================================================ -->
+    <!-- SECTION: Project Overview -->
+    <!-- ============================================================ -->
+    <h2 id="overview">Project Overview</h2>
+
+    <p>Automergent is an AI-powered coding agent that lives in your terminal. It provides a full-featured TUI built with the Charm v2 stack, supports multiple AI providers, and ships with 43+ built-in tools across 13 categories.</p>
+
+    <h3>Core Technologies</h3>
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Component</th><th>Technology</th><th>Version</th></tr></thead>
+        <tbody>
+          <tr><td>Language</td><td>Go</td><td>1.25+</td></tr>
+          <tr><td>Module</td><td><code>github.com/iSundram/Automergent</code></td><td>—</td></tr>
+          <tr><td>License</td><td>MIT</td><td>—</td></tr>
+          <tr><td>TUI Framework</td><td>Bubble Tea v2</td><td>v2.0.2</td></tr>
+          <tr><td>Styling</td><td>Lip Gloss v2</td><td>v2.0.1</td></tr>
+          <tr><td>Markdown Rendering</td><td>Glamour v2</td><td>v2.0.0</td></tr>
+          <tr><td>CLI Framework</td><td>Cobra</td><td>v1.8.1</td></tr>
+          <tr><td>Configuration</td><td>Viper</td><td>v1.19.0</td></tr>
+          <tr><td>AI SDK</td><td>Google GenAI SDK</td><td>v1.68.0</td></tr>
+          <tr><td>Tree-sitter</td><td>go-tree-sitter</td><td>—</td></tr>
+          <tr><td>Database</td><td>modernc.org/sqlite</td><td>v1.57.0</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout callout-info">
+      <div class="callout-title">Prerequisites</div>
+      <p>You need Go 1.25+ with CGO enabled. Some features (tree-sitter parsing, SQLite) require CGO. On macOS, ensure Xcode command line tools are installed. On Linux, you may need <code>gcc</code> and the SQLite development headers.</p>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- SECTION: Repository Structure -->
+    <!-- ============================================================ -->
+    <h2 id="repo-structure">Repository Structure</h2>
+
+    <p>The project follows standard Go project layout with a clean separation between the CLI entrypoint, internal packages, and the documentation site.</p>
+
+    <div class="tree-block">
+<span class="dir">cmd/automergent/</span>              <span class="comment">CLI entrypoint, Cobra command tree</span>
+  main.go                           <span class="comment">rootCmd, provider resolution, tool registry wiring</span>
+  config_commands.go                <span class="comment">/config slash commands</span>
+
+<span class="dir">internal/</span>
+  <span class="dir">agent/</span>                       <span class="comment">Agent loop, orchestration, approval policies</span>
+    agent.go                        <span class="comment">core agent loop (Run, event bus, tool dispatch)</span>
+    init_routing.go                 <span class="comment">init-phase intent classification &amp; routing</span>
+    approval_policy.go              <span class="comment">when to require user confirmation</span>
+    approvals.go                    <span class="comment">approval UI integration</span>
+    autocompact.go                  <span class="comment">automatic context compaction</span>
+    context.go                      <span class="comment">context isolation &amp; budget management</span>
+    context_isolation.go            <span class="comment">per-task context boundaries</span>
+    fleet.go                        <span class="comment">sub-agent fleet management</span>
+    hooks.go                        <span class="comment">lifecycle hooks (pre/post tool, pre/post turn)</span>
+    modes.go                        <span class="comment">agent modes (edit, plan, etc.)</span>
+    neural_context_test.go          <span class="comment">context selection tests</span>
+    orchestration_policy.go         <span class="comment">parallel/sequential/delegate strategies</span>
+    registry.go                     <span class="comment">agent type registry</span>
+    rules.go                        <span class="comment">behavioral rules &amp; violation handling</span>
+    skills.go                       <span class="comment">skill discovery &amp; invocation</span>
+    subagents.go                    <span class="comment">sub-agent spawning &amp; lifecycle</span>
+    systemprompt.go                 <span class="comment">layered system prompt composition</span>
+    triage.go                       <span class="comment">request triage &amp; complexity assessment</span>
+    <span class="dir">agentdef/</span>                   <span class="comment">agent type definitions</span>
+    <span class="dir">builtin/</span>                    <span class="comment">built-in agent implementations</span>
+    <span class="dir">custom/</span>                     <span class="comment">user-defined custom agents</span>
+    <span class="dir">mcpbridge/</span>                  <span class="comment">MCP ↔ agent bridge</span>
+
+  <span class="dir">ai/</span>                          <span class="comment">Provider abstraction layer</span>
+    provider.go                     <span class="comment">Provider interface, Message, CompletionRequest/Response</span>
+    registry.go                     <span class="comment">global provider registry</span>
+    stream.go                       <span class="comment">streaming response helpers</span>
+    message.go                      <span class="comment">message validation &amp; sequence checks</span>
+    fallback.go                     <span class="comment">fallback provider chain</span>
+    sequence.go                     <span class="comment">message sequence validation</span>
+    <span class="dir">google/</span>                     <span class="comment">Gemini client (retry, streaming, GenAI SDK)</span>
+    <span class="dir">openai/</span>                     <span class="comment">OpenAI-compatible client</span>
+    <span class="dir">anthropic/</span>                  <span class="comment">Anthropic Claude client</span>
+
+  <span class="dir">cache/</span>                       <span class="comment">Caching layer (prompt cache, response cache)</span>
+
+  <span class="dir">config/</span>                      <span class="comment">Viper-based configuration</span>
+    config.go                       <span class="comment">Config struct, defaults, validation</span>
+    loader.go                       <span class="comment">config file loading, env var resolution</span>
+    providers.go                    <span class="comment">provider credential management</span>
+    providers_catalog.go            <span class="comment">built-in provider catalog</span>
+    profiles.go                     <span class="comment">named configuration profiles</span>
+    secrets.go                      <span class="comment">secret redaction &amp; handling</span>
+
+  <span class="dir">context/</span>                     <span class="comment">Budget management &amp; dependency tracking</span>
+
+  <span class="dir">debug/</span>                       <span class="comment">Debug provider for logging requests &amp; responses</span>
+    provider.go                     <span class="comment">DebugProvider wraps ai.Provider</span>
+    logger.go                       <span class="comment">structured JSON logger</span>
+
+  <span class="dir">diagnostics/</span>                 <span class="comment">Compiler error parsers &amp; recovery</span>
+
+  <span class="dir">editreview/</span>                  <span class="comment">Edit review system</span>
+
+  <span class="dir">errors/</span>                      <span class="comment">Structured errors, retry policies, exit codes</span>
+
+  <span class="dir">git/</span>                         <span class="comment">Git operations (blame, branch, conflict, semantic diff)</span>
+
+  <span class="dir">mcp/</span>                         <span class="comment">Model Context Protocol client/server</span>
+
+  <span class="dir">planning/</span>                    <span class="comment">Planning system &amp; task decomposition</span>
+
+  <span class="dir">prompt/</span>                      <span class="comment">Phased prompt system</span>
+    <span class="dir">phases/</span>                   <span class="comment">per-phase prompt template files</span>
+
+  <span class="dir">recovery/</span>                    <span class="comment">Error recovery strategies</span>
+
+  <span class="dir">sandbox/</span>                     <span class="comment">OS-level sandboxing (macOS, Docker, namespaces)</span>
+
+  <span class="dir">session/</span>                     <span class="comment">Persistent transcripts, history, undo stack</span>
+
+  <span class="dir">shared/</span>                      <span class="comment">Shared types &amp; interfaces (TaskSpec, Intent, TodoItem)</span>
+
+  <span class="dir">taskstate/</span>                   <span class="comment">Task state store</span>
+
+  <span class="dir">tools/</span>                       <span class="comment">Tool system (43+ tools, 13 categories)</span>
+    tool.go                         <span class="comment">Tool interface, Result, BaseTool, ToolCost</span>
+    registry.go                     <span class="comment">tool registry (Register, Get, All, Clone)</span>
+    orchestrator.go                 <span class="comment">tool orchestration &amp; dispatch</span>
+    coerce.go                       <span class="comment">argument type coercion</span>
+    pathscope.go                    <span class="comment">path scope validation</span>
+    violation.go                    <span class="comment">tool-level policy violations</span>
+    <span class="dir">filesystem/</span>               <span class="comment">read_file, write_file, edit_file, glob, grep, list_dir</span>
+    <span class="dir">shell/</span>                    <span class="comment">async shell sessions (run, read, write, stop, list)</span>
+    <span class="dir">web/</span>                      <span class="comment">web_fetch, web_search</span>
+    <span class="dir">security/</span>                 <span class="comment">secrets_scan, dependency_audit</span>
+    <span class="dir">lsp/</span>                      <span class="comment">lsp_diagnostics</span>
+    <span class="dir">agent/</span>                    <span class="comment">task (sub-agent spawn), read_agent, list_agents</span>
+    <span class="dir">interaction/</span>              <span class="comment">ask_user, notify</span>
+    <span class="dir">skills/</span>                   <span class="comment">discover_skills, skill</span>
+    <span class="dir">ctxinfo/</span>                  <span class="comment">ctx_inspect (context introspection)</span>
+    <span class="dir">planmode/</span>                 <span class="comment">enter_plan_mode, exit_plan_mode, verify_plan</span>
+    <span class="dir">mcpres/</span>                   <span class="comment">list_resources, read_resources (MCP)</span>
+    <span class="dir">database/</span>                 <span class="comment">sql (SQLite queries)</span>
+
+  <span class="dir">tui/</span>                         <span class="comment">Bubble Tea v2 terminal UI</span>
+    tui.go                          <span class="comment">Run() entrypoint</span>
+    <span class="dir">app/</span>                       <span class="comment">core event loop, layout model</span>
+    <span class="dir">commands/</span>                  <span class="comment">slash command handlers (/compress, /sessions, etc.)</span>
+    <span class="dir">components/</span>                <span class="comment">UI widgets (confirm, diff pane, file tree, palette)</span>
+    <span class="dir">keys/</span>                      <span class="comment">keyboard binding definitions</span>
+    <span class="dir">render/</span>                    <span class="comment">ANSI parser, diff engine, Markdown renderer</span>
+    <span class="dir">themes/</span>                    <span class="comment">11 color palettes &amp; 50+ styles per theme</span>
+    <span class="dir">tips/</span>                      <span class="comment">contextual help tips</span>
+
+  <span class="dir">version/</span>                     <span class="comment">Version, Commit, BuildDate (injected via ldflags)</span>
+
+  <span class="dir">workflow/</span>                    <span class="comment">Workflow engine (todo-driven task execution)</span>
+
+<span class="dir">docs-site/</span>                     <span class="comment">Documentation website</span>
+  css/style.css                    <span class="comment">shared styles (dark theme, components)</span>
+  pages/                          <span class="comment">HTML documentation pages</span>
+
+<span class="dir">examples/</span>                      <span class="comment">Usage examples &amp; sample configs</span>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- SECTION: Building -->
+    <!-- ============================================================ -->
+    <h2 id="building">Building</h2>
+
+    <p>Automergent uses a <code>Makefile</code> with standard targets. All build commands require <code>CGO_ENABLED=1</code>.</p>
+
+    <h3>Make Targets</h3>
+    <div class="table-wrapper">
+      <table class="cmd-table">
+        <thead><tr><th>Command</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>make build</code></td><td>Build the binary to <code>bin/automergent</code></td></tr>
+          <tr><td><code>make install</code></td><td>Install to <code>$GOPATH/bin</code></td></tr>
+          <tr><td><code>make test</code></td><td>Run all tests (<code>CGO_ENABLED=1 go test ./...</code>)</td></tr>
+          <tr><td><code>make lint</code></td><td>Run <code>golangci-lint</code></td></tr>
+          <tr><td><code>make fmt</code></td><td>Format with <code>gofmt</code> + <code>goimports</code></td></tr>
+          <tr><td><code>make tidy</code></td><td>Run <code>go mod tidy</code></td></tr>
+          <tr><td><code>make ci</code></td><td>Full CI checks locally (test + vet + lint)</td></tr>
+          <tr><td><code>make clean</code></td><td>Remove <code>bin/</code> directory</td></tr>
+          <tr><td><code>make release</code></td><td>Run GoReleaser snapshot build</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Build Flags</h3>
+    <p>The build injects version metadata via <code>ldflags</code>:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">makefile</span>
+      </div>
+      <pre><code>LDFLAGS_AUTOMERGENT := -s -w \
+  -X 'github.com/iSundram/Automergent/internal/version.Version=$(VERSION)' \
+  -X 'github.com/iSundram/Automergent/internal/version.Commit=$(COMMIT)' \
+  -X 'github.com/iSundram/Automergent/internal/version.BuildDate=$(BUILD_DATE)'</code></pre>
+    </div>
+
+    <p>These values are read at runtime by the <code>internal/version</code> package and displayed via <code>automergent --version</code>.</p>
+
+    <h3>Quick Start for Contributors</h3>
+
+    <div class="step">
+      <span class="step-num">1</span>
+      <div class="step-body">
+        <p><strong>Clone and enter the repo:</strong></p>
+        <div class="code-block">
+          <pre><code>git clone https://github.com/iSundram/Automergent.git
+cd Automergent</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <span class="step-num">2</span>
+      <div class="step-body">
+        <p><strong>Build:</strong></p>
+        <div class="code-block">
+          <pre><code>make build</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <span class="step-num">3</span>
+      <div class="step-body">
+        <p><strong>Run tests:</strong></p>
+        <div class="code-block">
+          <pre><code>make test</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="step">
+      <span class="step-num">4</span>
+      <div class="step-body">
+        <p><strong>Run full CI checks:</strong></p>
+        <div class="code-block">
+          <pre><code>make ci</code></pre>
+        </div>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- SECTION: CI/CD Pipeline -->
+    <!-- ============================================================ -->
+    <h2 id="cicd">CI/CD Pipeline</h2>
+
+    <p>Automergent uses GitHub Actions for continuous integration and GoReleaser for release distribution.</p>
+
+    <h3>Continuous Integration</h3>
+    <p>CI runs on every pull request and push to <code>main</code>. The pipeline performs:</p>
+
+    <ul>
+      <li><strong>Tests</strong> — <code>CGO_ENABLED=1 go test ./...</code></li>
+      <li><strong>Vet</strong> — <code>go vet ./...</code></li>
+      <li><strong>Lint</strong> — <code>golangci-lint run ./...</code></li>
+    </ul>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">yaml</span>
+        <span class="lang-label">.github/workflows/ci.yml</span>
+      </div>
+      <pre><code><span class="token-keyword">name:</span> CI
+<span class="token-keyword">on:</span>
+  <span class="token-keyword">push:</span>
+    <span class="token-keyword">branches:</span> [main]
+  <span class="token-keyword">pull_request:</span>
+    <span class="token-keyword">branches:</span> [main]
+
+<span class="token-keyword">jobs:</span>
+  <span class="token-keyword">test:</span>
+    <span class="token-keyword">runs-on:</span> ubuntu-latest
+    <span class="token-keyword">steps:</span>
+      - <span class="token-keyword">uses:</span> actions/checkout@v4
+      - <span class="token-keyword">uses:</span> actions/setup-go@v5
+        <span class="token-keyword">with:</span>
+          <span class="token-keyword">go-version:</span> <span class="token-string">"1.25"</span>
+      - <span class="token-keyword">run:</span> CGO_ENABLED=1 go test ./...
+      - <span class="token-keyword">run:</span> go vet ./...
+      - <span class="token-keyword">run:</span> golangci-lint run ./...</code></pre>
+    </div>
+
+    <h3>Release Pipeline</h3>
+    <p>Releases are triggered by pushing a <code>v*</code> tag (e.g., <code>v1.0.0</code>). GoReleaser builds binaries for:</p>
+
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Platform</th><th>Architecture</th><th>Output</th></tr></thead>
+        <tbody>
+          <tr><td>Linux</td><td>amd64</td><td><code>automergent_linux_amd64</code></td></tr>
+          <tr><td>Linux</td><td>arm64</td><td><code>automergent_linux_arm64</code></td></tr>
+          <tr><td>macOS</td><td>amd64</td><td><code>automergent_darwin_amd64</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">yaml</span>
+        <span class="lang-label">.github/workflows/release.yml</span>
+      </div>
+      <pre><code><span class="token-keyword">name:</span> Release
+<span class="token-keyword">on:</span>
+  <span class="token-keyword">push:</span>
+    <span class="token-keyword">tags:</span> [<span class="token-string">"v*"</span>]
+
+<span class="token-keyword">jobs:</span>
+  <span class="token-keyword">release:</span>
+    <span class="token-keyword">runs-on:</span> ubuntu-latest
+    <span class="token-keyword">steps:</span>
+      - <span class="token-keyword">uses:</span> actions/checkout@v4
+        <span class="token-keyword">with:</span>
+          <span class="token-keyword">fetch-depth:</span> 0
+      - <span class="token-keyword">uses:</span> actions/setup-go@v5
+        <span class="token-keyword">with:</span>
+          <span class="token-keyword">go-version:</span> <span class="token-string">"1.25"</span>
+      - <span class="token-keyword">uses:</span> goreleaser/goreleaser-action@v6
+        <span class="token-keyword">with:</span>
+          <span class="token-keyword">version:</span> latest
+          <span class="token-keyword">args:</span> release --clean -f dist/goreleaser-automergent.yaml
+        <span class="token-keyword">env:</span>
+          <span class="token-keyword">GITHUB_TOKEN:</span> ${{ secrets.GITHUB_TOKEN }}</code></pre>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- SECTION: Testing -->
+    <!-- ============================================================ -->
+    <h2 id="testing">Testing</h2>
+
+    <p>All tests require CGO enabled. Run the full suite with:</p>
+
+    <div class="code-block">
+      <pre><code>CGO_ENABLED=1 go test ./...</code></pre>
+    </div>
+
+    <h3>Test Patterns</h3>
+    <p>The codebase uses several testing strategies:</p>
+
+    <ul>
+      <li><strong>Table-driven tests</strong> — standard Go pattern for input/output assertions</li>
+      <li><strong>Mock providers</strong> — in-memory provider implementations for testing agent behavior</li>
+      <li><strong>Debug provider</strong> — the <code>internal/debug</code> package provides a decorator that logs all requests/responses, useful for isolated testing</li>
+      <li><strong>Session testing</strong> — the <code>internal/session</code> package supports in-memory sessions for testing without disk I/O</li>
+      <li><strong>Tool testing</strong> — tools implement a common interface; tests can exercise them with mock contexts and file systems</li>
+      <li><strong>Concurrency testing</strong> — the tool registry and agent event bus are tested for concurrent access safety</li>
+    </ul>
+
+    <h3>Running Specific Tests</h3>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">bash</span>
+      </div>
+      <pre><code><span class="token-comment"># Run tests in a specific package</span>
+CGO_ENABLED=1 go test ./internal/tools/...
+
+<span class="token-comment"># Run tests matching a pattern</span>
+CGO_ENABLED=1 go test -run TestTool ./internal/tools/
+
+<span class="token-comment"># Run tests with verbose output</span>
+CGO_ENABLED=1 go test -v ./internal/agent/...
+
+<span class="token-comment"># Run tests with race detection</span>
+CGO_ENABLED=1 go test -race ./...</code></pre>
+    </div>
+
+    <h3>Linting</h3>
+    <p>Install <code>golangci-lint</code> and run:</p>
+
+    <div class="code-block">
+      <pre><code>golangci-lint run ./...</code></pre>
+    </div>
+
+    <p>The project uses the default <code>golangci-lint</code> configuration. CI will fail if any lint errors are found.</p>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- SECTION: Key Interfaces -->
+    <!-- ============================================================ -->
+    <h2 id="interfaces">Key Interfaces</h2>
+
+    <p>Automergent is built around a few core interfaces. Understanding these is essential for contributing new tools, providers, or themes.</p>
+
+    <h3>Tool Interface</h3>
+    <p>Every tool must implement the <code>Tool</code> interface defined in <code>internal/tools/tool.go</code>:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+        <span class="lang-label">internal/tools/tool.go</span>
+      </div>
+      <pre><code><span class="token-keyword">type</span> <span class="token-class">Tool</span> <span class="token-keyword">interface</span> {
+    <span class="token-function">Name</span>() <span class="token-keyword">string</span>
+    <span class="token-function">Description</span>() <span class="token-keyword">string</span>
+    <span class="token-function">Schema</span>() <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>
+    <span class="token-function">Execute</span>(ctx context.Context, args <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>) (<span class="token-class">Result</span>, <span class="token-keyword">error</span>)
+    <span class="token-function">RequiresConfirmation</span>(mode <span class="token-keyword">string</span>) <span class="token-keyword">bool</span>
+    <span class="token-function">IsConcurrencySafe</span>(args <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>) <span class="token-keyword">bool</span>
+    <span class="token-function">IsReadOnly</span>(args <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>) <span class="token-keyword">bool</span>
+    <span class="token-function">IsDestructive</span>(args <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>) <span class="token-keyword">bool</span>
+    <span class="token-function">EstimatedCost</span>() <span class="token-class">ToolCost</span>
+}</code></pre>
+    </div>
+
+    <div class="table-wrapper">
+      <table class="param-table">
+        <thead><tr><th>Method</th><th>Purpose</th><th>Default</th></tr></thead>
+        <tbody>
+          <tr><td><code>Name()</code></td><td>Unique tool identifier used in schemas and logs</td><td>—</td></tr>
+          <tr><td><code>Description()</code></td><td>Shown to the AI model in tool schemas</td><td>—</td></tr>
+          <tr><td><code>Schema()</code></td><td>JSON Schema for the tool's parameters</td><td>—</td></tr>
+          <tr><td><code>Execute()</code></td><td>Run the tool with the given arguments</td><td>—</td></tr>
+          <tr><td><code>RequiresConfirmation()</code></td><td>Whether this tool needs user approval before running</td><td><code>false</code></td></tr>
+          <tr><td><code>IsConcurrencySafe()</code></td><td>Whether the tool can run concurrently with others</td><td><code>false</code></td></tr>
+          <tr><td><code>IsReadOnly()</code></td><td>Whether the tool only reads (no side effects)</td><td><code>false</code></td></tr>
+          <tr><td><code>IsDestructive()</code></td><td>Whether the tool can destroy data</td><td><code>false</code></td></tr>
+          <tr><td><code>EstimatedCost()</code></td><td>Token and latency estimates for scheduling</td><td>low cost</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h4>BaseTool Helper</h4>
+    <p>Embed <code>BaseTool</code> to get safe defaults for the boolean methods and cost estimates:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+      </div>
+      <pre><code><span class="token-keyword">type</span> <span class="token-class">MyTool</span> <span class="token-keyword">struct</span> {
+    tools.<span class="token-class">BaseTool</span>
+}
+
+<span class="token-keyword">func</span> (t *<span class="token-class">MyTool</span>) <span class="token-function">Name</span>() <span class="token-keyword">string</span>        { <span class="token-keyword">return</span> <span class="token-string">"my_tool"</span> }
+<span class="token-keyword">func</span> (t *<span class="token-class">MyTool</span>) <span class="token-function">Description</span>() <span class="token-keyword">string</span>  { <span class="token-keyword">return</span> <span class="token-string">"Does something useful"</span> }
+<span class="token-keyword">func</span> (t *<span class="token-class">MyTool</span>) <span class="token-function">Schema</span>() <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span> {
+    <span class="token-keyword">return</span> <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>{
+        <span class="token-string">"type"</span>:       <span class="token-string">"object"</span>,
+        <span class="token-string">"properties"</span>: <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>{...},
+        <span class="token-string">"required"</span>:   []<span class="token-keyword">string</span>{...},
+    }
+}
+<span class="token-keyword">func</span> (t *<span class="token-class">MyTool</span>) <span class="token-function">Execute</span>(ctx context.Context, args <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>) (tools.<span class="token-class">Result</span>, <span class="token-keyword">error</span>) {
+    <span class="token-comment">// implementation</span>
+}</code></pre>
+    </div>
+
+    <h3>Provider Interface</h3>
+    <p>AI providers implement the <code>Provider</code> interface from <code>internal/ai/provider.go</code>:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+        <span class="lang-label">internal/ai/provider.go</span>
+      </div>
+      <pre><code><span class="token-keyword">type</span> <span class="token-class">Provider</span> <span class="token-keyword">interface</span> {
+    <span class="token-function">Name</span>() <span class="token-keyword">string</span>
+    <span class="token-function">Complete</span>(ctx context.Context, req <span class="token-class">CompletionRequest</span>) (<span class="token-class">CompletionResponse</span>, <span class="token-keyword">error</span>)
+    <span class="token-function">Models</span>(ctx context.Context) ([]<span class="token-class">Model</span>, <span class="token-keyword">error</span>)
+    <span class="token-function">TokenCount</span>(messages []<span class="token-class">Message</span>) (<span class="token-keyword">int</span>, <span class="token-keyword">error</span>)
+    <span class="token-function">ContextLimit</span>() <span class="token-keyword">int</span>
+}</code></pre>
+    </div>
+
+    <h3>RetryObserver Interface</h3>
+    <p>Providers that retry internally can implement <code>RetryObserver</code> to report retry attempts to the UI:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+      </div>
+      <pre><code><span class="token-keyword">type</span> <span class="token-class">RetryObserver</span> <span class="token-keyword">interface</span> {
+    <span class="token-function">SetRetryObserver</span>(<span class="token-keyword">func</span>(<span class="token-class">RetryInfo</span>))
+}</code></pre>
+    </div>
+
+    <p>Wrapping providers (caching, debug, etc.) <strong>must</strong> forward this to the wrapped provider so retries remain visible.</p>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- SECTION: Adding a New Tool -->
+    <!-- ============================================================ -->
+    <h2 id="add-tool">Adding a New Tool</h2>
+
+    <p>New tools are the most common contribution. Follow these steps to add one:</p>
+
+    <h3>Step 1: Create the tool file</h3>
+    <p>Add a new file in the appropriate <code>internal/tools/&lt;category&gt;/</code> directory:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+        <span class="lang-label">internal/tools/mytool/mytool.go</span>
+      </div>
+      <pre><code><span class="token-keyword">package</span> mytool
+
+<span class="token-keyword">import</span> (
+    <span class="token-string">"context"</span>
+
+    <span class="token-string">"github.com/iSundram/Automergent/internal/tools"</span>
+)
+
+<span class="token-comment">// MyTool implements tools.Tool</span>
+<span class="token-keyword">type</span> <span class="token-class">MyTool</span> <span class="token-keyword">struct</span> {
+    tools.<span class="token-class">BaseTool</span>
+}
+
+<span class="token-keyword">func</span> (t *<span class="token-class">MyTool</span>) <span class="token-function">Name</span>() <span class="token-keyword">string</span> { <span class="token-keyword">return</span> <span class="token-string">"my_tool"</span> }
+
+<span class="token-keyword">func</span> (t *<span class="token-class">MyTool</span>) <span class="token-function">Description</span>() <span class="token-keyword">string</span> {
+    <span class="token-keyword">return</span> <span class="token-string">"Description shown to the AI model"</span>
+}
+
+<span class="token-keyword">func</span> (t *<span class="token-class">MyTool</span>) <span class="token-function">Schema</span>() <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span> {
+    <span class="token-keyword">return</span> <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>{
+        <span class="token-string">"type"</span>: <span class="token-string">"object"</span>,
+        <span class="token-string">"properties"</span>: <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>{
+            <span class="token-string">"input"</span>: <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>{
+                <span class="token-string">"type"</span>:        <span class="token-string">"string"</span>,
+                <span class="token-string">"description"</span>: <span class="token-string">"The input parameter"</span>,
+            },
+        },
+        <span class="token-string">"required"</span>: []<span class="token-keyword">string</span>{<span class="token-string">"input"</span>},
+    }
+}
+
+<span class="token-keyword">func</span> (t *<span class="token-class">MyTool</span>) <span class="token-function">Execute</span>(ctx context.Context, args <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>) (tools.<span class="token-class">Result</span>, <span class="token-keyword">error</span>) {
+    input, _ := args[<span class="token-string">"input"</span>].(<span class="token-keyword">string</span>)
+
+    <span class="token-comment">// Tool logic here</span>
+
+    <span class="token-keyword">return</span> tools.<span class="token-class">Result</span>{
+        Content: <span class="token-string">"Result text"</span>,
+        Summary: <span class="token-string">"Short summary for UI"</span>,
+    }, <span class="token-keyword">nil</span>
+}</code></pre>
+    </div>
+
+    <h3>Step 2: Register the tool</h3>
+    <p>In <code>cmd/automergent/main.go</code>, add the import and register the tool in the tool registry setup block:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+        <span class="lang-label">cmd/automergent/main.go (excerpt)</span>
+      </div>
+      <pre><code><span class="token-keyword">import</span> (
+    toolsMyTool <span class="token-string">"github.com/iSundram/Automergent/internal/tools/mytool"</span>
+)
+
+<span class="token-comment">// In the tool registry setup:</span>
+reg.Register(&toolsMytool.<span class="token-class">MyTool</span>{})</code></pre>
+    </div>
+
+    <h3>Step 3: Add a tool prompt (optional)</h3>
+    <p>Add a prompt file in <code>internal/prompt/phases/</code> to guide the model on when and how to use your tool.</p>
+
+    <h3>Step 4: Test</h3>
+    <p>Write tests in <code>mytool_test.go</code> following the table-driven test pattern:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+      </div>
+      <pre><code><span class="token-keyword">func</span> <span class="token-function">TestMyTool</span>(t *testing.T) {
+    tool := &<span class="token-class">MyTool</span>{}
+
+    <span class="token-keyword">if</span> tool.<span class="token-function">Name</span>() != <span class="token-string">"my_tool"</span> {
+        t.<span class="token-function">Errorf</span>(<span class="token-string">"expected name my_tool, got %s"</span>, tool.<span class="token-function">Name</span>())
+    }
+
+    result, err := tool.<span class="token-function">Execute</span>(context.Background(), <span class="token-keyword">map</span>[<span class="token-keyword">string</span>]<span class="token-keyword">any</span>{
+        <span class="token-string">"input"</span>: <span class="token-string">"test"</span>,
+    })
+
+    <span class="token-keyword">if</span> err != <span class="token-keyword">nil</span> {
+        t.<span class="token-function">Fatal</span>(err)
+    }
+    <span class="token-keyword">if</span> result.IsError {
+        t.<span class="token-function">Error</span>(<span class="token-string">"expected success"</span>)
+    }
+}</code></pre>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- SECTION: Adding a New Provider -->
+    <!-- ============================================================ -->
+    <h2 id="add-provider">Adding a New Provider</h2>
+
+    <p>New AI providers implement the <code>Provider</code> interface and register themselves in the global provider registry.</p>
+
+    <h3>Step 1: Create the provider package</h3>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+        <span class="lang-label">internal/ai/myprovider/myprovider.go</span>
+      </div>
+      <pre><code><span class="token-keyword">package</span> myprovider
+
+<span class="token-keyword">import</span> (
+    <span class="token-string">"context"</span>
+    <span class="token-string">"github.com/iSundram/Automergent/internal/ai"</span>
+)
+
+<span class="token-keyword">type</span> <span class="token-class">Provider</span> <span class="token-keyword">struct</span> {
+    config ai.<span class="token-class">ProviderConfig</span>
+}
+
+<span class="token-keyword">func</span> <span class="token-function">New</span>(cfg ai.<span class="token-class">ProviderConfig</span>) *<span class="token-class">Provider</span> {
+    <span class="token-keyword">return</span> &<span class="token-class">Provider</span>{config: cfg}
+}
+
+<span class="token-keyword">func</span> (p *<span class="token-class">Provider</span>) <span class="token-function">Name</span>() <span class="token-keyword">string</span> { <span class="token-keyword">return</span> <span class="token-string">"myprovider"</span> }
+
+<span class="token-keyword">func</span> (p *<span class="token-class">Provider</span>) <span class="token-function">Complete</span>(
+    ctx context.Context,
+    req ai.<span class="token-class">CompletionRequest</span>,
+) (ai.<span class="token-class">CompletionResponse</span>, <span class="token-keyword">error</span>) {
+    <span class="token-comment">// Call your provider's API here</span>
+    <span class="token-comment">// Return a CompletionResponse with streaming support</span>
+}
+
+<span class="token-keyword">func</span> (p *<span class="token-class">Provider</span>) <span class="token-function">Models</span>(ctx context.Context) ([]ai.<span class="token-class">Model</span>, <span class="token-keyword">error</span>) {
+    <span class="token-comment">// Return available models</span>
+}
+
+<span class="token-keyword">func</span> (p *<span class="token-class">Provider</span>) <span class="token-function">TokenCount</span>(messages []ai.<span class="token-class">Message</span>) (<span class="token-keyword">int</span>, <span class="token-keyword">error</span>) {
+    <span class="token-comment">// Estimate token count</span>
+}
+
+<span class="token-keyword">func</span> (p *<span class="token-class">Provider</span>) <span class="token-function">ContextLimit</span>() <span class="token-keyword">int</span> {
+    <span class="token-keyword">return</span> 128000 <span class="token-comment">// context window size</span>
+}</code></pre>
+    </div>
+
+    <h3>Step 2: Register in the provider catalog</h3>
+    <p>Add your provider to <code>internal/config/providers_catalog.go</code> so it appears in the config schema and auto-discovery:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+      </div>
+      <pre><code><span class="token-comment">// In the catalog entry:</span>
+<span class="token-string">"myprovider"</span>: {
+    Name:        <span class="token-string">"myprovider"</span>,
+    DisplayName: <span class="token-string">"My Provider"</span>,
+    EnvKey:      <span class="token-string">"MYPROVIDER_API_KEY"</span>,
+    Models:      []<span class="token-keyword">string</span>{<span class="token-string">"model-1"</span>, <span class="token-string">"model-2"</span>},
+    DefaultModel: <span class="token-string">"model-1"</span>,
+}</code></pre>
+    </div>
+
+    <h3>Step 3: Wire into the CLI</h3>
+    <p>In <code>cmd/automergent/main.go</code>, add a case in the provider switch:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+      </div>
+      <pre><code><span class="token-keyword">case</span> <span class="token-string">"myprovider"</span>:
+    provider = myprovider.New(aiCfg)</code></pre>
+    </div>
+
+    <h3>Step 4: Configure</h3>
+    <p>Add to your <code>~/.automergent/config.yaml</code>:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">yaml</span>
+      </div>
+      <pre><code><span class="token-keyword">provider:</span> myprovider
+<span class="token-keyword">model:</span> model-1
+
+<span class="token-keyword">providers:</span>
+  <span class="token-keyword">myprovider:</span>
+    <span class="token-keyword">api_key:</span> <span class="token-string">"your-api-key-here"</span></code></pre>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- SECTION: Adding a Theme -->
+    <!-- ============================================================ -->
+    <h2 id="add-theme">Adding a Theme</h2>
+
+    <p>Automergent ships with 11 built-in themes. Each theme defines a 16-color palette and 50+ pre-built Lip Gloss styles.</p>
+
+    <h3>Color Palette (16 slots)</h3>
+
+    <div class="table-wrapper">
+      <table class="param-table">
+        <thead><tr><th>Slot</th><th>Purpose</th></tr></thead>
+        <tbody>
+          <tr><td><code>Background</code></td><td>Terminal background color</td></tr>
+          <tr><td><code>Surface</code></td><td>Card/panel background</td></tr>
+          <tr><td><code>Overlay</code></td><td>Dropdown/popover background</td></tr>
+          <tr><td><code>Text</code></td><td>Primary text color</td></tr>
+          <tr><td><code>Subtext</code></td><td>Secondary text</td></tr>
+          <tr><td><code>Muted</code></td><td>Dimmed/disabled text</td></tr>
+          <tr><td><code>Accent</code></td><td>Primary accent (brand color)</td></tr>
+          <tr><td><code>AccentAlt</code></td><td>Secondary accent</td></tr>
+          <tr><td><code>Green</code></td><td>Success states</td></tr>
+          <tr><td><code>Red</code></td><td>Error states</td></tr>
+          <tr><td><code>Yellow</code></td><td>Warning states</td></tr>
+          <tr><td><code>Blue</code></td><td>Informational / links</td></tr>
+          <tr><td><code>Magenta</code></td><td>Special highlights</td></tr>
+          <tr><td><code>Cyan</code></td><td>Code / secondary accent</td></tr>
+          <tr><td><code>BorderNormal</code></td><td>Default border color</td></tr>
+          <tr><td><code>BorderFocused</code></td><td>Focused/active border</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Step 1: Define the theme</h3>
+    <p>Add a new file in <code>internal/tui/themes/</code>:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+        <span class="lang-label">internal/tui/themes/mytheme.go</span>
+      </div>
+      <pre><code><span class="token-keyword">package</span> themes
+
+<span class="token-keyword">import</span> <span class="token-string">"charm.land/lipgloss/v2"</span>
+
+<span class="token-keyword">func</span> <span class="token-function">MyTheme</span>() *<span class="token-class">Theme</span> {
+    <span class="token-keyword">return</span> &<span class="token-class">Theme</span>{
+        Name:          <span class="token-string">"mytheme"</span>,
+        Background:    lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#1a1b26"</span>),
+        Surface:       lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#24283b"</span>),
+        Overlay:       lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#414868"</span>),
+        Text:          lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#c0caf5"</span>),
+        Subtext:       lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#a9b1d6"</span>),
+        Muted:         lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#565f89"</span>),
+        Accent:        lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#7aa2f7"</span>),
+        AccentAlt:     lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#bb9af7"</span>),
+        Green:         lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#9ece6a"</span>),
+        Red:           lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#f7768e"</span>),
+        Yellow:        lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#e0af68"</span>),
+        Blue:          lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#7aa2f7"</span>),
+        Magenta:       lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#bb9af7"</span>),
+        Cyan:          lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#7dcfff"</span>),
+        BorderNormal:  lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#414868"</span>),
+        BorderFocused: lipgloss.<span class="token-function">Color</span>(<span class="token-string">"#7aa2f7"</span>),
+    }
+}</code></pre>
+    </div>
+
+    <h3>Step 2: Register in the ThemeEngine</h3>
+    <p>In <code>internal/tui/themes/engine.go</code>, add a <code>RegisterTheme</code> call in <code>NewThemeEngine</code>:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+        <span class="lang-label">internal/tui/themes/engine.go</span>
+      </div>
+      <pre><code><span class="token-keyword">func</span> <span class="token-function">NewThemeEngine</span>() *<span class="token-class">ThemeEngine</span> {
+    te := &<span class="token-class">ThemeEngine</span>{...}
+
+    <span class="token-comment">// Register themes</span>
+    te.<span class="token-function">RegisterTheme</span>(<span class="token-function">Catppuccin</span>())
+    te.<span class="token-function">RegisterTheme</span>(<span class="token-function">Dracula</span>())
+    te.<span class="token-function">RegisterTheme</span>(<span class="token-function">MyTheme</span>())  <span class="token-comment">// ← add here</span>
+    <span class="token-comment">// ...</span>
+}</code></pre>
+    </div>
+
+    <h3>Built-in Themes</h3>
+    <p>The following themes are available out of the box:</p>
+
+    <div class="table-wrapper">
+      <table>
+        <thead><tr><th>Name</th><th>Style</th><th>Background</th></tr></thead>
+        <tbody>
+          <tr><td><code>modern</code></td><td>Default dark theme</td><td><code>#0d1117</code></td></tr>
+          <tr><td><code>catppuccin</code></td><td>Catppuccin Mocha</td><td><code>#1e1e2e</code></td></tr>
+          <tr><td><code>dracula</code></td><td>Dracula</td><td><code>#282a36</code></td></tr>
+          <tr><td><code>nord</code></td><td>Nord</td><td><code>#2e3440</code></td></tr>
+          <tr><td><code>gruvbox</code></td><td>Gruvbox Dark</td><td><code>#282828</code></td></tr>
+          <tr><td><code>onedark</code></td><td>Atom One Dark</td><td><code>#282c34</code></td></tr>
+          <tr><td><code>tokyonight</code></td><td>Tokyo Night</td><td><code>#1a1b26</code></td></tr>
+          <tr><td><code>solarized-dark</code></td><td>Solarized Dark</td><td><code>#002b36</code></td></tr>
+          <tr><td><code>solarized-light</code></td><td>Solarized Light</td><td><code>#fdf6e3</code></td></tr>
+          <tr><td><code>high-contrast</code></td><td>Accessibility</td><td><code>#000000</code></td></tr>
+          <tr><td><code>monokai</code></td><td>Classic Monokai</td><td><code>#272822</code></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- SECTION: Debug Mode -->
+    <!-- ============================================================ -->
+    <h2 id="debug-mode">Debug Mode</h2>
+
+    <p>Automergent includes a debug provider that wraps any AI provider to log all requests and responses. This is invaluable for understanding model behavior and debugging prompt issues.</p>
+
+    <h3>How It Works</h3>
+    <p>When debug mode is enabled, the <code>DebugProvider</code> wraps the primary provider as a transparent decorator:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+        <span class="lang-label">internal/debug/provider.go</span>
+      </div>
+      <pre><code><span class="token-keyword">type</span> <span class="token-class">DebugProvider</span> <span class="token-keyword">struct</span> {
+    provider ai.<span class="token-class">Provider</span>
+    logger   *<span class="token-class">Logger</span>
+}
+
+<span class="token-keyword">func</span> (d *<span class="token-class">DebugProvider</span>) <span class="token-function">Complete</span>(
+    ctx context.Context, req ai.<span class="token-class">CompletionRequest</span>,
+) (ai.<span class="token-class">CompletionResponse</span>, <span class="token-keyword">error</span>) {
+    start := time.<span class="token-function">Now</span>()
+    d.logger.<span class="token-function">LogRequest</span>(ctx, d.provider.<span class="token-function">Name</span>(), req)
+
+    resp, err := d.provider.<span class="token-function">Complete</span>(ctx, req)
+
+    <span class="token-keyword">if</span> err != <span class="token-keyword">nil</span> {
+        d.logger.<span class="token-function">LogError</span>(ctx, d.provider.<span class="token-function">Name</span>(), err, req)
+        <span class="token-keyword">return</span> <span class="token-keyword">nil</span>, err
+    }
+
+    d.logger.<span class="token-function">LogResponse</span>(ctx, d.provider.<span class="token-function">Name</span>(), resp, time.<span class="token-function">Since</span>(start))
+    <span class="token-keyword">return</span> resp, <span class="token-keyword">nil</span>
+}</code></pre>
+    </div>
+
+    <h3>Enabling Debug Mode</h3>
+    <p>Add to your config or use the CLI flag:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">yaml</span>
+        <span class="lang-label">~/.automergent/config.yaml</span>
+      </div>
+      <pre><code><span class="token-keyword">debug:</span>
+  <span class="token-keyword">enabled:</span> <span class="token-keyword">true</span>
+  <span class="token-keyword">output_dir:</span> <span class="token-string">"./debug-logs"</span></code></pre>
+    </div>
+
+    <p>Or via environment variable:</p>
+
+    <div class="code-block">
+      <pre><code><span class="token-keyword">export</span> AUTOMERGENT_DEBUG_ENABLED=true</code></pre>
+    </div>
+
+    <h3>What Gets Logged</h3>
+    <ul>
+      <li><strong>Requests</strong> — full <code>CompletionRequest</code> including messages, tools, and system prompt</li>
+      <li><strong>Responses</strong> — completion response with token usage and latency</li>
+      <li><strong>Errors</strong> — error details with request context</li>
+      <li><strong>Retries</strong> — retry attempts via the <code>RetryObserver</code> interface</li>
+    </ul>
+
+    <h3>Architecture</h3>
+    <p>The debug wiring in <code>cmd/automergent/main.go</code> shows the decorator chain:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">go</span>
+      </div>
+      <pre><code><span class="token-comment">// Provider resolution chain:</span>
+provider := googleProvider.New(aiCfg)    <span class="token-comment">// base provider</span>
+provider = cache.NewCachingProvider(...)  <span class="token-comment">// optional caching wrapper</span>
+provider = debug.NewDebugProvider(...)    <span class="token-comment">// debug wrapper (outermost)</span></code></pre>
+    </div>
+
+    <p>The debug provider also implements <code>Unwrap()</code> to let callers reach the underlying provider's capabilities.</p>
+
+    <hr>
+
+    <!-- ============================================================ -->
+    <!-- Additional Notes -->
+    <!-- ============================================================ -->
+    <h2 id="additional">Additional Notes</h2>
+
+    <h3>Session Persistence</h3>
+    <p>Automergent persists conversation sessions to disk using JSONL format. The session system supports:</p>
+    <ul>
+      <li>Crash recovery via <code>state.json</code> and <code>recovery.json</code></li>
+      <li>Auto-save every 30 seconds</li>
+      <li>Session pruning (configurable max age and count)</li>
+      <li>Resume with <code>--resume</code> or <code>--session &lt;id&gt;</code></li>
+    </ul>
+
+    <h3>MCP Integration</h3>
+    <p>The Model Context Protocol (MCP) allows extending Automergent with external tool servers. Configure MCP servers in your config:</p>
+
+    <div class="code-block">
+      <div class="code-block-header">
+        <span class="lang-label">yaml</span>
+      </div>
+      <pre><code><span class="token-keyword">mcp:</span>
+  <span class="token-keyword">servers:</span>
+    <span class="token-keyword">my-server:</span>
+      <span class="token-keyword">command:</span> <span class="token-string">"npx"</span>
+      <span class="token-keyword">args:</span> [<span class="token-string">"-y"</span>, <span class="token-string">"@my/mcp-server"</span>]
+      <span class="token-keyword">env:</span>
+        <span class="token-keyword">API_KEY:</span> <span class="token-string">"xxx"</span></code></pre>
+    </div>
+
+    <h3>Contributing Guidelines</h3>
+    <ol>
+      <li>Fork the repository and create a feature branch</li>
+      <li>Write tests for new functionality</li>
+      <li>Run <code>make ci</code> before submitting</li>
+      <li>Follow existing code style and patterns</li>
+      <li>Keep PRs focused — one feature or fix per PR</li>
+      <li>Update documentation if adding user-facing features</li>
+    </ol>
+
+    <div class="callout callout-success">
+      <div class="callout-title">Ready to contribute?</div>
+      <p>Start with a <code>good first issue</code> label, or pick a tool category that interests you. The tool system is the most accessible entry point for new contributors.</p>
+    </div>
+
+  </main>
+</div>
+
+<!-- BACK TO TOP -->
+<button class="back-to-top" id="backToTop" title="Back to top">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <polyline points="18 15 12 9 6 15"></polyline>
+  </svg>
+</button>
+
+<!-- FOOTER -->
+<footer class="footer">
+  <div class="footer-inner">
+    <div class="footer-brand">
+      <a href="../index.html" class="navbar-logo" style="font-size:1.1rem">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="24" height="24">
+          <polyline points="4 17 10 11 4 5"></polyline>
+          <line x1="12" y1="19" x2="20" y2="19"></line>
+        </svg>
+        <span class="logo-accent">Auto</span>mergent
+      </a>
+      <p>Terminal-native AI coding agent. Write, edit, and understand code directly in your terminal.</p>
+    </div>
+    <div class="footer-col">
+      <h4>Product</h4>
+      <ul>
+        <li><a href="getting-started.html">Getting Started</a></li>
+        <li><a href="developer-guide.html">Developer Guide</a></li>
+        <li><a href="architecture.html">Architecture</a></li>
+        <li><a href="tools-reference.html">Tools Reference</a></li>
+      </ul>
+    </div>
+    <div class="footer-col">
+      <h4>Resources</h4>
+      <ul>
+        <li><a href="themes.html">Themes</a></li>
+        <li><a href="https://github.com/iSundram/Automergent">GitHub</a></li>
+        <li><a href="https://github.com/iSundram/Automergent/issues">Issues</a></li>
+        <li><a href="https://github.com/iSundram/Automergent/releases">Releases</a></li>
+      </ul>
+    </div>
+    <div class="footer-col">
+      <h4>Legal</h4>
+      <ul>
+        <li><a href="https://github.com/iSundram/Automergent/blob/main/LICENSE">MIT License</a></li>
+      </ul>
+    </div>
+  </div>
+  <div class="footer-bottom">
+    <span>&copy; 2026 iSundram. Built with Go and the Charm stack.</span>
+    <a href="https://github.com/iSundram/Automergent">View on GitHub</a>
+  </div>
+</footer>
+
+<script>
+  // Back to top button
+  const backToTop = document.getElementById('backToTop');
+  window.addEventListener('scroll', () => {
+    backToTop.classList.toggle('visible', window.scrollY > 400);
+  });
+  backToTop.addEventListener('click', () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+
+  // Active TOC link highlighting
+  const tocLinks = document.querySelectorAll('.toc-sidebar a');
+  const sections = [];
+  tocLinks.forEach(link => {
+    const id = link.getAttribute('href').slice(1);
+    const section = document.getElementById(id);
+    if (section) sections.push({ id, el: section, link });
+  });
+
+  function updateToc() {
+    let current = sections[0];
+    for (const s of sections) {
+      if (s.el.getBoundingClientRect().top <= 120) current = s;
+    }
+    tocLinks.forEach(l => l.classList.remove('active'));
+    if (current) current.link.classList.add('active');
+  }
+
+  window.addEventListener('scroll', updateToc);
+  updateToc();
+
+  // Smooth scroll for TOC links
+  tocLinks.forEach(link => {
+    link.addEventListener('click', e => {
+      e.preventDefault();
+      const id = link.getAttribute('href').slice(1);
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    });
+  });
+</script>
+
+<script src="../js/nav.js"></script>
+<script src="../js/footer.js"></script>
+</body>
+</html>

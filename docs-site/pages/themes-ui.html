@@ -1,0 +1,1105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Themes &amp; UI — Automergent Documentation</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --bg-card: #161b22;
+    --bg-surface: #1c2129;
+    --bg-overlay: #21262d;
+    --accent: #58a6ff;
+    --accent-dim: #1f6feb;
+    --text: #e6edf3;
+    --text-sub: #8b949e;
+    --text-muted: #6e7681;
+    --border: #30363d;
+    --border-focus: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+    --magenta: #bc8cff;
+    --cyan: #39d353;
+    --radius: 8px;
+    --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.65;
+    display: flex;
+    min-height: 100vh;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  /* Sidebar TOC */
+  .sidebar {
+    position: fixed;
+    top: 0; left: 0;
+    width: 260px;
+    height: 100vh;
+    background: var(--bg-card);
+    border-right: 1px solid var(--border);
+    padding: 24px 0;
+    overflow-y: auto;
+    z-index: 100;
+  }
+  .sidebar-title {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    color: var(--accent);
+    padding: 0 20px 12px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 8px;
+  }
+  .sidebar nav a {
+    display: block;
+    padding: 6px 20px 6px 24px;
+    font-size: 13px;
+    color: var(--text-sub);
+    border-left: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .sidebar nav a:hover {
+    color: var(--text);
+    background: var(--bg-overlay);
+    text-decoration: none;
+  }
+  .sidebar nav a.active,
+  .sidebar nav a:focus {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    background: rgba(88,166,255,0.06);
+  }
+  .sidebar nav .sub { padding-left: 36px; font-size: 12px; }
+
+  /* Main content */
+  .main {
+    margin-left: 260px;
+    padding: 48px 56px 80px;
+    max-width: 920px;
+  }
+  h1 {
+    font-size: 32px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: var(--text);
+  }
+  h1 span.badge {
+    font-size: 12px;
+    font-weight: 500;
+    background: var(--accent-dim);
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 10px;
+    vertical-align: middle;
+    margin-left: 8px;
+  }
+  .subtitle {
+    font-size: 16px;
+    color: var(--text-sub);
+    margin-bottom: 40px;
+  }
+  h2 {
+    font-size: 22px;
+    font-weight: 700;
+    margin-top: 56px;
+    margin-bottom: 16px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+  }
+  h3 {
+    font-size: 16px;
+    font-weight: 600;
+    margin-top: 32px;
+    margin-bottom: 10px;
+    color: var(--text);
+  }
+  p, li {
+    font-size: 15px;
+    color: var(--text-sub);
+    margin-bottom: 10px;
+  }
+  ul, ol { padding-left: 22px; margin-bottom: 16px; }
+  li { margin-bottom: 6px; }
+
+  /* Code */
+  code {
+    font-family: var(--mono);
+    font-size: 13px;
+    background: var(--bg-overlay);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--cyan);
+  }
+  pre {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px 20px;
+    overflow-x: auto;
+    margin: 12px 0 20px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-sub);
+  }
+  pre code { background: none; padding: 0; color: inherit; }
+
+  /* Cards */
+  .card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px 24px;
+    margin-bottom: 16px;
+  }
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  /* Theme preview cards */
+  .theme-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    transition: border-color 0.2s;
+  }
+  .theme-card:hover { border-color: var(--border-focus); }
+  .theme-card-header {
+    padding: 14px 18px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .theme-card-name {
+    font-weight: 700;
+    font-size: 15px;
+    color: var(--text);
+  }
+  .theme-card-tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    background: var(--bg-overlay);
+    color: var(--text-muted);
+  }
+  .theme-card-tag.default {
+    background: var(--accent-dim);
+    color: #fff;
+  }
+  .swatch-row {
+    display: flex;
+    gap: 4px;
+    padding: 0 18px 14px;
+    flex-wrap: wrap;
+  }
+  .swatch {
+    width: 28px;
+    height: 28px;
+    border-radius: 4px;
+    border: 1px solid rgba(255,255,255,0.08);
+    position: relative;
+    cursor: default;
+  }
+  .swatch[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: calc(100% + 4px);
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--bg-overlay);
+    color: var(--text);
+    font-size: 10px;
+    font-family: var(--mono);
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .theme-card-desc {
+    padding: 0 18px 14px;
+    font-size: 13px;
+    color: var(--text-muted);
+    line-height: 1.5;
+  }
+
+  /* Table */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0 20px;
+    font-size: 14px;
+  }
+  th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--text);
+    padding: 10px 12px;
+    border-bottom: 2px solid var(--border);
+    font-size: 13px;
+  }
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text-sub);
+    vertical-align: top;
+  }
+  td code { font-size: 12px; }
+
+  /* Layout diagram */
+  .layout-diagram {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 20px;
+    margin: 16px 0;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.8;
+    color: var(--text-sub);
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .layout-diagram .lbl { color: var(--accent); font-weight: 600; }
+  .layout-diagram .dim { color: var(--text-muted); }
+
+  /* Info box */
+  .info {
+    background: rgba(88,166,255,0.08);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    padding: 14px 18px;
+    margin: 16px 0;
+    font-size: 14px;
+    color: var(--text-sub);
+  }
+  .info strong { color: var(--accent); }
+
+  /* Shortcut key */
+  kbd {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 12px;
+    background: var(--bg-overlay);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1px 6px;
+    color: var(--text);
+    min-width: 22px;
+    text-align: center;
+  }
+
+  /* Section anchors offset for fixed sidebar */
+  [id] { scroll-margin-top: 24px; }
+
+  @media (max-width: 960px) {
+    .sidebar { display: none; }
+    .main { margin-left: 0; padding: 32px 24px 60px; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Sidebar TOC -->
+<aside class="sidebar">
+  <div class="sidebar-title">Themes &amp; UI</div>
+  <nav>
+    <a href="#overview">Theme System Overview</a>
+    <a href="#color-slots" class="sub">16 Color Slots</a>
+    <a href="#styles" class="sub">Pre-built Styles</a>
+    <a href="#custom-themes" class="sub">Custom Themes</a>
+    <a href="#gallery">Theme Gallery</a>
+    <a href="#switching">Switching Themes</a>
+    <a href="#layout">TUI Layout</a>
+    <a href="#header" class="sub">Header Bar</a>
+    <a href="#conversation" class="sub">Conversation Area</a>
+    <a href="#input" class="sub">Input Area</a>
+    <a href="#dock" class="sub">Bottom Dock</a>
+    <a href="#statusbar" class="sub">Status Bar</a>
+    <a href="#diff" class="sub">Diff Pane</a>
+    <a href="#filetree" class="sub">File Tree</a>
+    <a href="#palette" class="sub">Command Palette</a>
+    <a href="#tool-cards">Tool Card Rendering</a>
+    <a href="#tool-renderers" class="sub">Per-Family Renderers</a>
+    <a href="#tool-read" class="sub">Read Cards</a>
+    <a href="#tool-edit" class="sub">Edit Cards</a>
+    <a href="#tool-terminal" class="sub">Terminal Cards</a>
+    <a href="#keybindings">Keyboard Shortcuts</a>
+    <a href="#notifications">Notification System</a>
+  </nav>
+</aside>
+
+<!-- Main content -->
+<div class="main">
+
+<h1>Themes &amp; UI <span class="badge">v1.0</span></h1>
+<p class="subtitle">Color palettes, layout anatomy, tool rendering, and keyboard navigation for the Automergent terminal UI.</p>
+
+<!-- ============================================================ -->
+<h2 id="overview">Theme System Overview</h2>
+
+<p>Automergent ships with <strong>11 built-in color themes</strong>, each defining a complete 16-slot color palette plus <strong>50+ pre-built lipgloss styles</strong> derived from those colors. Themes are hot-swappable at runtime &mdash; every renderer, diff pane, markdown block, and tool card repaints instantly.</p>
+
+<h3 id="color-slots">16 Color Slots per Theme</h3>
+
+<p>Every theme must fill these 16 named color slots, defined in <code>internal/tui/themes/theme.go</code>:</p>
+
+<table>
+<thead>
+<tr><th>Slot</th><th>Purpose</th><th>Usage</th></tr>
+</thead>
+<tbody>
+<tr><td><code>Background</code></td><td>Primary background</td><td>Terminal bg, pane fill, code blocks</td></tr>
+<tr><td><code>Surface</code></td><td>Raised surfaces</td><td>User bubbles, tool slabs, input bg, diff bg</td></tr>
+<tr><td><code>Overlay</code></td><td>Overlays &amp; secondary</td><td>Dropdown bg, inactive borders, menu dims</td></tr>
+<tr><td><code>Text</code></td><td>Primary text</td><td>Body text, headings, bold elements</td></tr>
+<tr><td><code>Subtext</code></td><td>Secondary text</td><td>Labels, hints, descriptions, timestamps</td></tr>
+<tr><td><code>Muted</code></td><td>De-emphasized text</td><td>Dim text, status bar, system messages</td></tr>
+<tr><td><code>Accent</code></td><td>Primary accent</td><td>Links, focused borders, active indicators, brand</td></tr>
+<tr><td><code>AccentAlt</code></td><td>Secondary accent</td><td>Alternating highlights, agent labels</td></tr>
+<tr><td><code>Green</code></td><td>Success / add</td><td>Success badges, diff additions, confirm buttons</td></tr>
+<tr><td><code>Red</code></td><td>Error / delete</td><td>Error text, diff deletions, reject buttons</td></tr>
+<tr><td><code>Yellow</code></td><td>Warning / caution</td><td>Warning text, tool calls, feedback buttons</td></tr>
+<tr><td><code>Blue</code></td><td>Info / brand</td><td>Brand glyph, directory names, info indicators</td></tr>
+<tr><td><code>Magenta</code></td><td>Accent secondary</td><td>Agent kind labels, alternate highlights</td></tr>
+<tr><td><code>Cyan</code></td><td>Code / inline</td><td>Inline code, code blocks, search highlights</td></tr>
+<tr><td><code>BorderNormal</code></td><td>Default borders</td><td>Pane borders, dividers, separators</td></tr>
+<tr><td><code>BorderFocused</code></td><td>Focused borders</td><td>Active pane, focused input, palette border</td></tr>
+</tbody>
+</table>
+
+<div class="info">
+  <strong>Color model:</strong> Automergent uses <code>color.Color</code> (Go's <code>image/color</code>) for all slots, supporting truecolor, 256-color, and 16-color terminal palettes. The <code>themes.Mix()</code> function blends colors linearly, and <code>themes.Luminance()</code> / <code>themes.IsDark()</code> handle brightness detection for adaptive rendering.
+</div>
+
+<h3 id="styles">Pre-built Lipgloss Styles</h3>
+
+<p>Each theme generates <strong>50+ lipgloss styles</strong> via <code>themes.NewStyles()</code> in <code>internal/tui/themes/theme.go:90</code>. These cover every UI element:</p>
+
+<div class="card-grid">
+  <div class="card">
+    <strong style="color:var(--accent)">Layout &amp; Chrome</strong>
+    <ul style="margin-top:8px">
+      <li><code>Header</code>, <code>HeaderBrand</code>, <code>HeaderCenter</code>, <code>HeaderRight</code>, <code>HeaderPill</code></li>
+      <li><code>StatusBar</code>, <code>StatusBarRight</code></li>
+      <li><code>Input</code>, <code>InputFocused</code></li>
+      <li><code>Palette</code>, <code>PaletteItem</code>, <code>PaletteSelect</code>, <code>PaletteDim</code></li>
+    </ul>
+  </div>
+  <div class="card">
+    <strong style="color:var(--accent)">Messages &amp; Tool</strong>
+    <ul style="margin-top:8px">
+      <li><code>UserMsg</code>, <code>UserLabel</code>, <code>UserBubble</code></li>
+      <li><code>AssistantMsg</code>, <code>AssistantLabel</code>, <code>AssistantBubble</code></li>
+      <li><code>ToolCall</code>, <code>ToolResult</code>, <code>ToolBox</code>, <code>ToolName</code></li>
+      <li><code>ToolHeader</code>, <code>ToolBody</code>, <code>ToolStatus</code>, <code>ToolDuration</code></li>
+      <li><code>ToolIcon</code>, <code>ToolAccent</code></li>
+    </ul>
+  </div>
+  <div class="card">
+    <strong style="color:var(--accent)">Overlays &amp; UI</strong>
+    <ul style="margin-top:8px">
+      <li><code>ConfirmBox</code>, <code>ConfirmAllow</code>, <code>ConfirmAlways</code>, <code>ConfirmReject</code>, <code>ConfirmFeedback</code></li>
+      <li><code>DiffPane</code>, <code>DiffAction</code>, <code>ActivePane</code>, <code>InactivePane</code></li>
+      <li><code>FileTree</code>, <code>FileTreeDir</code>, <code>FileTreeFile</code>, <code>FileTreeSelect</code></li>
+      <li><code>HelpBox</code></li>
+    </ul>
+  </div>
+  <div class="card">
+    <strong style="color:var(--accent)">Utility</strong>
+    <ul style="margin-top:8px">
+      <li><code>Base</code>, <code>Error</code>, <code>Border</code>, <code>Code</code>, <code>Dim</code>, <code>Bold</code></li>
+      <li><code>Success</code>, <code>Warning</code>, <code>Timestamp</code></li>
+      <li><code>SystemMsg</code></li>
+    </ul>
+  </div>
+</div>
+
+<h3 id="custom-themes">Custom Themes via CreateCustomTheme()</h3>
+
+<p>You can create themes programmatically using <code>themes.CreateCustomTheme()</code>:</p>
+
+<pre><code>// internal/tui/themes/engine.go:174
+theme := themes.CreateCustomTheme("my-theme", map[string]string{
+    "background":     "#1a1a2e",
+    "surface":        "#16213e",
+    "overlay":        "#0f3460",
+    "text":           "#e6e6e6",
+    "subtext":        "#b0b0b0",
+    "muted":          "#808080",
+    "accent":         "#e94560",
+    "accent_alt":     "#533483",
+    "green":          "#00b894",
+    "red":            "#e94560",
+    "yellow":         "#fdcb6e",
+    "blue":           "#0984e3",
+    "magenta":        "#6c5ce7",
+    "cyan":           "#00cec9",
+    "border_normal":  "#2d3436",
+    "border_focused": "#e94560",
+})
+
+engine.RegisterTheme(theme)
+engine.SetTheme("my-theme")</code></pre>
+
+<p>Register the theme with the engine, and it becomes available in the <code>/theme</code> picker alongside all built-in themes.</p>
+
+<!-- ============================================================ -->
+<h2 id="gallery">Theme Gallery</h2>
+
+<p>All 11 built-in themes with their actual color palettes. Hover over any swatch to see its hex value.</p>
+
+<div class="card-grid">
+
+  <!-- modern -->
+  <div class="theme-card">
+    <div class="theme-card-header">
+      <span class="theme-card-name">modern</span>
+      <span class="theme-card-tag default">default</span>
+    </div>
+    <div class="swatch-row">
+      <div class="swatch" style="background:#2b2b2b" title="Background"></div>
+      <div class="swatch" style="background:#3c3c3c" title="Surface"></div>
+      <div class="swatch" style="background:#4a4a4a" title="Overlay"></div>
+      <div class="swatch" style="background:#ffffff" title="Text"></div>
+      <div class="swatch" style="background:#d4d4d4" title="Subtext"></div>
+      <div class="swatch" style="background:#b3b3b3" title="Muted"></div>
+      <div class="swatch" style="background:#ffffff" title="Accent"></div>
+      <div class="swatch" style="background:#d4d4d4" title="AccentAlt"></div>
+      <div class="swatch" style="background:#a6e3a1" title="Green"></div>
+      <div class="swatch" style="background:#f38ba8" title="Red"></div>
+      <div class="swatch" style="background:#f9e2af" title="Yellow"></div>
+      <div class="swatch" style="background:#89b4fa" title="Blue"></div>
+      <div class="swatch" style="background:#cba6f7" title="Magenta"></div>
+      <div class="swatch" style="background:#89dceb" title="Cyan"></div>
+      <div class="swatch" style="background:#4a4a4a" title="BorderNormal"></div>
+      <div class="swatch" style="background:#ffffff" title="BorderFocused"></div>
+    </div>
+    <div class="theme-card-desc">Clean, grayscale-focused palette with high-contrast white accents. Minimal color noise; semantic colors borrowed from Catppuccin for visibility.</div>
+  </div>
+
+  <!-- catppuccin -->
+  <div class="theme-card">
+    <div class="theme-card-header">
+      <span class="theme-card-name">catppuccin</span>
+      <span class="theme-card-tag">Mocha</span>
+    </div>
+    <div class="swatch-row">
+      <div class="swatch" style="background:#1e1e2e" title="Background"></div>
+      <div class="swatch" style="background:#313244" title="Surface"></div>
+      <div class="swatch" style="background:#45475a" title="Overlay"></div>
+      <div class="swatch" style="background:#cdd6f4" title="Text"></div>
+      <div class="swatch" style="background:#bac2de" title="Subtext"></div>
+      <div class="swatch" style="background:#6c7086" title="Muted"></div>
+      <div class="swatch" style="background:#cba6f7" title="Accent"></div>
+      <div class="swatch" style="background:#89b4fa" title="AccentAlt"></div>
+      <div class="swatch" style="background:#a6e3a1" title="Green"></div>
+      <div class="swatch" style="background:#f38ba8" title="Red"></div>
+      <div class="swatch" style="background:#f9e2af" title="Yellow"></div>
+      <div class="swatch" style="background:#89b4fa" title="Blue"></div>
+      <div class="swatch" style="background:#cba6f7" title="Magenta"></div>
+      <div class="swatch" style="background:#89dceb" title="Cyan"></div>
+      <div class="swatch" style="background:#45475a" title="BorderNormal"></div>
+      <div class="swatch" style="background:#cba6f7" title="BorderFocused"></div>
+    </div>
+    <div class="theme-card-desc">Catppuccin Mocha. Warm, pastel palette with mauve accent. Gentle on the eyes for extended sessions.</div>
+  </div>
+
+  <!-- dracula -->
+  <div class="theme-card">
+    <div class="theme-card-header">
+      <span class="theme-card-name">dracula</span>
+      <span class="theme-card-tag">Classic</span>
+    </div>
+    <div class="swatch-row">
+      <div class="swatch" style="background:#282a36" title="Background"></div>
+      <div class="swatch" style="background:#44475a" title="Surface"></div>
+      <div class="swatch" style="background:#6272a4" title="Overlay"></div>
+      <div class="swatch" style="background:#f8f8f2" title="Text"></div>
+      <div class="swatch" style="background:#e0e0e0" title="Subtext"></div>
+      <div class="swatch" style="background:#6272a4" title="Muted"></div>
+      <div class="swatch" style="background:#bd93f9" title="Accent"></div>
+      <div class="swatch" style="background:#50fa7b" title="AccentAlt"></div>
+      <div class="swatch" style="background:#50fa7b" title="Green"></div>
+      <div class="swatch" style="background:#ff5555" title="Red"></div>
+      <div class="swatch" style="background:#f1fa8c" title="Yellow"></div>
+      <div class="swatch" style="background:#8be9fd" title="Blue"></div>
+      <div class="swatch" style="background:#bd93f9" title="Magenta"></div>
+      <div class="swatch" style="background:#8be9fd" title="Cyan"></div>
+      <div class="swatch" style="background:#44475a" title="BorderNormal"></div>
+      <div class="swatch" style="background:#bd93f9" title="BorderFocused"></div>
+    </div>
+    <div class="theme-card-desc">Dracula. Purple-dominant palette with vibrant green, pink, and cyan. Bold contrast, iconic look.</div>
+  </div>
+
+  <!-- nord -->
+  <div class="theme-card">
+    <div class="theme-card-header">
+      <span class="theme-card-name">nord</span>
+      <span class="theme-card-tag">Arctic</span>
+    </div>
+    <div class="swatch-row">
+      <div class="swatch" style="background:#2e3440" title="Background"></div>
+      <div class="swatch" style="background:#3b4252" title="Surface"></div>
+      <div class="swatch" style="background:#434c5e" title="Overlay"></div>
+      <div class="swatch" style="background:#eceff4" title="Text"></div>
+      <div class="swatch" style="background:#e5e9f0" title="Subtext"></div>
+      <div class="swatch" style="background:#4c566a" title="Muted"></div>
+      <div class="swatch" style="background:#88c0d0" title="Accent"></div>
+      <div class="swatch" style="background:#81a1c1" title="AccentAlt"></div>
+      <div class="swatch" style="background:#a3be8c" title="Green"></div>
+      <div class="swatch" style="background:#bf616a" title="Red"></div>
+      <div class="swatch" style="background:#ebcb8b" title="Yellow"></div>
+      <div class="swatch" style="background:#81a1c1" title="Blue"></div>
+      <div class="swatch" style="background:#b48ead" title="Magenta"></div>
+      <div class="swatch" style="background:#88c0d0" title="Cyan"></div>
+      <div class="swatch" style="background:#434c5e" title="BorderNormal"></div>
+      <div class="swatch" style="background:#88c0d0" title="BorderFocused"></div>
+    </div>
+    <div class="theme-card-desc">Nord. Cool arctic blues with frosty cyan accent. Calm, muted tones inspired by the Aurora Borealis.</div>
+  </div>
+
+  <!-- gruvbox -->
+  <div class="theme-card">
+    <div class="theme-card-header">
+      <span class="theme-card-name">gruvbox</span>
+      <span class="theme-card-tag">Dark</span>
+    </div>
+    <div class="swatch-row">
+      <div class="swatch" style="background:#282828" title="Background"></div>
+      <div class="swatch" style="background:#3c3836" title="Surface"></div>
+      <div class="swatch" style="background:#504945" title="Overlay"></div>
+      <div class="swatch" style="background:#ebdbb2" title="Text"></div>
+      <div class="swatch" style="background:#d5c4a1" title="Subtext"></div>
+      <div class="swatch" style="background:#928374" title="Muted"></div>
+      <div class="swatch" style="background:#fe8019" title="Accent"></div>
+      <div class="swatch" style="background:#fabd2f" title="AccentAlt"></div>
+      <div class="swatch" style="background:#b8bb26" title="Green"></div>
+      <div class="swatch" style="background:#fb4934" title="Red"></div>
+      <div class="swatch" style="background:#fabd2f" title="Yellow"></div>
+      <div class="swatch" style="background:#83a598" title="Blue"></div>
+      <div class="swatch" style="background:#d3869b" title="Magenta"></div>
+      <div class="swatch" style="background:#8ec07c" title="Cyan"></div>
+      <div class="swatch" style="background:#504945" title="BorderNormal"></div>
+      <div class="swatch" style="background:#fe8019" title="BorderFocused"></div>
+    </div>
+    <div class="theme-card-desc">Gruvbox Dark. Warm retro palette with orange accent and earthy greens/browns. Cozy and readable.</div>
+  </div>
+
+  <!-- onedark -->
+  <div class="theme-card">
+    <div class="theme-card-header">
+      <span class="theme-card-name">onedark</span>
+      <span class="theme-card-tag">Atom</span>
+    </div>
+    <div class="swatch-row">
+      <div class="swatch" style="background:#282c34" title="Background"></div>
+      <div class="swatch" style="background:#353b45" title="Surface"></div>
+      <div class="swatch" style="background:#3e4451" title="Overlay"></div>
+      <div class="swatch" style="background:#abb2bf" title="Text"></div>
+      <div class="swatch" style="background:#9da5b4" title="Subtext"></div>
+      <div class="swatch" style="background:#5c6370" title="Muted"></div>
+      <div class="swatch" style="background:#61afef" title="Accent"></div>
+      <div class="swatch" style="background:#c678dd" title="AccentAlt"></div>
+      <div class="swatch" style="background:#98c379" title="Green"></div>
+      <div class="swatch" style="background:#e06c75" title="Red"></div>
+      <div class="swatch" style="background:#e5c07b" title="Yellow"></div>
+      <div class="swatch" style="background:#61afef" title="Blue"></div>
+      <div class="swatch" style="background:#c678dd" title="Magenta"></div>
+      <div class="swatch" style="background:#56b6c2" title="Cyan"></div>
+      <div class="swatch" style="background:#3e4451" title="BorderNormal"></div>
+      <div class="swatch" style="background:#61afef" title="BorderFocused"></div>
+    </div>
+    <div class="theme-card-desc">Atom One Dark. Blue accent with purple alt. Balanced contrast, familiar from Atom editor.</div>
+  </div>
+
+  <!-- tokyonight -->
+  <div class="theme-card">
+    <div class="theme-card-header">
+      <span class="theme-card-name">tokyonight</span>
+      <span class="theme-card-tag">Night</span>
+    </div>
+    <div class="swatch-row">
+      <div class="swatch" style="background:#1a1b26" title="Background"></div>
+      <div class="swatch" style="background:#24283b" title="Surface"></div>
+      <div class="swatch" style="background:#414868" title="Overlay"></div>
+      <div class="swatch" style="background:#c0caf5" title="Text"></div>
+      <div class="swatch" style="background:#a9b1d6" title="Subtext"></div>
+      <div class="swatch" style="background:#565f89" title="Muted"></div>
+      <div class="swatch" style="background:#7aa2f7" title="Accent"></div>
+      <div class="swatch" style="background:#bb9af7" title="AccentAlt"></div>
+      <div class="swatch" style="background:#9ece6a" title="Green"></div>
+      <div class="swatch" style="background:#f7768e" title="Red"></div>
+      <div class="swatch" style="background:#e0af68" title="Yellow"></div>
+      <div class="swatch" style="background:#7aa2f7" title="Blue"></div>
+      <div class="swatch" style="background:#bb9af7" title="Magenta"></div>
+      <div class="swatch" style="background:#7dcfff" title="Cyan"></div>
+      <div class="swatch" style="background:#414868" title="BorderNormal"></div>
+      <div class="swatch" style="background:#7aa2f7" title="BorderFocused"></div>
+    </div>
+    <div class="theme-card-desc">Tokyo Night. Deep indigo with blue-violet accents. Moody and immersive, inspired by Tokyo's nightscape.</div>
+  </div>
+
+  <!-- solarized-dark -->
+  <div class="theme-card">
+    <div class="theme-card-header">
+      <span class="theme-card-name">solarized-dark</span>
+      <span class="theme-card-tag">Ethan Schoonover</span>
+    </div>
+    <div class="swatch-row">
+      <div class="swatch" style="background:#002b36" title="Background"></div>
+      <div class="swatch" style="background:#073642" title="Surface"></div>
+      <div class="swatch" style="background:#586e75" title="Overlay"></div>
+      <div class="swatch" style="background:#839496" title="Text"></div>
+      <div class="swatch" style="background:#93a1a1" title="Subtext"></div>
+      <div class="swatch" style="background:#657b83" title="Muted"></div>
+      <div class="swatch" style="background:#268bd2" title="Accent"></div>
+      <div class="swatch" style="background:#2aa198" title="AccentAlt"></div>
+      <div class="swatch" style="background:#859900" title="Green"></div>
+      <div class="swatch" style="background:#dc322f" title="Red"></div>
+      <div class="swatch" style="background:#b58900" title="Yellow"></div>
+      <div class="swatch" style="background:#268bd2" title="Blue"></div>
+      <div class="swatch" style="background:#d33682" title="Magenta"></div>
+      <div class="swatch" style="background:#2aa198" title="Cyan"></div>
+      <div class="swatch" style="background:#586e75" title="BorderNormal"></div>
+      <div class="swatch" style="background:#268bd2" title="BorderFocused"></div>
+    </div>
+    <div class="theme-card-desc">Solarized Dark. Precision-crafted color relationships with blue accent. Scientifically balanced contrast.</div>
+  </div>
+
+  <!-- solarized-light -->
+  <div class="theme-card">
+    <div class="theme-card-header">
+      <span class="theme-card-name">solarized-light</span>
+      <span class="theme-card-tag">Light</span>
+    </div>
+    <div class="swatch-row">
+      <div class="swatch" style="background:#fdf6e3" title="Background"></div>
+      <div class="swatch" style="background:#eee8d5" title="Surface"></div>
+      <div class="swatch" style="background:#93a1a1" title="Overlay"></div>
+      <div class="swatch" style="background:#657b83" title="Text"></div>
+      <div class="swatch" style="background:#586e75" title="Subtext"></div>
+      <div class="swatch" style="background:#839496" title="Muted"></div>
+      <div class="swatch" style="background:#268bd2" title="Accent"></div>
+      <div class="swatch" style="background:#2aa198" title="AccentAlt"></div>
+      <div class="swatch" style="background:#859900" title="Green"></div>
+      <div class="swatch" style="background:#dc322f" title="Red"></div>
+      <div class="swatch" style="background:#b58900" title="Yellow"></div>
+      <div class="swatch" style="background:#268bd2" title="Blue"></div>
+      <div class="swatch" style="background:#d33682" title="Magenta"></div>
+      <div class="swatch" style="background:#2aa198" title="Cyan"></div>
+      <div class="swatch" style="background:#93a1a1" title="BorderNormal"></div>
+      <div class="swatch" style="background:#268bd2" title="BorderFocused"></div>
+    </div>
+    <div class="theme-card-desc">Solarized Light. Warm parchment background with the same precise color relationships as its dark sibling.</div>
+  </div>
+
+  <!-- high-contrast -->
+  <div class="theme-card">
+    <div class="theme-card-header">
+      <span class="theme-card-name">high-contrast</span>
+      <span class="theme-card-tag">A11y</span>
+    </div>
+    <div class="swatch-row">
+      <div class="swatch" style="background:#000000" title="Background"></div>
+      <div class="swatch" style="background:#1a1a1a" title="Surface"></div>
+      <div class="swatch" style="background:#333333" title="Overlay"></div>
+      <div class="swatch" style="background:#ffffff" title="Text"></div>
+      <div class="swatch" style="background:#e0e0e0" title="Subtext"></div>
+      <div class="swatch" style="background:#999999" title="Muted"></div>
+      <div class="swatch" style="background:#00ff00" title="Accent"></div>
+      <div class="swatch" style="background:#00ffff" title="AccentAlt"></div>
+      <div class="swatch" style="background:#00ff00" title="Green"></div>
+      <div class="swatch" style="background:#ff0000" title="Red"></div>
+      <div class="swatch" style="background:#ffff00" title="Yellow"></div>
+      <div class="swatch" style="background:#0080ff" title="Blue"></div>
+      <div class="swatch" style="background:#ff00ff" title="Magenta"></div>
+      <div class="swatch" style="background:#00ffff" title="Cyan"></div>
+      <div class="swatch" style="background:#666666" title="BorderNormal"></div>
+      <div class="swatch" style="background:#ffffff" title="BorderFocused"></div>
+    </div>
+    <div class="theme-card-desc">High Contrast. Pure black background with maximum-saturation primaries. Meets WCAG AAA for accessibility.</div>
+  </div>
+
+  <!-- monokai -->
+  <div class="theme-card">
+    <div class="theme-card-header">
+      <span class="theme-card-name">monokai</span>
+      <span class="theme-card-tag">Classic</span>
+    </div>
+    <div class="swatch-row">
+      <div class="swatch" style="background:#272822" title="Background"></div>
+      <div class="swatch" style="background:#3e3d32" title="Surface"></div>
+      <div class="swatch" style="background:#49483e" title="Overlay"></div>
+      <div class="swatch" style="background:#f8f8f2" title="Text"></div>
+      <div class="swatch" style="background:#cfcfc2" title="Subtext"></div>
+      <div class="swatch" style="background:#75715e" title="Muted"></div>
+      <div class="swatch" style="background:#a6e22e" title="Accent"></div>
+      <div class="swatch" style="background:#66d9ef" title="AccentAlt"></div>
+      <div class="swatch" style="background:#a6e22e" title="Green"></div>
+      <div class="swatch" style="background:#f92672" title="Red"></div>
+      <div class="swatch" style="background:#e6db74" title="Yellow"></div>
+      <div class="swatch" style="background:#66d9ef" title="Blue"></div>
+      <div class="swatch" style="background:#ae81ff" title="Magenta"></div>
+      <div class="swatch" style="background:#66d9ef" title="Cyan"></div>
+      <div class="swatch" style="background:#49483e" title="BorderNormal"></div>
+      <div class="swatch" style="background:#a6e22e" title="BorderFocused"></div>
+    </div>
+    <div class="theme-card-desc">Monokai. The original sublime text theme. Vibrant green accent on warm dark, nostalgic and energetic.</div>
+  </div>
+
+</div>
+
+<!-- ============================================================ -->
+<h2 id="switching">Switching Themes</h2>
+
+<h3>Interactive Theme Picker</h3>
+<pre><code>/theme</code></pre>
+<p>Opens the Spotlight-style theme picker with a scrollable list of all registered themes. The currently active theme is marked with <span style="color:var(--green)">(current)</span>.</p>
+
+<h3>Direct Switch</h3>
+<pre><code>/theme catppuccin
+/theme dracula
+/theme high-contrast</code></pre>
+<p>Switches to the named theme immediately. All UI elements repaint in one frame. The engine rebuilds every lipgloss style, markdown renderer, and diff palette from the new color slots.</p>
+
+<h3>Keyboard Navigation in Theme Picker</h3>
+<table>
+<thead><tr><th>Key</th><th>Action</th></tr></thead>
+<tbody>
+<tr><td><kbd>↑</kbd> <kbd>k</kbd></td><td>Move selection up</td></tr>
+<tr><td><kbd>↓</kbd> <kbd>j</kbd> <kbd>Tab</kbd></td><td>Move selection down</td></tr>
+<tr><td><kbd>Enter</kbd></td><td>Apply selected theme</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>Cancel and close picker</td></tr>
+<tr><td><kbd>Ctrl+Tab</kbd></td><td>Jump to next section (in palette categories)</td></tr>
+</tbody>
+</table>
+
+<div class="info">
+  <strong>Programmatic switching:</strong> The <code>ThemeEngine.SetTheme()</code> method accepts a name string and returns a boolean. Call <code>CycleTheme()</code> to iterate through all themes. Use <code>OnThemeChange()</code> to register listeners that fire on every switch.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="layout">TUI Layout</h2>
+
+<p>The Automergent TUI is a full-screen terminal application built with Bubble Tea. Every element adapts to the active theme:</p>
+
+<div class="layout-diagram"><span class="lbl">┌─ Header Bar ─────────────────────────────────────────────────────┐</span>
+<span class="dim">│ ✦ AUTOMERGENT   claude-3.5-sonnet · $0.12 · 14.2k tok · main   │</span>
+<span class="lbl">├──────────────────────────────────────────────────────────────────┤</span>
+<span class="dim">│                                                                  │</span>
+<span class="dim">│  <span style="color:var(--accent)">╭─ User ─────────────────────────────────────╮</span>                  │</span>
+<span class="dim">│  <span style="color:var(--accent)">│ Refactor the auth module to use JWT</span>         <span style="color:var(--accent)">│</span>                  │</span>
+<span class="dim">│  <span style="color:var(--accent)">╰─────────────────────────────────────────────╯</span>                  │</span>
+<span class="dim">│                                                                  │</span>
+<span class="dim">│  <span style="color:#a6e3a1">● Read</span>  internal/auth/handler.go · L1–120 · 120 lines    12ms  │</span>
+<span class="dim">│  <span style="color:#a6e3a1">● Edit</span>  handler.go · 3 lines replaced                   8ms  │</span>
+<span class="dim">│    <span style="color:#a6e3a1">+3</span> <span style="color:#f38ba8">−1</span> ────────────────────────────────────                      │</span>
+<span class="dim">│     <span style="color:#89b4fa">22</span> │  token, err := jwt.Sign(token, secret)                     │</span>
+<span class="dim">│    <span style="color:#f38ba8"> 21</span> │  token, err := jwt.Sign(token, secret, jwt.SigningMethodRS256)│</span>
+<span class="dim">│                                                                  │</span>
+<span class="dim">│  <span style="color:#89b4fa">● Bash</span> <span style="color:#8b949e">─────────────────────────────────</span> <span style="color:#a6e3a1">✓ exit 0</span>        2s    │</span>
+<span class="dim">│    <span style="color:#8b949e">$ go test ./internal/auth/...</span>                                     │</span>
+<span class="dim">│    <span style="color:#8b949e">ok   github.com/.../auth  0.847s</span>                                   │</span>
+<span class="dim">│                                                                  │</span>
+<span class="lbl">├─ Input Area ─────────────────────────────────────────────────────┤</span>
+<span class="dim">│ <span style="color:var(--accent)">└─</span> <span style="color:#6e7681">accept-edits</span> mode · <span style="color:#6e7681">esc interrupts · ctrl+c stops</span>            │</span>
+<span class="dim">│<span style="color:#6e7681">│ Type a message…                                                  │</span></span>
+<span class="lbl">├──────────────────────────────────────────────────────────────────┤</span>
+<span class="dim">│ <span style="color:#6e7681">▐ ACCEPT EDITS ▌  ▸ read_file…      ctx 12% ##──────     main</span>    │</span>
+<span class="lbl">└──────────────────────────────────────────────────────────────────┘</span></div>
+
+<h3 id="header">Header Bar</h3>
+<p>The floating pill header displays at the top, showing:</p>
+<ul>
+  <li><strong>Brand mark</strong> &mdash; the <code>✦</code> glyph in theme's Blue color, followed by <code>AUTOMERGENT</code></li>
+  <li><strong>Model &amp; provider</strong> &mdash; current model name and provider icon</li>
+  <li><strong>Cost</strong> &mdash; session cost in USD ($0.00 format)</li>
+  <li><strong>Token meter</strong> &mdash; context usage bar (current tokens / max window)</li>
+  <li><strong>Git branch</strong> &mdash; active branch name from the working directory</li>
+  <li><strong>Phase pill</strong> &mdash; <code>init</code>, <code>explore</code>, <code>plan</code>, or <code>build</code> (color-coded)</li>
+  <li><strong>Effort</strong> &mdash; thinking effort level: <code>low</code>, <code>medium</code>, <code>high</code>, <code>max</code></li>
+</ul>
+
+<h3 id="conversation">Conversation Area</h3>
+<p>The main scrollable region displays the conversation as styled message bubbles:</p>
+<ul>
+  <li><strong>User messages</strong> &mdash; right-aligned with <code>UserBubble</code> (Surface bg, Text fg) and <code>UserLabel</code></li>
+  <li><strong>Assistant messages</strong> &mdash; left-aligned with markdown rendering (glamour) using theme-derived syntax highlighting</li>
+  <li><strong>Tool cards</strong> &mdash; inline cards rendered by per-family renderers (see <a href="#tool-cards">Tool Card Rendering</a>)</li>
+  <li><strong>System messages</strong> &mdash; italic, Muted color</li>
+</ul>
+
+<h3 id="input">Input Area</h3>
+<p>A thin border-topped text input sits below the conversation. Displays:</p>
+<ul>
+  <li><strong>Approval mode indicator</strong> &mdash; <code>manual</code>, <code>accept-edits</code>, <code>auto</code>, or <code>plan</code> (shown in status bar)</li>
+  <li><strong>Context-aware hints</strong> &mdash; dynamic keybinding hints above the input change based on state (idle, running, palette open)</li>
+  <li><strong>Queue strip</strong> &mdash; when messages are queued, a strip shows them with <kbd>Ctrl+X</kbd> drop / <kbd>Ctrl+O</kbd> edit controls</li>
+</ul>
+
+<h3 id="dock">Bottom Dock</h3>
+<p>The dock sits below the status bar and shows running background processes:</p>
+<ul>
+  <li><strong>Background shells</strong> &mdash; one row per running command with live status glyph</li>
+  <li><strong>Sub-agents</strong> &mdash; one row per spawned agent with kind label and progress</li>
+  <li><strong>Status marks</strong> &mdash; <code style="color:var(--green)">✓</code> success, <code style="color:var(--red)">✗</code> failure, <code style="color:var(--yellow)">●</code> running, <code style="color:var(--text-muted)">◌</code> idle</li>
+  <li><strong>Collapse</strong> &mdash; dock collapses to a single line when empty; expands automatically on activity</li>
+</ul>
+
+<h3 id="statusbar">Status Bar</h3>
+<p>The bottom bar shows the current state with independent slots:</p>
+<ul>
+  <li><strong>Mode chip</strong> &mdash; colored approval mode indicator (<code style="background:var(--green);color:#000">MANUAL</code>, <code style="background:var(--accent-dim);color:#fff">ACCEPT EDITS</code>, etc.)</li>
+  <li><strong>Activity</strong> &mdash; transient status: <code>thinking…</code>, <code>▸ read_file…</code>, <code>retrying (3/10)</code></li>
+  <li><strong>Outcome</strong> &mdash; sticky result: <code>CANCELLED</code>, <code>ERROR</code></li>
+  <li><strong>HUD segments</strong> &mdash; context usage bar (<code>ctx 12% ##──────</code>), git branch, pending edits count, problems count</li>
+  <li><strong>Work dir</strong> &mdash; <code>~</code>-abbreviated project path on the left edge</li>
+  <li><strong>Clock</strong> &mdash; user's local time, auto-detected from IP</li>
+</ul>
+
+<h3 id="diff">Diff Pane</h3>
+<p>Toggle with <kbd>Ctrl+D</kbd> or <code>/diff</code>. Shows a file-tabbed diff view of all edits made this session:</p>
+<ul>
+  <li><strong>File tabs</strong> &mdash; one tab per modified file with status icon</li>
+  <li><strong>Inline diffs</strong> &mdash; theme-colored additions (<code>Green</code> bg tint) and deletions (<code>Red</code> bg tint)</li>
+  <li><strong>Word-level diffs</strong> &mdash; highlighted within changed lines using <code>Mix()</code> blends</li>
+  <li><strong>Navigation</strong> &mdash; <kbd>↑</kbd>/<kbd>↓</kbd> or <kbd>j</kbd>/<kbd>k</kbd> to move between files, <kbd>Esc</kbd> to close</li>
+</ul>
+
+<h3 id="filetree">File Tree Sidebar</h3>
+<p>Toggle with <kbd>Ctrl+T</kbd> or <code>/tree</code> (alias <code>/files</code>). Displays a navigable project file tree:</p>
+<ul>
+  <li><strong>Directories</strong> &mdash; <code>FileTreeDir</code> style (Blue, bold)</li>
+  <li><strong>Files</strong> &mdash; <code>FileTreeFile</code> style (Text color)</li>
+  <li><strong>Selection</strong> &mdash; <code>FileTreeSelect</code> highlight (Surface bg, Accent fg)</li>
+  <li><strong>Navigable</strong> &mdash; arrow keys to move, Enter to open in diff pane or insert path</li>
+</ul>
+
+<h3 id="palette">Command Palette</h3>
+<p>Spotlight-style command palette, opened with <kbd>Ctrl+P</kbd> or by typing <code>/</code> in the input:</p>
+<ul>
+  <li><strong>Fuzzy search</strong> &mdash; type to filter all commands, themes, and keybinding schemes</li>
+  <li><strong>Section jumps</strong> &mdash; <kbd>Shift+Tab</kbd> / <kbd>Ctrl+Tab</kbd> to jump between categories</li>
+  <li><strong>Sub-palettes</strong> &mdash; commands like <code>/theme</code> and <code>/keybindings</code> open dedicated sub-palettes with their own items</li>
+  <li><strong>Command hints</strong> &mdash; each item shows its icon, label, and description in a dim color</li>
+  <li><strong>Current indicator</strong> &mdash; active theme/keybinding/model marked with <span style="color:var(--green)">(current)</span></li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="tool-cards">Tool Card Rendering</h2>
+
+<p>Every tool call is rendered as a compact card in the conversation area. Automergent uses <strong>per-family renderers</strong> that collapse verbose output into scannable one-liners:</p>
+
+<div class="card" style="margin-bottom:20px">
+  <strong style="color:var(--accent)">Renderer files:</strong>
+  <code>tool_read.go</code> &middot; <code>tool_edit.go</code> &middot; <code>tool_terminal.go</code> &middot; <code>tool_box.go</code> &middot; <code>tool_web.go</code> &middot; <code>tool_agent.go</code> &middot; <code>tool_inspect.go</code>
+</div>
+
+<h3 id="tool-read">Read Cards (tool_read.go)</h3>
+
+<p>Reads are <strong>always one line</strong>, even for 500-line files. What matters is <em>which file</em> and <em>how much</em>, not the contents:</p>
+
+<pre><code><span style="color:var(--green)">●</span> <span style="color:var(--text)">Read</span>  internal/tui/components/tool_box.go · L40–160 · 121 lines    12ms
+<span style="color:var(--green)">●</span> <span style="color:var(--text)">Read</span>  src/main.rs · L1→ · 45 lines                              8ms
+<span style="color:var(--green)">●</span> <span style="color:var(--text)">List</span>  internal/tui/components/ · 24 entries                       3ms
+<span style="color:var(--green)">●</span> <span style="color:var(--text)">Grep</span>  "TODO|FIXME" · 14 matches across 6 files                 22ms</code></pre>
+
+<p>The call line carries chips for the line range (<code>L40–160</code>), line count, and duration. Errors show the first line of error text as a chip.</p>
+
+<h3 id="tool-edit">Edit Cards (tool_edit.go)</h3>
+
+<p>Edits expand to show the diff &mdash; vertical space is always worth spending here:</p>
+
+<pre><code><span style="color:var(--yellow)">●</span> <span style="color:var(--text)">Edit</span>  handler.go  ·  1 line replaced                              8ms
+  <span style="color:var(--green)">+1</span> <span style="color:var(--red)">−1</span> ──────────────────────────────────────────
+     <span style="color:var(--text-muted)">34</span> │ <span style="color:var(--text)">limit := c.tailLimit()</span>
+     <span style="color:var(--text-muted)">35</span> │ <span style="color:var(--text)">limit := c.tailLimit() + 2</span>
+     <span style="color:var(--text-muted)">↑</span> <span style="color:var(--text-muted)">first 3 hidden · ctrl+e expands</span></code></pre>
+
+<p>Diff boxes use theme-derived colors: additions get a Green-tinted background, deletions get Red-tinted. Word-level changes are highlighted within lines using <code>Mix()</code> blends at higher saturation.</p>
+
+<h3 id="tool-terminal">Terminal Cards (tool_terminal.go)</h3>
+
+<p>Terminal output shows a themed slab (Surface background) with the command and merged output tail:</p>
+
+<pre><code><span style="color:var(--blue)">●</span> <span style="color:var(--text)">Bash</span> <span style="color:var(--text-muted)">─────────────────────────────────────</span> <span style="color:var(--green)">✓ exit 0</span>        2s
+  <span style="color:var(--text-muted)">$ go test ./internal/auth/...</span>
+  <span style="color:var(--text-muted)">ok   github.com/.../auth  0.847s</span></code></pre>
+
+<p>The command appears <strong>once</strong> on the <code>$</code> row. Stderr sections and failure preambles are stripped since the exit-chip already conveys the result. Running commands show <code style="color:var(--yellow)">◌ running…</code> and expand as output arrives.</p>
+
+<h3>Tool Card Anatomy</h3>
+
+<table>
+<thead><tr><th>Element</th><th>Style</th><th>Description</th></tr></thead>
+<tbody>
+<tr><td>Glyph</td><td><code>statusGlyph()</code></td><td><code style="color:var(--green)">●</code> success, <code style="color:var(--red)">●</code> error, <code style="color:var(--yellow)">●</code> running, <code style="color:var(--text-muted)">◌</code> pending</td></tr>
+<tr><td>Name</td><td><code>ToolName</code></td><td>Bold text in tool's accent color</td></tr>
+<tr><td>Subject</td><td>Dim</td><td>File path, command, or search pattern</td></tr>
+<tr><td>Chips</td><td>Dim</td><td>Metadata: line ranges, line counts, exit codes</td></tr>
+<tr><td>Duration</td><td><code>ToolDuration</code></td><td>Muted italic, right-aligned</td></tr>
+<tr><td>Body</td><td><code>ToolBox</code></td><td>Surface-bg panel with diff, output, or error</td></tr>
+<tr><td>Expand hint</td><td>Dim</td><td><code>ctrl+e expands</code> when output is truncated</td></tr>
+</tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="keybindings">Keyboard Shortcuts</h2>
+
+<p>Automergent supports three keybinding schemes. Switch with <code>/keybindings</code> or <code>/keys</code>:</p>
+
+<h3>Default Scheme</h3>
+<table>
+<thead><tr><th>Key</th><th>Action</th></tr></thead>
+<tbody>
+<tr><td><kbd>Enter</kbd></td><td>Submit message</td></tr>
+<tr><td><kbd>Ctrl+C</kbd></td><td>Quit (press twice to force exit)</td></tr>
+<tr><td><kbd>Ctrl+Q</kbd></td><td>Quit (alias)</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>Cancel / interrupt / close overlay</td></tr>
+<tr><td><kbd>Ctrl+D</kbd></td><td>Toggle diff pane</td></tr>
+<tr><td><kbd>Ctrl+L</kbd></td><td>Toggle LSP integration</td></tr>
+<tr><td><kbd>Ctrl+S</kbd></td><td>Open session list</td></tr>
+<tr><td><kbd>Ctrl+N</kbd></td><td>New session</td></tr>
+<tr><td><kbd>Ctrl+U</kbd></td><td>Clear input</td></tr>
+<tr><td><kbd>↑</kbd> / <kbd>k</kbd></td><td>Scroll up</td></tr>
+<tr><td><kbd>↓</kbd> / <kbd>j</kbd></td><td>Scroll down</td></tr>
+<tr><td><kbd>PgUp</kbd></td><td>Page up</td></tr>
+<tr><td><kbd>PgDn</kbd></td><td>Page down</td></tr>
+<tr><td><kbd>Ctrl+J</kbd></td><td>Send after current tool / steer at tool boundary</td></tr>
+<tr><td><kbd>Ctrl+P</kbd></td><td>Open command palette</td></tr>
+<tr><td><kbd>Ctrl+T</kbd></td><td>Toggle file tree</td></tr>
+<tr><td><kbd>Ctrl+W</kbd></td><td>Toggle diff pane (alias)</td></tr>
+<tr><td><kbd>Ctrl+E</kbd></td><td>Expand truncated tool output</td></tr>
+<tr><td><kbd>Ctrl+R</kbd></td><td>Toggle review mode / inline rename</td></tr>
+<tr><td><kbd>Ctrl+X</kbd></td><td>Drop queued message</td></tr>
+<tr><td><kbd>Ctrl+O</kbd></td><td>Pull queued message back into input</td></tr>
+<tr><td><kbd>Shift+↑/↓</kbd></td><td>Select in queue strip</td></tr>
+<tr><td><kbd>Y</kbd> / <kbd>N</kbd></td><td>Confirm / deny in approval dialogs</td></tr>
+</tbody>
+</table>
+
+<h3>Vim Scheme</h3>
+<table>
+<thead><tr><th>Key</th><th>Differs from Default</th></tr></thead>
+<tbody>
+<tr><td><kbd>k</kbd></td><td>Scroll up (primary)</td></tr>
+<tr><td><kbd>j</kbd></td><td>Scroll down (primary)</td></tr>
+<tr><td><kbd>Ctrl+U</kbd></td><td>Page up</td></tr>
+<tr><td><kbd>Ctrl+D</kbd></td><td>Page down</td></tr>
+<tr><td><kbd>q</kbd></td><td>Quit (alongside <kbd>Ctrl+C</kbd>)</td></tr>
+<tr><td><kbd>Esc</kbd></td><td>Cancel (same as default)</td></tr>
+</tbody>
+</table>
+
+<h3>Emacs Scheme</h3>
+<table>
+<thead><tr><th>Key</th><th>Differs from Default</th></tr></thead>
+<tbody>
+<tr><td><kbd>Ctrl+P</kbd></td><td>Scroll up (primary)</td></tr>
+<tr><td><kbd>Ctrl+N</kbd></td><td>Scroll down (primary)</td></tr>
+<tr><td><kbd>Alt+V</kbd></td><td>Page up</td></tr>
+<tr><td><kbd>Ctrl+V</kbd></td><td>Page down</td></tr>
+<tr><td><kbd>Ctrl+K</kbd></td><td>Clear input</td></tr>
+<tr><td><kbd>Ctrl+G</kbd></td><td>Cancel (primary)</td></tr>
+</tbody>
+</table>
+
+<h3>Switching Schemes</h3>
+<pre><code>/keybindings default
+/keybindings vim
+/keybindings emacs</code></pre>
+<p>Or open the sub-palette with <code>/keybindings</code> (no args) and select interactively.</p>
+
+<!-- ============================================================ -->
+<h2 id="notifications">Notification System</h2>
+
+<p>Automergent delivers notifications through multiple channels, configured in <code>config.yaml</code>:</p>
+
+<pre><code>notifications:
+  desktop: true        # OS-level desktop notifications
+  bell: true           # Terminal bell (\a) on completion
+  contextWarning: true # Warning when context window is nearly full</code></pre>
+
+<h3>Desktop Notifications</h3>
+<p>When <code>desktop: true</code>, Automergent sends OS-level notifications via the terminal's notification protocol. Triggered when:</p>
+<ul>
+  <li>A background shell completes or fails</li>
+  <li>A sub-agent finishes its task</li>
+  <li>The context window reaches a critical threshold</li>
+  <li>A session requires user interaction after being idle</li>
+</ul>
+
+<h3>Terminal Bell</h3>
+<p>When <code>bell: true</code>, a <code>\a</code> (BEL) character is emitted for:</p>
+<ul>
+  <li>Tool completion requiring approval</li>
+  <li>Error conditions that need attention</li>
+  <li>Background process state changes</li>
+</ul>
+
+<h3>Context Warnings</h3>
+<p>When <code>contextWarning: true</code>, the system warns before the context window fills up:</p>
+<ul>
+  <li><strong>80% usage</strong> &mdash; info-level toast: <em>"Context 80% full — consider compacting"</em></li>
+  <li><strong>90% usage</strong> &mdash; warning toast: <em>"Context nearly full — auto-compact will trigger"</em></li>
+  <li><strong>Auto-compact</strong> &mdash; automatic summarization when the threshold is reached</li>
+  <li><strong>Blocking limit</strong> &mdash; new messages are blocked until compaction completes</li>
+</ul>
+
+<h3>Toast Stack</h3>
+<p>In-app notifications appear as toast cards above the status bar:</p>
+<ul>
+  <li><strong>Max 3 visible</strong> &mdash; oldest evicted when exceeding the cap</li>
+  <li><strong>Auto-expire</strong> &mdash; 6 second TTL, then fade out</li>
+  <li><strong>Levels</strong> &mdash; <code>info</code> (accent border), <code>warn</code> (yellow border), <code>error</code> (red border)</li>
+  <li><strong>Fallback</strong> &mdash; when toast stack is unavailable, messages go to the status bar</li>
+</ul>
+
+<h3>Background Task Notifications</h3>
+<p>Both shell and agent managers emit completion hooks wired in <code>notifications.go</code>:</p>
+<pre><code>// Shell completion → toast
+shellNotificationMsg{
+    id:       "sh-001",
+    command:  "go test ./...",
+    status:   "success",
+    exitCode: 0,
+    duration: 2.3s,
+}
+
+// Agent completion → toast
+agentNotificationMsg{
+    id:     "agent-042",
+    name:   "refactor-auth",
+    kind:   "sub-agent",
+    status: "success",
+    summary: "Refactored 3 files, added JWT validation",
+    duration: 45s,
+}</code></pre>
+
+<div class="info">
+  <strong>Notification rate limiting:</strong> The <code>NotifyTool</code> enforces rate limits via <code>SetNotifyRateLimit()</code>. Notifications exceeding the limit are dropped or summarized to avoid spamming the user during high-frequency tool execution.
+</div>
+
+</div><!-- .main -->
+
+<script src="../js/nav.js"></script>
+<script src="../js/footer.js"></script>
+</body>
+</html>

@@ -1,0 +1,1039 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Architecture &amp; Concepts — Automergent</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d1117;
+      --bg-card:   #161b22;
+      --bg-code:   #1c2128;
+      --border:    #30363d;
+      --text:      #c9d1d9;
+      --text-dim:  #8b949e;
+      --accent:    #58a6ff;
+      --accent2:   #3fb950;
+      --accent3:   #d2a8ff;
+      --accent4:   #f0883e;
+      --danger:    #f85149;
+      --sidebar-w: 280px;
+      --mono:      'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', Consolas, monospace;
+      --sans:      -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ── Sidebar ── */
+    .sidebar {
+      position: fixed;
+      top: 0; left: 0;
+      width: var(--sidebar-w);
+      height: 100vh;
+      background: var(--bg-card);
+      border-right: 1px solid var(--border);
+      overflow-y: auto;
+      padding: 24px 0;
+      z-index: 100;
+      scrollbar-width: thin;
+      scrollbar-color: var(--border) transparent;
+    }
+
+    .sidebar-title {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      padding: 0 20px 12px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+
+    .sidebar nav a {
+      display: block;
+      padding: 6px 20px;
+      font-size: 13px;
+      color: var(--text-dim);
+      text-decoration: none;
+      transition: color .15s, background .15s;
+      border-left: 3px solid transparent;
+    }
+
+    .sidebar nav a:hover,
+    .sidebar nav a.active {
+      color: var(--accent);
+      background: rgba(88,166,255,.06);
+      border-left-color: var(--accent);
+    }
+
+    .sidebar nav a.sub {
+      padding-left: 36px;
+      font-size: 12px;
+    }
+
+    .sidebar nav .section-label {
+      display: block;
+      padding: 14px 20px 4px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-dim);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+
+    /* ── Main ── */
+    .main {
+      margin-left: var(--sidebar-w);
+      flex: 1;
+      max-width: 900px;
+      padding: 48px 56px 120px;
+    }
+
+    h1 {
+      font-size: 36px;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      font-size: 16px;
+      color: var(--text-dim);
+      margin-bottom: 48px;
+    }
+
+    h2 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+      margin-top: 56px;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    h3 {
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--accent);
+      margin-top: 32px;
+      margin-bottom: 12px;
+    }
+
+    h4 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--accent3);
+      margin-top: 24px;
+      margin-bottom: 8px;
+    }
+
+    p { margin-bottom: 14px; }
+
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    strong { color: #e6edf3; }
+
+    ul, ol {
+      margin-bottom: 14px;
+      padding-left: 24px;
+    }
+    li { margin-bottom: 4px; }
+
+    code {
+      font-family: var(--mono);
+      font-size: 13px;
+      background: var(--bg-code);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--accent2);
+    }
+
+    pre {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      overflow-x: auto;
+      margin-bottom: 20px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text);
+    }
+
+    pre code {
+      background: none;
+      padding: 0;
+      color: inherit;
+    }
+
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin-bottom: 20px;
+    }
+
+    .card-accent {
+      border-left: 4px solid var(--accent);
+    }
+
+    .card-green {
+      border-left: 4px solid var(--accent2);
+    }
+
+    .card-purple {
+      border-left: 4px solid var(--accent3);
+    }
+
+    .card-orange {
+      border-left: 4px solid var(--accent4);
+    }
+
+    .card-danger {
+      border-left: 4px solid var(--danger);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-bottom: 20px;
+      font-size: 14px;
+    }
+
+    th, td {
+      padding: 10px 14px;
+      text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      background: var(--bg-code);
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+
+    tr:hover td { background: rgba(88,166,255,.04); }
+
+    .diagram {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px;
+      margin-bottom: 24px;
+      font-family: var(--mono);
+      font-size: 12.5px;
+      line-height: 1.55;
+      overflow-x: auto;
+      white-space: pre;
+      color: var(--text-dim);
+    }
+
+    .diagram .hl  { color: var(--accent); font-weight: 700; }
+    .diagram .hl2 { color: var(--accent2); font-weight: 700; }
+    .diagram .hl3 { color: var(--accent3); font-weight: 700; }
+    .diagram .hl4 { color: var(--accent4); font-weight: 700; }
+    .diagram .dim { color: #484f58; }
+
+    .tag {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 12px;
+      margin-right: 4px;
+      vertical-align: middle;
+    }
+    .tag-blue   { background: rgba(88,166,255,.15); color: var(--accent); }
+    .tag-green  { background: rgba(63,185,80,.15);  color: var(--accent2); }
+    .tag-purple { background: rgba(210,168,255,.15); color: var(--accent3); }
+    .tag-orange { background: rgba(240,136,62,.15);  color: var(--accent4); }
+    .tag-red    { background: rgba(248,81,73,.15);   color: var(--danger); }
+
+    .phase-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+
+    .phase-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px;
+      text-align: center;
+    }
+
+    .phase-card .phase-name {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .phase-card .phase-desc {
+      font-size: 12px;
+      color: var(--text-dim);
+    }
+
+    .layer-stack {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-bottom: 24px;
+    }
+
+    .layer-item {
+      display: flex;
+      align-items: center;
+      padding: 8px 14px;
+      font-size: 13px;
+      font-family: var(--mono);
+      border-radius: 4px;
+    }
+
+    .layer-item .lnum {
+      width: 28px;
+      font-weight: 700;
+      color: var(--text-dim);
+      flex-shrink: 0;
+    }
+
+    .layer-item .lname {
+      flex: 1;
+      color: var(--text);
+    }
+
+    .layer-item .ldesc {
+      color: var(--text-dim);
+      font-size: 11px;
+    }
+
+    @media (max-width: 960px) {
+      .sidebar { display: none; }
+      .main { margin-left: 0; padding: 24px 20px 80px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ═══════════════ SIDEBAR ═══════════════ -->
+<aside class="sidebar">
+  <div class="sidebar-title">Architecture</div>
+  <nav>
+    <span class="section-label">Overview</span>
+    <a href="#system-overview">System Overview</a>
+    <a href="#design-philosophy" class="sub">Design Philosophy</a>
+    <a href="#tech-stack" class="sub">Tech Stack</a>
+    <a href="#directory-layout" class="sub">Directory Layout</a>
+
+    <span class="section-label">Agent Loop</span>
+    <a href="#four-phase-loop">4-Phase Agent Loop</a>
+    <a href="#phase-init" class="sub">INIT Phase</a>
+    <a href="#phase-explore" class="sub">EXPLORE Phase</a>
+    <a href="#phase-plan" class="sub">PLAN Phase</a>
+    <a href="#phase-build" class="sub">BUILD Phase</a>
+    <a href="#phase-transitions" class="sub">Transitions &amp; Budgets</a>
+
+    <span class="section-label">Prompts</span>
+    <a href="#prompt-system">Prompt System</a>
+    <a href="#prompt-layers" class="sub">13-Layer Composition</a>
+    <a href="#prompt-composer" class="sub">Composer Pipeline</a>
+    <a href="#behavioral-rules" class="sub">Behavioral Rules</a>
+
+    <span class="section-label">Context</span>
+    <a href="#context-window">Context Window Mgmt</a>
+    <a href="#compaction-ladder" class="sub">Compaction Ladder</a>
+    <a href="#token-budgets" class="sub">Token Budgets</a>
+
+    <span class="section-label">Tools</span>
+    <a href="#tool-system">Tool System</a>
+    <a href="#tool-interface" class="sub">Interface &amp; Registry</a>
+    <a href="#tool-orchestrator" class="sub">Orchestrator</a>
+
+    <span class="section-label">Agents</span>
+    <a href="#sub-agent-arch">Sub-agent Architecture</a>
+    <a href="#agent-types" class="sub">Agent Types</a>
+    <a href="#agent-lifecycle" class="sub">Lifecycle</a>
+
+    <span class="section-label">Infra</span>
+    <a href="#session-management">Session Management</a>
+    <a href="#memory-system" class="sub">Memory System</a>
+    <a href="#sandboxing">Sandboxing</a>
+  </nav>
+</aside>
+
+<!-- ═══════════════ MAIN ═══════════════ -->
+<div class="main">
+
+<h1>Architecture &amp; Concepts</h1>
+<p class="subtitle">A deep-dive into Automergent's internals — the phase-driven agent loop, layered prompt composition, context window management, tool system, sub-agent orchestration, session persistence, and sandboxing.</p>
+
+<!-- ────────────── 1. SYSTEM OVERVIEW ────────────── -->
+<h2 id="system-overview">1. System Overview</h2>
+
+<h3 id="design-philosophy">Design Philosophy</h3>
+<p>Automergent is a <strong>terminal-native AI coding agent</strong> written in Go. It runs entirely in your command line — no Electron, no VS Code extension, no browser. This means:</p>
+<ul>
+  <li><strong>Zero IDE dependency</strong> — works in any terminal emulator or remote SSH session</li>
+  <li><strong>Sub-millisecond responsiveness</strong> — native Go binary, no JS runtime overhead</li>
+  <li><strong>Works everywhere</strong> — Linux, macOS, Windows (WSL); headless servers included</li>
+  <li><strong>Composable</strong> — pipe output, script interactions, integrate into CI/CD</li>
+</ul>
+
+<div class="card card-accent">
+  <strong>Core Principle:</strong> Automergent brings the power of IDE coding agents (file editing, terminal access, code intelligence) directly into any terminal — with the reliability and speed of a compiled Go binary.
+</div>
+
+<h3 id="tech-stack">Tech Stack</h3>
+<table>
+  <thead><tr><th>Layer</th><th>Technology</th><th>Purpose</th></tr></thead>
+  <tbody>
+    <tr><td>TUI Framework</td><td><code>charm.land/bubbletea/v2</code></td><td>Elm-architecture terminal UI</td></tr>
+    <tr><td>Styling</td><td><code>charm.land/lipgloss/v2</code></td><td>Declarative ANSI styling</td></tr>
+    <tr><td>Markdown Render</td><td><code>charm.land/glamour</code></td><td>Terminal-native markdown</td></tr>
+    <tr><td>AST Parsing</td><td><code>tree-sitter</code> (via CGO)</td><td>Language-aware code intelligence</td></tr>
+    <tr><td>AI Providers</td><td>Gemini, OpenAI, Anthropic, DeepSeek, Ollama</td><td>Multi-provider abstraction</td></tr>
+    <tr><td>Configuration</td><td>Viper</td><td>YAML + env var config</td></tr>
+    <tr><td>Sandboxing</td><td>bubblewrap (Linux), seatbelt (macOS)</td><td>OS-level process isolation</td></tr>
+  </tbody>
+</table>
+
+<h3 id="directory-layout">Directory Layout</h3>
+<pre><code>Automergent/
+├── cmd/automergent/              <span class="dim"># CLI entrypoint</span>
+├── internal/
+│   ├── agent/                    <span class="dim"># Agent loop, orchestration, approval policies</span>
+│   │   ├── agent.go              <span class="dim"># Core Agent struct + Execute()</span>
+│   │   ├── builtin/              <span class="dim"># Built-in agent definitions (explore, review, etc.)</span>
+│   │   ├── custom/               <span class="dim"># User-defined agent loader</span>
+│   │   ├── init.go               <span class="dim"># INIT phase decomposer</span>
+│   │   ├── subagents.go          <span class="dim"># Sub-agent spawning &amp; management</span>
+│   │   └── autocompact.go        <span class="dim"># Context window auto-compaction</span>
+│   ├── ai/                       <span class="dim"># Provider abstraction (Gemini, OpenAI, Anthropic)</span>
+│   ├── config/                   <span class="dim"># Viper configuration, validation</span>
+│   ├── context/                  <span class="dim"># Budget management, compaction, dependency tracking</span>
+│   │   ├── manager.go            <span class="dim"># Central context coordinator</span>
+│   │   ├── budget.go             <span class="dim"># Token budget allocation</span>
+│   │   ├── compaction.go         <span class="dim"># 6-tier progressive compaction pipeline</span>
+│   │   └── adaptive.go           <span class="dim"># Anchor+estimate token counting</span>
+│   ├── prompt/                   <span class="dim"># Phased prompt system (13-layer composer)</span>
+│   │   ├── composer.go           <span class="dim"># Layered prompt assembly</span>
+│   │   ├── phase_manager.go      <span class="dim"># Phase state machine</span>
+│   │   ├── behavioral.go         <span class="dim"># Behavioral rule injection</span>
+│   │   └── bases/                <span class="dim"># Model-specific base prompts</span>
+│   ├── sandbox/                  <span class="dim"># OS-level sandboxing (bubblewrap/seatbelt)</span>
+│   ├── session/                  <span class="dim"># Persistent transcripts, memory, checkpoints</span>
+│   ├── tools/                    <span class="dim"># 43+ tools (FS, Terminal, AST, Web, Diagnostics)</span>
+│   │   ├── tool.go               <span class="dim"># Tool interface definition</span>
+│   │   ├── agent/                <span class="dim"># Sub-agent tools (task, batch_task, read_agent)</span>
+│   │   ├── filesystem/           <span class="dim"># read, write, edit, glob, search</span>
+│   │   └── shell/                <span class="dim"># bash, async shells, process management</span>
+│   ├── tui/                      <span class="dim"># Bubble Tea v2 TUI</span>
+│   └── workflow/                 <span class="dim"># Artifact system, plan management</span>
+└── Makefile                      <span class="dim"># Build, test, lint, release</span></code></pre>
+
+
+<!-- ────────────── 2. FOUR-PHASE AGENT LOOP ────────────── -->
+<h2 id="four-phase-loop">2. Four-Phase Agent Loop</h2>
+
+<p>Every user message flows through a structured <strong>4-phase state machine</strong>. Each phase has its own tool set, step budget, prompt style, and behavioral rules. The <code>PhaseManager</code> controls transitions; the <code>PhaseClassifier</code> determines initial routing.</p>
+
+<div class="diagram"><span class="dim">                         ┌─────────────────────────────────────┐</span>
+<span class="dim">                         │</span>          <span class="hl">USER MESSAGE</span>               <span class="dim">│</span>
+<span class="dim">                         └──────────────────┬──────────────────┘</span>
+                                             │
+                                    <span class="hl">┌────────▼────────┐</span>
+                                    <span class="hl">│   INIT PHASE    │</span>
+                                    <span class="hl">│  (classifier)   │</span>
+                                    <span class="hl">│  3-step budget  │</span>
+                                    <span class="hl">└───┬────┬────┬───┘</span>
+                                        │    │    │
+                    ┌───────────────────┘    │    └───────────────────┐
+                    │                        │                        │
+           <span class="hl2">┌───────▼───────┐</span>     <span class="hl3">┌───────▼───────┐</span>     <span class="hl4">┌───────▼───────┐</span>
+           <span class="hl2">│ EXPLORE PHASE │</span>     <span class="hl3">│  PLAN PHASE   │</span>     <span class="hl4">│ BUILD PHASE   │</span>
+           <span class="hl2">│ (read-only)   │</span>     <span class="hl3">│ (architect)   │</span>     <span class="hl4">│ (implementer) │</span>
+           <span class="hl2">│ 10 steps      │</span>     <span class="hl3">│ 5 steps       │</span>     <span class="hl4">│ 20 steps      │</span>
+           <span class="hl2">└───────┬───────┘</span>     <span class="hl3">└───────┬───────┘</span>     <span class="hl4">└───────┬───────┘</span>
+                   │                       │                       │
+                   └───────────┬───────────┘───────────────────────┘
+                               │
+                    <span class="hl">┌────────▼────────┐</span>
+                    <span class="hl">│   INIT (next)   │</span>
+                    <span class="hl">└─────────────────┘</span></div>
+
+<h3 id="phase-init">INIT Phase — Classifier &amp; Router</h3>
+<div class="card card-accent">
+  <p><strong>Persona:</strong> Serious, decisive. Minimal output.</p>
+  <p><strong>Tools:</strong> <code>bash</code>, <code>read_file</code>, <code>glob</code>, <code>grep</code>, <code>edit_file</code>, <code>task</code> — <em>no todo tools</em></p>
+  <p><strong>Step budget:</strong> 3</p>
+</div>
+
+<p>INIT decomposes the user message into structured intents using an LLM call. It:</p>
+<ul>
+  <li>Classifies intent type (<code>explore</code>, <code>implement</code>, <code>fix</code>, <code>question</code>, etc.)</li>
+  <li>Routes tasks to the appropriate phase and sub-agent type</li>
+  <li>Answers direct questions inline without entering the loop</li>
+  <li>Confirms violations via the safety ladder (warn → block_imminent → blocked)</li>
+  <li>Produces <code>TaskSpec</code> objects with phase assignment and agent routing</li>
+</ul>
+
+<pre><code><span class="dim">// internal/shared/types.go</span>
+<span class="hl">AgentPhase</span> = <span class="hl2">"init"</span> | <span class="hl3">"explore"</span> | <span class="hl4">"plan"</span> | <span class="hl4">"build"</span>
+
+<span class="dim">// TaskSpec carries routing metadata</span>
+<span class="hl">TaskSpec</span> {
+    Agent  <span class="hl2">string</span>  <span class="dim">// "main", "explore", "general-purpose", "review", ...</span>
+    Phase  <span class="hl3">AgentPhase</span>  <span class="dim">// explore | plan | build</span>
+    Type   <span class="hl4">string</span>  <span class="dim">// "explore", "implement", "fix", "plan", ...</span>
+    ...
+}</code></pre>
+
+<h3 id="phase-explore">EXPLORE Phase — Read-Only Investigation</h3>
+<div class="card card-green">
+  <p><strong>Persona:</strong> Thorough, investigative. File:line reporting.</p>
+  <p><strong>Tools:</strong> <code>glob</code>, <code>grep</code>, <code>read_file</code>, <code>bash</code>, <code>list_directory</code> — <em>read-only only</em></p>
+  <p><strong>Step budget:</strong> 10</p>
+</div>
+
+<p>EXPLORE is strictly read-only. It performs codebase reconnaissance:</p>
+<ul>
+  <li>File discovery and code search (glob, grep, tree-sitter AST)</li>
+  <li>Dependency analysis and import graph walking</li>
+  <li>Violation confirmation when flagged by INIT</li>
+  <li>Issue-suspect investigation with file:line references</li>
+  <li>Produces findings for the PLAN phase or BUILD phase</li>
+</ul>
+
+<h3 id="phase-plan">PLAN Phase — Architect Mode</h3>
+<div class="card card-purple">
+  <p><strong>Persona:</strong> Structured, analytical. Produces actionable plans.</p>
+  <p><strong>Tools:</strong> <code>read_file</code>, <code>write_file</code>, <code>bash</code>, <code>task</code>, <code>grep</code>, <code>glob</code></p>
+  <p><strong>Step budget:</strong> 5</p>
+</div>
+
+<p>PLAN consumes INIT's constraints and EXPLORE's findings to produce a structured implementation plan:</p>
+<ul>
+  <li>Ordered task graph with dependencies</li>
+  <li>File change manifest (which files to modify, create, delete)</li>
+  <li>Risk assessment and rollback points</li>
+  <li>Can delegate research sub-tasks via <code>task</code> tool</li>
+</ul>
+
+<h3 id="phase-build">BUILD Phase — Implementer + Tester + Todo Manager</h3>
+<div class="card card-orange">
+  <p><strong>Persona:</strong> Focused, pragmatic. Verify after every change.</p>
+  <p><strong>Tools:</strong> Full set — <code>edit_file</code>, <code>write_file</code>, <code>bash</code>, <code>read_file</code>, <code>task</code>, <code>glob</code>, <code>grep</code>, <code>multi_edit</code></p>
+  <p><strong>Step budget:</strong> 20</p>
+</div>
+
+<p>BUILD is the implementation workhorse:</p>
+<ul>
+  <li>Edits files using AST-aware diffs (tree-sitter)</li>
+  <li>Runs tests after every change — <strong>verify before moving on</strong></li>
+  <li>Manages a todo list of sub-tasks</li>
+  <li>When blocked, transitions back to EXPLORE for more context</li>
+  <li>Emits task notifications via the steering channel</li>
+</ul>
+
+<h3 id="phase-transitions">Phase Transitions &amp; Step Budgets</h3>
+
+<table>
+  <thead>
+    <tr><th>From</th><th>Allowed Transitions</th><th>Step Budget</th><th>Trigger</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><span class="tag tag-blue">INIT</span></td><td>EXPLORE, PLAN, BUILD, INIT (self)</td><td>3</td><td>User message classification</td></tr>
+    <tr><td><span class="tag tag-green">EXPLORE</span></td><td>PLAN, BUILD, INIT</td><td>10</td><td>Findings complete, blocked, or clarified</td></tr>
+    <tr><td><span class="tag tag-purple">PLAN</span></td><td>BUILD, EXPLORE, INIT</td><td>5</td><td>Plan ready, needs more info, or done</td></tr>
+    <tr><td><span class="tag tag-orange">BUILD</span></td><td>EXPLORE, PLAN, INIT</td><td>20</td><td>Implementation complete, blocked, or needs plan revision</td></tr>
+  </tbody>
+</table>
+
+<pre><code><span class="dim">// internal/prompt/phase_manager.go</span>
+<span class="hl">PhaseManager</span> {
+    currentPhase   <span class="hl2">AgentPhase</span>
+    phaseHistory   []<span class="hl3">PhaseTransition</span>
+    taskQueue      *<span class="hl4">TaskQueue</span>
+    violationCount map[<span class="hl2">ViolationType</span>]<span class="hl4">int</span>
+}
+
+<span class="dim">// Valid transitions are enforced:</span>
+<span class="hl">CanTransition(from, to)</span> → <span class="hl2">bool</span>
+<span class="hl">Transition(to, reason, trigger)</span> → <span class="hl2">error</span></code></pre>
+
+
+<!-- ────────────── 3. PROMPT SYSTEM ────────────── -->
+<h2 id="prompt-system">3. Prompt System Architecture</h2>
+
+<p>The system prompt is assembled from <strong>11+ composable layers</strong> via the <code>PromptComposer</code>. Each layer is independent, cached where possible, and injected in a fixed order.</p>
+
+<h3 id="prompt-layers">Layered Composition</h3>
+
+<div class="layer-stack">
+  <div class="layer-item" style="background:rgba(88,166,255,.1)">
+    <span class="lnum">1</span>
+    <span class="lname"><strong>Base Model</strong></span>
+    <span class="ldesc">Model-specific base (bases/{model}.txt) — identity &amp; tone</span>
+  </div>
+  <div class="layer-item" style="background:rgba(88,166,255,.08)">
+    <span class="lnum">2</span>
+    <span class="lname"><strong>Platform Core</strong></span>
+    <span class="ldesc">Shared rules, task discipline, action care, communication style</span>
+  </div>
+  <div class="layer-item" style="background:rgba(63,185,80,.1)">
+    <span class="lnum">3</span>
+    <span class="lname"><strong>Environment</strong></span>
+    <span class="ldesc">Working dir, git status, platform, date, model info</span>
+  </div>
+  <div class="layer-item" style="background:rgba(63,185,80,.08)">
+    <span class="lnum">4</span>
+    <span class="lname"><strong>Agent Definition</strong></span>
+    <span class="ldesc">Per-agent custom prompt from config or agentdef</span>
+  </div>
+  <div class="layer-item" style="background:rgba(210,168,255,.1)">
+    <span class="lnum">5</span>
+    <span class="lname"><strong>Phase Prompt</strong></span>
+    <span class="ldesc">Phase-specific mission, rules, exit criteria (phases/*.txt)</span>
+  </div>
+  <div class="layer-item" style="background:rgba(210,168,255,.08)">
+    <span class="lnum">6</span>
+    <span class="lname"><strong>Behavioral Rules</strong></span>
+    <span class="ldesc">Phase discipline, context hygiene, verification, safety</span>
+  </div>
+  <div class="layer-item" style="background:rgba(240,136,62,.1)">
+    <span class="lnum">7</span>
+    <span class="lname"><strong>Tool Prompts</strong></span>
+    <span class="ldesc">Per-tool guidance — only for tools offered this phase</span>
+  </div>
+  <div class="layer-item" style="background:rgba(240,136,62,.08)">
+    <span class="lnum">8</span>
+    <span class="lname"><strong>Skills / MCP</strong></span>
+    <span class="ldesc">Available skills &amp; MCP server instructions</span>
+  </div>
+  <div class="layer-item" style="background:rgba(88,166,255,.06)">
+    <span class="lnum">9</span>
+    <span class="lname"><strong>Dynamic</strong></span>
+    <span class="ldesc">Init results, task progress, working areas, todo snapshot</span>
+  </div>
+  <div class="layer-item" style="background:rgba(255,255,255,.03)">
+    <span class="lnum">10</span>
+    <span class="lname"><strong>Project Instructions</strong></span>
+    <span class="ldesc">AUTOMERGENT.md / AGENTS.md / CLAUDE.md (user msg)</span>
+  </div>
+  <div class="layer-item" style="background:rgba(255,255,255,.02)">
+    <span class="lnum">11</span>
+    <span class="lname"><strong>Git Status Snapshot</strong></span>
+    <span class="ldesc">Compact git status block (user msg)</span>
+  </div>
+  <div class="layer-item" style="background:rgba(255,255,255,.02)">
+    <span class="lnum">12</span>
+    <span class="lname"><strong>Task Notifications</strong></span>
+    <span class="ldesc">Sub-agent completion notifications (user msg)</span>
+  </div>
+  <div class="layer-item" style="background:rgba(255,255,255,.01)">
+    <span class="lnum">13</span>
+    <span class="lname"><strong>Long-Run Nudges</strong></span>
+    <span class="ldesc">Transient system messages for long-running tasks</span>
+  </div>
+</div>
+
+<h3 id="prompt-composer">Composer Pipeline</h3>
+
+<pre><code><span class="dim">// internal/prompt/composer.go</span>
+
+<span class="hl">PromptComposer</span> {
+    layers      map[<span class="hl2">PromptLayer</span>][]<span class="hl3">string</span>
+    layerOrder  []<span class="hl2">PromptLayer</span>   <span class="dim">// fixed assembly order</span>
+    model       <span class="hl4">ModelInfo</span>
+    agent       *<span class="hl2">AgentDefinition</span>
+    phase       <span class="hl3">AgentPhase</span>
+    registry    *<span class="hl4">tools.Registry</span>  <span class="dim">// live tool metadata</span>
+}
+
+<span class="dim">// Assembly order — each layer appends to its slot</span>
+<span class="hl">buildAllLayers()</span> → buildBaseModel → buildPlatform → buildEnvironment →
+    buildInstructions → buildSkills → buildMCP → buildAgentCustom →
+    buildPhase → buildBehavioral → buildTool → buildDynamic
+
+<span class="dim">// Final render — joins layers with "---" separators</span>
+<span class="hl">Compose()</span> → <span class="hl2">string</span></code></pre>
+
+<p>The composer's <code>SetRegistry()</code> method attaches the live tool registry so the tool layer renders <code>ToolMeta</code> self-documentation for each offered tool — tools document themselves.</p>
+
+<h3 id="behavioral-rules">Behavioral Rules</h3>
+
+<p>Behavioral prompts are injected by <code>RenderBehavioralPrompts()</code> and grouped by dimension:</p>
+
+<table>
+  <thead><tr><th>Dimension</th><th>Rules</th><th>Triggers</th></tr></thead>
+  <tbody>
+    <tr><td><span class="tag tag-blue">Phase Discipline</span></td><td>Stay in current phase. Don't edit during EXPLORE. Don't explore during BUILD.</td><td>always</td></tr>
+    <tr><td><span class="tag tag-green">Context Hygiene</span></td><td>Don't re-read known files. Use file:line references. Micro-compact tool outputs.</td><td>always</td></tr>
+    <tr><td><span class="tag tag-purple">Verification</span></td><td>Run tests after every edit. Confirm build passes. Check for regressions.</td><td>tool_use, phase_change</td></tr>
+    <tr><td><span class="tag tag-red">Safety &amp; Honesty</span></td><td>Don't fabricate. Don't commit secrets. Confirm destructive ops. Escalate violations.</td><td>always, violation</td></tr>
+  </tbody>
+</table>
+
+
+<!-- ────────────── 4. CONTEXT WINDOW ────────────── -->
+<h2 id="context-window">4. Context Window Management</h2>
+
+<p>Automergent uses a <strong>progressive degradation ladder</strong> to keep conversations within the model's context window. The <code>CompactionPipeline</code> operates across 6 tiers, each triggered at a different threshold.</p>
+
+<h3 id="compaction-ladder">The Compaction Ladder</h3>
+
+<div class="diagram"><span class="dim">  Context Window Usage</span>
+<span class="dim">  0%                    50%       65%       75%       85%       90%       95%   100%</span>
+<span class="dim">  ├──────────────────────┼─────────┼─────────┼─────────┼─────────┼─────────┤</span>
+                       <span class="hl">┌─────┐</span>
+                       <span class="hl">│GHOST│</span>     <span class="dim">persist large outputs to disk, replace with stub</span>
+                       <span class="hl">└─────┘</span>
+                                 <span class="hl2">┌───────────┐</span>
+                                 <span class="hl2">│ TRUNCATE  │</span>  <span class="dim">keep head+tail with "[truncated]" marker</span>
+                                 <span class="hl2">└───────────┘</span>
+                                           <span class="hl3">┌──────────┐</span>
+                                           <span class="hl3">│ DISTILL  │</span>  <span class="dim">LLM-summarize old file reads</span>
+                                            <span class="hl3">└──────────┘</span>
+                                                      <span class="hl4">┌──────────┐</span>
+                                                      <span class="hl4">│ SNAPSHOT │</span>  <span class="dim">Master State JSON + summary</span>
+                                                      <span class="hl4">└──────────┘</span>
+                                                                <span class="hl">┌─────────────┐</span>
+                                                                <span class="hl">│MICROCOMPACT│</span>  <span class="dim">compact tool results only via LLM</span>
+                                                                <span class="hl">└─────────────┘</span>
+                                                                          <span class="hl2">┌──────────────┐</span>
+                                                                          <span class="hl2">│ FULL COMPACT │</span>  <span class="dim">summarize + probe-verify</span>
+                                                                          <span class="hl2">└──────────────┘</span></div>
+
+<h3 id="token-budgets">Token Budgets &amp; Thresholds</h3>
+
+<table>
+  <thead>
+    <tr><th>Tier</th><th>Strategy</th><th>Threshold</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td><code>ghost</code></td><td>50%</td><td>Persist large tool outputs (&gt;32KB) to disk; replace with preview stub</td></tr>
+    <tr><td>2</td><td><code>truncate_middle</code></td><td>65%</td><td>Keep 40% head + 40% tail of tool results; insert truncation marker</td></tr>
+    <tr><td>3</td><td><code>distill</code></td><td>75%</td><td>LLM-summarize old file reads (&gt;2 turns old, &gt;2KB)</td></tr>
+    <tr><td>4</td><td><code>snapshot</code></td><td>Emit Master State JSON with active tasks, facts, constraints, recent arc</td><td></td></tr>
+    <tr><td>5</td><td><code>microcompact</code></td><td>90%</td><td>Non-LLM compact of all but last 2 tool results</td></tr>
+    <tr><td>6</td><td><code>full_compact</code></td><td>95%</td><td>Full history summarization + probe-verify for completeness</td></tr>
+  </tbody>
+</table>
+
+<div class="card card-accent">
+  <strong>Summary Reserve:</strong> 20K tokens &nbsp;|&nbsp;
+  <strong>Auto-compact Buffer:</strong> 13K (50K window) &nbsp;|&nbsp;
+  <strong>Micro-compact Trigger:</strong> 55% usage
+</div>
+
+<h4>Token Estimation</h4>
+<p>Automergent uses <strong>anchor-plus-estimate</strong> token counting:</p>
+<ul>
+  <li><strong>Anchor:</strong> After each LLM call, the provider-reported usage anchors the count</li>
+  <li><strong>Estimate:</strong> Between calls, <code>len(content) / 4</code> provides a fast heuristic</li>
+  <li><strong>Adaptive:</strong> <code>AdaptiveTokenCalculator</code> learns model-specific drift and corrects estimates over time</li>
+</ul>
+
+<h4>Compaction Boundaries &amp; Metadata Markers</h4>
+<p>Compacted sections are delimited by metadata markers that the agent can detect:</p>
+<ul>
+  <li><code>[DISTILLED]</code> — LLM-summarized tool output</li>
+  <li><code>[truncated N chars]</code> — head/tail truncation</li>
+  <li><code>[Output persisted to path]</code> — ghosted large output</li>
+  <li><code># Neural Context Summary</code> — full compact summary</li>
+  <li><code># Context Snapshot</code> — Master State JSON injection</li>
+</ul>
+
+<h4>Post-Compact File Restore</h4>
+<p>Ghosted outputs can be restored on demand via <code>read_file</code> — the stub includes the persistence path. The <code>ToolResultStore</code> manages the on-disk ghost files and cleans up after session end.</p>
+
+
+<!-- ────────────── 5. TOOL SYSTEM ────────────── -->
+<h2 id="tool-system">5. Tool System</h2>
+
+<h3 id="tool-interface">Tool Interface &amp; Registry</h3>
+
+<pre><code><span class="dim">// internal/tools/tool.go</span>
+
+<span class="hl">Tool</span> <span class="hl2">interface</span> {
+    <span class="hl3">Name</span>() <span class="hl4">string</span>
+    <span class="hl3">Description</span>() <span class="hl4">string</span>
+    <span class="hl3">Schema</span>() map[<span class="hl4">string</span>]<span class="hl4">any</span>
+    <span class="hl3">Execute</span>(ctx, args) → (<span class="hl2">Result</span>, <span class="hl4">error</span>)
+    <span class="hl3">RequiresConfirmation</span>(mode) → <span class="hl4">bool</span>
+    <span class="hl3">IsConcurrencySafe</span>(args) → <span class="hl4">bool</span>
+    <span class="hl3">IsReadOnly</span>(args) → <span class="hl4">bool</span>
+    <span class="hl3">IsDestructive</span>(args) → <span class="hl4">bool</span>
+    <span class="hl3">EstimatedCost</span>() → <span class="hl2">ToolCost</span>
+}
+
+<span class="hl">ToolCost</span> {
+    TokensApprox  <span class="hl4">int</span>     <span class="dim">// estimated tokens consumed</span>
+    LatencyMs     <span class="hl4">int</span>     <span class="dim">// typical latency in ms</span>
+    RiskLevel     <span class="hl4">string</span>  <span class="dim">// "low" | "medium" | "high"</span>
+}
+
+<span class="hl">BaseTool</span> <span class="dim">// embeddable defaults: conservative (not concurrency-safe, not read-only)</span></code></pre>
+
+<p>The <strong>Tool Registry</strong> supports:</p>
+<ul>
+  <li><strong>Clone for sub-agents:</strong> Each child agent gets a filtered copy of the registry</li>
+  <li><strong>Per-phase filtering:</strong> Only tools allowed in the current phase are offered to the model</li>
+  <li><strong>ToolMeta self-documentation:</strong> Tools describe themselves via <code>Meta()</code> for prompt injection</li>
+  <li><strong>Cost tracking:</strong> Each tool reports estimated tokens, latency, and risk level</li>
+</ul>
+
+<h3 id="tool-orchestrator">Tool Orchestrator &amp; Security</h3>
+
+<div class="card card-danger">
+  <strong>Security Layer:</strong> The orchestrator enforces confirmation policies, path boundary checks, destructive-op gating, and concurrency safety before any tool execution.
+</div>
+
+<ul>
+  <li><strong>Confirmation:</strong> Destructive tools require user approval (configurable: manual / accept-edits / auto)</li>
+  <li><strong>Path Boundary:</strong> <code>PathScope</code> enforces that file operations stay within the working directory</li>
+  <li><strong>Concurrency:</strong> Tools declare <code>IsConcurrencySafe()</code> — the orchestrator serializes unsafe tools</li>
+  <li><strong>Ghosting:</strong> Large tool outputs (&gt;32KB) are automatically ghosted to disk to protect the context window</li>
+</ul>
+
+
+<!-- ────────────── 6. SUB-AGENT ARCHITECTURE ────────────── -->
+<h2 id="sub-agent-arch">6. Sub-agent Architecture</h2>
+
+<h3 id="agent-types">Agent Types</h3>
+
+<table>
+  <thead>
+    <tr><th>Type</th><th>Role</th><th>Tools</th><th>Use Case</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><span class="tag tag-blue">general-purpose</span></td><td>Full coding agent</td><td>Full toolset</td><td>Implementation, debugging, refactoring</td></tr>
+    <tr><td><span class="tag tag-green">explore</span></td><td>Read-only researcher</td><td>Read-only tools</td><td>File discovery, code understanding</td></tr>
+    <tr><td><span class="tag tag-purple">review</span></td><td>Code reviewer</td><td>Read-only + analysis</td><td>Bug detection, security analysis</td></tr>
+    <tr><td><span class="tag tag-orange">code-review</span></td><td>Deep code review</td><td>Read-only + diagnostics</td><td>PR review, style compliance</td></tr>
+    <tr><td><span class="tag tag-blue">contexter</span></td><td>Context manager</td><td>Context tools</td><td>Compaction, memory optimization</td></tr>
+    <tr><td><span class="tag tag-green">coordinator</span></td><td>Orchestrator</td><td>Task spawning</td><td>Spawns and manages child agents</td></tr>
+    <tr><td><span class="tag tag-purple">task</span></td><td>Command executor</td><td>Shell + file tools</td><td>Execute commands with verbose output</td></tr>
+  </tbody>
+</table>
+
+<h3 id="agent-lifecycle">Agent Lifecycle</h3>
+
+<div class="diagram"><span class="hl">Parent Agent</span>
+    │
+    ├── <span class="hl2">task(agent_type="explore", prompt="find auth handlers")</span>
+    │       │
+    │       ├── <span class="dim">1. Clone tool registry (filtered for read-only)</span>
+    │       ├── <span class="dim">2. Create child session (sidechain transcript)</span>
+    │       ├── <span class="dim">3. Compose prompt (own phase + behavioral rules)</span>
+    │       ├── <span class="dim">4. Execute turns (model → tools → model → ...)</span>
+    │       │       │
+    │       │       └── <span class="hl3">steer channel</span> ← task notifications
+    │       │
+    │       └── <span class="hl4">5. Return result (or notify on background completion)</span>
+    │
+    ├── <span class="hl2">task(agent_type="general-purpose", mode="background")</span>
+    │       └── <span class="dim">Runs async. Use read_agent to collect results.</span>
+    │
+    └── <span class="hl2">batch_task([explore, review])</span>
+            └── <span class="dim">Launches multiple agents in parallel. Max 8 concurrent.</span></div>
+
+<p>Key architectural details:</p>
+<ul>
+  <li><strong>Per-child registry clone:</strong> Each sub-agent gets its own filtered copy of the tool registry, ensuring it can only use tools appropriate for its type</li>
+  <li><strong>Own todo store:</strong> Sub-agents maintain independent todo lists</li>
+  <li><strong>Sidechain transcripts:</strong> Child conversations are persisted to separate files, not mixed with the parent</li>
+  <li><strong>Steering channel:</strong> Parent is notified of child completion via <code>AgentNotification</code> hooks</li>
+  <li><strong>Background execution:</strong> <code>mode="background"</code> runs the agent async; <code>read_agent</code> polls results with optional blocking</li>
+  <li><strong>Fork context:</strong> <code>inherit_context=true</code> copies the parent's conversation as the child's starting context</li>
+  <li><strong>Resume:</strong> <code>resume_agent_id</code> continues a previously spawned agent's conversation</li>
+</ul>
+
+
+<!-- ────────────── 7. SESSION MANAGEMENT ────────────── -->
+<h2 id="session-management">7. Session Management</h2>
+
+<h3>Persistent Transcripts</h3>
+<p>Every conversation is persisted as a JSONL transcript. Sessions survive process restarts and can be resumed.</p>
+
+<pre><code><span class="dim">// internal/session/session.go</span>
+<span class="hl">Session</span> {
+    ID        <span class="hl4">string</span>
+    Title     <span class="hl4">string</span>
+    WorkDir   <span class="hl4">string</span>
+    Messages  []<span class="hl2">ai.Message</span>
+    Metadata  map[<span class="hl4">string</span>]<span class="hl4">string</span>
+    AllowedTools []<span class="hl3">ToolApproval</span>   <span class="dim">// survives restarts</span>
+    TotalInputTokens  <span class="hl4">int</span>
+    TotalOutputTokens <span class="hl4">int</span>
+}</code></pre>
+
+<h3>Checkpoint / Recovery</h3>
+<p>Checkpoints are atomic snapshots written to disk at configurable intervals:</p>
+<ul>
+  <li>Written atomically via temp file + rename</li>
+  <li>Restricted permissions (0600)</li>
+  <li>Index-based naming: <code>{session_id}_cp{index}.json</code></li>
+  <li>Recovery loads the most recent checkpoint and replays from there</li>
+</ul>
+
+<h3>Undo Stack</h3>
+<p>File edits are tracked in an undo stack. The agent can revert changes on failure or user request.</p>
+
+<h3 id="memory-system">Memory System</h3>
+
+<div class="card card-green">
+  <strong>Durable Facts:</strong> The memory system stores learned patterns, conventions, and project knowledge that persist across sessions.
+</div>
+
+<pre><code><span class="dim">// internal/session/memory.go</span>
+<span class="hl">ProjectMemory</span> {
+    Conventions   map[<span class="hl4">string</span>]<span class="hl2">Convention</span>     <span class="dim">// learned coding conventions</span>
+    CodePatterns  []<span class="hl3">CodePattern</span>            <span class="dim">// reusable patterns</span>
+    Architecture  *<span class="hl4">ArchitectureDecisions</span>  <span class="dim">// project architecture</span>
+    FilePatterns  map[<span class="hl4">string</span>]<span class="hl2">FilePattern</span>   <span class="dim">// per-filetype conventions</span>
+    Preferences   map[<span class="hl4">string</span>]<span class="hl4">string</span>       <span class="dim">// user preferences</span>
+}
+
+<span class="hl">Convention</span> {
+    Name        <span class="hl4">string</span>
+    Description <span class="hl4">string</span>
+    Confidence  <span class="hl4">float64</span>   <span class="dim">// 0.0–1.0</span>
+    Source      <span class="hl4">string</span>    <span class="dim">// where learned from</span>
+}
+
+<span class="dim">// /dream command consolidates session observations into memory</span>
+<span class="dim">// Memory is injected into context via GetContextWithMemory()</span></code></pre>
+
+<h3>Session Search &amp; Compaction</h3>
+<ul>
+  <li><strong>Search:</strong> Full-text search across session transcripts via <code>SearchTranscripts()</code></li>
+  <li><strong>Compaction:</strong> Old sessions are compacted via the same 6-tier pipeline</li>
+  <li><strong>Migration:</strong> Schema versioning ensures backward compatibility across upgrades</li>
+  <li><strong>Redaction:</strong> Sensitive content is automatically redacted in logs and exports</li>
+</ul>
+
+
+<!-- ────────────── 8. SANDBOXING ────────────── -->
+<h2 id="sandboxing">8. Sandboxing</h2>
+
+<p>Automergent wraps every shell command in an OS-level sandbox to contain damage from runaway or malicious tool executions.</p>
+
+<table>
+  <thead>
+    <tr><th>Platform</th><th>Mechanism</th><th>Capabilities</th><th>Availability</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="tag tag-blue">Linux</span></td>
+      <td><code>bubblewrap</code> (bwrap)</td>
+      <td>Namespace isolation, mount sandboxing, seccomp, network isolation, resource limits</td>
+      <td>Requires bubblewrap installed</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-green">macOS</span></td>
+      <td><code>sandbox-exec</code> (seatbelt)</td>
+      <td>Filesystem restriction, network filtering,itlement-based isolation</td>
+      <td>Built-in on macOS</td>
+    </tr>
+    <tr>
+      <td><span class="tag tag-orange">Windows</span></td>
+      <td><code>noop</code></td>
+      <td>No sandboxing — commands run without restrictions</td>
+      <td>Fallback only</td>
+    </tr>
+  </tbody>
+</table>
+
+<pre><code><span class="dim">// internal/sandbox/sandbox.go</span>
+<span class="hl">Sandbox</span> <span class="hl2">interface</span> {
+    <span class="hl3">Wrap</span>(ctx, name, args) → (<span class="hl4">string</span>, []<span class="hl4">string</span>)
+    <span class="hl3">WrapWithPolicy</span>(ctx, name, args, policy) → (<span class="hl4">string</span>, []<span class="hl4">string</span>)
+    <span class="hl3">IsAvailable</span>() → <span class="hl4">bool</span>
+    <span class="hl3">Name</span>() → <span class="hl4">string</span>
+    <span class="hl3">Capabilities</span>() → <span class="hl2">Capabilities</span>
+}
+
+<span class="hl">Capabilities</span> {
+    SupportsNamespaces      <span class="hl4">bool</span>
+    SupportsSeccomp         <span class="hl4">bool</span>
+    SupportsCgroups         <span class="hl4">bool</span>
+    SupportsNetworkIsolation <span class="hl4">bool</span>
+    SupportsFSIsolation     <span class="hl4">bool</span>
+    SupportsResourceLimits  <span class="hl4">bool</span>
+    RequiresRoot            <span class="hl4">bool</span>
+}</code></pre>
+
+<h3>Path Boundary Enforcement</h3>
+<p>The <code>PathScope</code> component ensures all file operations stay within the working directory:</p>
+<ul>
+  <li>Validates every file path before tool execution</li>
+  <li>Prevents <code>../../../etc/passwd</code> style escapes</li>
+  <li>Checked at the orchestrator level before sandbox wrapping</li>
+  <li>Configurable scope (strict: working dir only; relaxed: allow parent dirs)</li>
+</ul>
+
+<div class="card card-danger">
+  <strong>Defense in Depth:</strong> Sandboxing is a safety net, not the primary defense. The approval policy, path boundary enforcement, and behavioral rules form the first three layers. The sandbox catches anything that slips through.
+</div>
+
+
+<!-- ────────────── FOOTER ────────────── -->
+<hr style="border:none;border-top:1px solid var(--border);margin:48px 0 24px">
+<p style="color:var(--text-dim);font-size:13px">
+  Automergent Architecture Documentation — Generated from source code analysis<br>
+  <code>internal/agent/agent.go</code> · <code>internal/prompt/composer.go</code> · <code>internal/context/compaction.go</code> · <code>internal/tools/tool.go</code> · <code>internal/tools/agent/tools.go</code> · <code>internal/sandbox/sandbox.go</code> · <code>internal/session/</code>
+</p>
+
+</div><!-- /.main -->
+
+<script>
+  // Sidebar active link tracking
+  const links = document.querySelectorAll('.sidebar nav a');
+  const sections = [];
+  links.forEach(link => {
+    const href = link.getAttribute('href');
+    if (href && href.startsWith('#')) {
+      const el = document.getElementById(href.slice(1));
+      if (el) sections.push({ el, link });
+    }
+  });
+
+  function updateActive() {
+    let current = null;
+    const scrollY = window.scrollY + 120;
+    for (const s of sections) {
+      if (s.el.offsetTop <= scrollY) current = s;
+    }
+    links.forEach(l => l.classList.remove('active'));
+    if (current) current.link.classList.add('active');
+  }
+
+  window.addEventListener('scroll', updateActive, { passive: true });
+  updateActive();
+</script>
+
+<script src="../js/nav.js"></script>
+<script src="../js/footer.js"></script>
+</body>
+</html>

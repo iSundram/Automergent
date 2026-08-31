@@ -1,0 +1,1104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Advanced Features — Automergent</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0d1117;
+      --card: #161b22;
+      --border: #30363d;
+      --text: #e6edf3;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-dim: #1f6feb;
+      --green: #3fb950;
+      --red: #f85149;
+      --orange: #d29922;
+      --purple: #bc8cff;
+      --code-bg: #0d1117;
+      --sidebar-w: 280px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.7;
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* ── Sidebar ─────────────────────────────────── */
+    .sidebar {
+      position: fixed;
+      top: 0; left: 0;
+      width: var(--sidebar-w);
+      height: 100vh;
+      background: var(--card);
+      border-right: 1px solid var(--border);
+      padding: 24px 16px;
+      overflow-y: auto;
+      z-index: 10;
+    }
+    .sidebar h2 {
+      font-size: 18px;
+      color: var(--accent);
+      margin-bottom: 16px;
+      letter-spacing: .5px;
+    }
+    .sidebar nav a {
+      display: block;
+      color: var(--text-muted);
+      text-decoration: none;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+      transition: .15s;
+    }
+    .sidebar nav a:hover,
+    .sidebar nav a.active {
+      color: var(--text);
+      background: rgba(88,166,255,.08);
+    }
+    .sidebar nav a.sub {
+      padding-left: 24px;
+      font-size: 12px;
+    }
+    .sidebar .version {
+      margin-top: 24px;
+      font-size: 11px;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+      padding-top: 12px;
+    }
+
+    /* ── Main Content ────────────────────────────── */
+    .main {
+      margin-left: var(--sidebar-w);
+      flex: 1;
+      padding: 48px 64px 120px;
+      max-width: 960px;
+    }
+    .main h1 {
+      font-size: 36px;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, var(--accent), var(--purple));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .main .subtitle {
+      color: var(--text-muted);
+      font-size: 16px;
+      margin-bottom: 40px;
+    }
+    .main h2 {
+      font-size: 26px;
+      margin: 48px 0 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      color: var(--accent);
+    }
+    .main h3 {
+      font-size: 20px;
+      margin: 32px 0 12px;
+      color: var(--text);
+    }
+    .main h4 {
+      font-size: 16px;
+      margin: 24px 0 8px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: .5px;
+    }
+    .main p { margin-bottom: 14px; }
+    .main a { color: var(--accent); text-decoration: none; }
+    .main a:hover { text-decoration: underline; }
+
+    /* ── Cards ────────────────────────────────────── */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .card-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .card h3 { margin-top: 0; color: var(--accent); font-size: 17px; }
+    .card p { color: var(--text-muted); font-size: 14px; }
+    .card .tag {
+      display: inline-block;
+      font-size: 11px;
+      padding: 2px 8px;
+      border-radius: 12px;
+      margin-right: 6px;
+      margin-bottom: 4px;
+    }
+    .tag-blue   { background: rgba(88,166,255,.15); color: var(--accent); }
+    .tag-green  { background: rgba(63,185,80,.15);  color: var(--green); }
+    .tag-orange { background: rgba(210,153,34,.15); color: var(--orange); }
+    .tag-purple { background: rgba(188,140,255,.15); color: var(--purple); }
+    .tag-red    { background: rgba(248,81,73,.15);  color: var(--red); }
+
+    /* ── Code blocks ─────────────────────────────── */
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 20px;
+      overflow-x: auto;
+      margin: 14px 0 20px;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    code {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 13px;
+    }
+    :not(pre) > code {
+      background: rgba(88,166,255,.1);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--accent);
+    }
+    .kw  { color: var(--purple); }
+    .str { color: var(--green); }
+    .cmt { color: var(--text-muted); font-style: italic; }
+    .fn  { color: var(--accent); }
+    .num { color: var(--orange); }
+
+    /* ── Tables ───────────────────────────────────── */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 24px;
+      font-size: 14px;
+    }
+    th, td {
+      text-align: left;
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border);
+    }
+    th {
+      background: rgba(88,166,255,.06);
+      color: var(--accent);
+      font-weight: 600;
+    }
+    tr:hover td { background: rgba(88,166,255,.03); }
+
+    /* ── Callouts ─────────────────────────────────── */
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: rgba(88,166,255,.06);
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin: 16px 0;
+      font-size: 14px;
+    }
+    .callout.warn  { border-color: var(--orange); background: rgba(210,153,34,.06); }
+    .callout.error { border-color: var(--red);    background: rgba(248,81,73,.06); }
+    .callout.success { border-color: var(--green); background: rgba(63,185,80,.06); }
+    .callout strong { display: block; margin-bottom: 4px; }
+
+    /* ── Lists ────────────────────────────────────── */
+    ul, ol { padding-left: 22px; margin: 10px 0 16px; }
+    li { margin-bottom: 6px; font-size: 14px; }
+
+    /* ── Badge ────────────────────────────────────── */
+    .badge {
+      display: inline-block;
+      font-size: 11px;
+      padding: 3px 10px;
+      border-radius: 14px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .4px;
+    }
+    .badge-new     { background: rgba(63,185,80,.2); color: var(--green); }
+    .badge-beta    { background: rgba(210,153,34,.2); color: var(--orange); }
+    .badge-stable  { background: rgba(88,166,255,.2); color: var(--accent); }
+
+    /* ── Flow diagram ─────────────────────────────── */
+    .flow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 16px 0;
+      flex-wrap: wrap;
+    }
+    .flow-step {
+      background: var(--card);
+      border: 1px solid var(--border);
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      color: var(--text);
+    }
+    .flow-arrow { color: var(--text-muted); font-size: 18px; }
+
+    /* ── Scrollbar ────────────────────────────────── */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: var(--bg); }
+    ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+    @media (max-width: 860px) {
+      .sidebar { display: none; }
+      .main { margin-left: 0; padding: 24px 20px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- SIDEBAR                                         -->
+<!-- ════════════════════════════════════════════════ -->
+<aside class="sidebar">
+  <h2>Automergent</h2>
+  <nav>
+    <a href="#top">Advanced Features</a>
+    <a href="#sub-agents" class="sub">Sub-agent System</a>
+    <a href="#agent-types" class="sub">Agent Types</a>
+    <a href="#spawning" class="sub">Spawning Agents</a>
+    <a href="#parallel" class="sub">Parallel Execution</a>
+    <a href="#monitoring" class="sub">Monitoring</a>
+    <a href="#isolation" class="sub">Isolation</a>
+    <a href="#mcp">MCP (Model Context Protocol)</a>
+    <a href="#mcp-config" class="sub">Configuration</a>
+    <a href="#mcp-transports" class="sub">Transport Types</a>
+    <a href="#mcp-commands" class="sub">Commands</a>
+    <a href="#workflows">Workflows</a>
+    <a href="#workflow-format" class="sub">Format</a>
+    <a href="#workflow-run" class="sub">Running</a>
+    <a href="#skills">Skills System</a>
+    <a href="#skills-paths" class="sub">Skill Paths</a>
+    <a href="#memory">Memory System</a>
+    <a href="#memory-commands" class="sub">Commands</a>
+    <a href="#dream" class="sub">Dream Mode</a>
+    <a href="#artifacts">Artifact System</a>
+    <a href="#plan-mode" class="sub">Plan Mode</a>
+    <a href="#goal" class="sub">Goal Mode</a>
+    <a href="#security">Security Features</a>
+    <a href="#sandboxing" class="sub">Sandboxing</a>
+    <a href="#secrets" class="sub">Secrets Scanning</a>
+    <a href="#permissions" class="sub">Permissions</a>
+    <a href="#bg-shells">Background Shells</a>
+    <a href="#approval-modes">Approval Modes</a>
+    <a href="#approval-table" class="sub">Mode Comparison</a>
+  </nav>
+  <div class="version">Automergent v2.1 — Docs rev 2026.08</div>
+</aside>
+
+<!-- ════════════════════════════════════════════════ -->
+<!-- MAIN CONTENT                                    -->
+<!-- ════════════════════════════════════════════════ -->
+<main class="main" id="top">
+
+<h1>Advanced Features</h1>
+<p class="subtitle">Sub-agents, MCP, workflows, memory, artifacts, security, and background execution.</p>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- 1. SUB-AGENT SYSTEM                             -->
+<!-- ═══════════════════════════════════════════════ -->
+<h2 id="sub-agents">Sub-agent System <span class="badge badge-stable">Stable</span></h2>
+<p>Automergent spawns specialized child agents to parallelize work. Each sub-agent runs in its own context with an isolated tool registry and todo store, reporting progress back through a steering channel.</p>
+
+<h3 id="agent-types">Agent Types</h3>
+
+<div class="card-grid">
+  <div class="card">
+    <h3>general-purpose</h3>
+    <span class="tag tag-blue">Default</span>
+    <p>Full capabilities — file editing, code generation, debugging, refactoring. Use when the task requires writes or multi-step reasoning.</p>
+    <pre><code><span class="kw">task</span>(agent_type=<span class="str">"general-purpose"</span>,
+     prompt=<span class="str">"Implement the OAuth2 flow in src/auth.ts"</span>)</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>explore</h3>
+    <span class="tag tag-green">Read-only</span>
+    <p>Fast, read-only agent for locating files, grepping patterns, and understanding code structure. No write tools available.</p>
+    <pre><code><span class="kw">task</span>(agent_type=<span class="str">"explore"</span>,
+     prompt=<span class="str">"Find all database migration files"</span>)</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>review</h3>
+    <span class="tag tag-orange">Analysis</span>
+    <p>Specialized for code review, bug detection, and security analysis. Produces structured findings with severity levels.</p>
+    <pre><code><span class="kw">task</span>(agent_type=<span class="str">"review"</span>,
+     prompt=<span class="str">"Review src/api/handlers.go for security issues"</span>)</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>contexter</h3>
+    <span class="tag tag-purple">Memory</span>
+    <p>Context management and compaction. Optimizes memory usage by summarizing long conversations and managing context windows.</p>
+    <pre><code><span class="kw">task</span>(agent_type=<span class="str">"contexter"</span>,
+     prompt=<span class="str">"Compact the session history for topic X"</span>)</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>coordinator</h3>
+    <span class="tag tag-blue">Orchestrator</span>
+    <p>Spawns and manages other agents. Decomposes complex tasks, assigns sub-agents, and aggregates results.</p>
+    <pre><code><span class="kw">task</span>(agent_type=<span class="str">"coordinator"</span>,
+     prompt=<span class="str">"Refactor the payment module: explore, plan, implement"</span>)</code></pre>
+  </div>
+
+  <div class="card">
+    <h3>task</h3>
+    <span class="tag tag-red">Shell</span>
+    <p>Executes shell commands with verbose output. Ideal for build, test, and deployment tasks that need terminal access.</p>
+    <pre><code><span class="kw">task</span>(agent_type=<span class="str">"task"</span>,
+     prompt=<span class="str">"Run the full test suite and report failures"</span>)</code></pre>
+  </div>
+</div>
+
+<h3 id="spawning">Spawning Agents</h3>
+<p>Use the <code>task</code> tool with a self-contained prompt. The parent agent should include all necessary context since the child has no access to parent conversation history.</p>
+
+<pre><code><span class="cmt">// Self-contained prompt — child agent cannot see parent context</span>
+<span class="kw">task</span>(
+  agent_type=<span class="str">"explore"</span>,
+  prompt=<span class="str">"""
+    Project: Automergent CLI
+    Goal: Find all error handling patterns in Go source files.
+    Constraints: Read-only, no modifications.
+    Output: List files with line numbers and the pattern used.
+  """</span>
+)</code></pre>
+
+<div class="callout">
+  <strong>Tip</strong>
+  Always include project context in the prompt. Sub-agents start with a blank slate — they only see what you provide.
+</div>
+
+<h3 id="parallel">Parallel Execution</h3>
+<p>Launch multiple agents simultaneously with <code>batch_task</code>. Each runs independently, and results are collected when all complete.</p>
+
+<pre><code><span class="cmt">// Launch 3 explore agents to analyze different parts of the codebase</span>
+<span class="kw">batch_task</span>([
+  { agent_type: <span class="str">"explore"</span>,  prompt: <span class="str">"Analyze src/auth/ — patterns, dependencies"</span> },
+  { agent_type: <span class="str">"explore"</span>,  prompt: <span class="str">"Analyze src/api/ — routes, middleware"</span> },
+  { agent_type: <span class="str">"explore"</span>,  prompt: <span class="str">"Analyze src/db/ — models, migrations"</span> },
+])</code></pre>
+
+<p>Execution flow:</p>
+<div class="flow">
+  <div class="flow-step">Parent agent</div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-step">batch_task()</div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-step">3 × explore</div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-step">Results aggregated</div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-step">Parent continues</div>
+</div>
+
+<h3 id="monitoring">Monitoring Agents</h3>
+
+<table>
+  <thead>
+    <tr><th>Tool</th><th>Purpose</th><th>Returns</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>read_agent</code></td>
+      <td>Read results of a completed agent</td>
+      <td>Full output, status, duration</td>
+    </tr>
+    <tr>
+      <td><code>list_agents</code></td>
+      <td>List all active and completed agents</td>
+      <td>Roster with status, type, start time</td>
+    </tr>
+    <tr>
+      <td><code>stop_agent</code></td>
+      <td>Kill a running agent</td>
+      <td>Confirmation, partial results if any</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3>Background Execution with Live Progress</h3>
+<p>Sub-agents run in the background. The parent agent continues working while children execute. Task notifications arrive through the steering channel:</p>
+
+<pre><code><span class="cmt">// Parent receives notifications like:</span>
+<span class="cmt">// [task:explore] Completed in 12.3s — found 47 files, 3 patterns</span>
+<span class="cmt">// [task:review]  Completed in 8.1s  — 3 warnings, 0 errors</span>
+
+<span class="cmt">// Read results when ready:</span>
+<span class="kw">read_agent</span>(agent_id=<span class="str">"task-explore-001"</span>)</code></pre>
+
+<h3 id="isolation">Per-child Tool Registry &amp; Todo Store</h3>
+<p>Each sub-agent maintains an isolated workspace:</p>
+
+<table>
+  <thead>
+    <tr><th>Isolation Boundary</th><th>What's Isolated</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Tool Registry</td><td>Each child only has tools matching its agent type (explore gets read-only tools, task gets shell tools)</td></tr>
+    <tr><td>Todo Store</td><td>Each child's task list is independent — no cross-contamination</td></tr>
+    <tr><td>Context Window</td><td>Each child has its own LLM context — parent context is not inherited</td></tr>
+    <tr><td>Memory Scope</td><td>Child agents cannot modify parent memory — only report findings</td></tr>
+  </tbody>
+</table>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- 2. MCP                                          -->
+<!-- ═══════════════════════════════════════════════ -->
+<h2 id="mcp">MCP — Model Context Protocol <span class="badge badge-stable">Stable</span></h2>
+<p>MCP is a standard protocol for integrating external tools and resources into Automergent. It lets you connect custom APIs, databases, and services as first-class tools.</p>
+
+<h3 id="mcp-config">Server Configuration</h3>
+<p>Add MCP servers in <code>config.yaml</code>:</p>
+
+<pre><code><span class="cmt"># config.yaml</span>
+mcp:
+  servers:
+    <span class="fn">github</span>:
+      transport: <span class="str">stdio</span>
+      command: <span class="str">"npx"</span>
+      args: [<span class="str">"-y"</span>, <span class="str">"@modelcontextprotocol/server-github"</span>]
+      env:
+        GITHUB_TOKEN: <span class="str">"${GITHUB_TOKEN}"</span>
+
+    <span class="fn">postgres</span>:
+      transport: <span class="str">sse</span>
+      url: <span class="str">"http://localhost:8080/mcp"</span>
+      headers:
+        Authorization: <span class="str">"Bearer ${DB_TOKEN}"</span>
+
+    <span class="fn">filesystem</span>:
+      transport: <span class="str">stdio</span>
+      command: <span class="str">"npx"</span>
+      args: [<span class="str">"-y"</span>, <span class="str">"@modelcontextprotocol/server-filesystem"</span>, <span class="str">"/safe/path"</span>]</code></pre>
+
+<h3 id="mcp-transports">Transport Types</h3>
+
+<table>
+  <thead>
+    <tr><th>Transport</th><th>Protocol</th><th>Use Case</th><th>Hot-Reload</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>stdio</code></td>
+      <td>stdin/stdout</td>
+      <td>Local processes, CLI tools</td>
+      <td>Restart on config change</td>
+    </tr>
+    <tr>
+      <td><code>sse</code></td>
+      <td>Server-Sent Events</td>
+      <td>Remote servers, long-lived connections</td>
+      <td>Reconnect on config change</td>
+    </tr>
+    <tr>
+      <td><code>http</code></td>
+      <td>HTTP POST</td>
+      <td>REST-style integrations, webhooks</td>
+      <td>Re-init on config change</td>
+    </tr>
+  </tbody>
+</table>
+
+<h3 id="mcp-commands">Commands</h3>
+
+<table>
+  <thead>
+    <tr><th>Command</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>/mcp</code></td><td>Show all configured MCP servers and their status</td></tr>
+    <tr><td><code>/mcp tools</code></td><td>List all tools provided by connected MCP servers</td></tr>
+    <tr><td><code>/mcp enable &lt;server&gt;</code></td><td>Enable a disabled MCP server</td></tr>
+    <tr><td><code>/mcp disable &lt;server&gt;</code></td><td>Disable a running MCP server</td></tr>
+    <tr><td><code>/mcp add</code></td><td>Interactively add a new MCP server</td></tr>
+    <tr><td><code>/mcp remove &lt;server&gt;</code></td><td>Remove an MCP server from config</td></tr>
+  </tbody>
+</table>
+
+<h3>MCP Tools</h3>
+<p>Once connected, MCP tools are available alongside built-in tools:</p>
+
+<pre><code><span class="cmt">// List all resources exposed by MCP servers</span>
+<span class="fn">list_mcp_resources</span>(server=<span class="str">"github"</span>)
+
+<span class="cmt">// Read a specific resource</span>
+<span class="fn">read_mcp_resource</span>(server=<span class="str">"github"</span>, uri=<span class="str">"github://repo/owner/name"</span>)</code></pre>
+
+<h3>Hot-Reload Support</h3>
+<p>MCP servers support hot-reload. Edit <code>config.yaml</code> and changes take effect within seconds:</p>
+
+<pre><code><span class="cmt">// Config watcher detects changes:</span>
+<span class="cmt">// [mcp] Config changed — reloading github server...</span>
+<span class="cmt">// [mcp] github: connected (3 tools, 12 resources)</span></code></pre>
+
+<h3 id="mcp-example">Example: Adding a Custom MCP Server</h3>
+
+<pre><code><span class="cmt"># 1. Create a minimal MCP server</span>
+cat &gt; my-mcp-server.js &lt;&lt; 'EOF'
+const { Server } = require("@modelcontextprotocol/sdk/server");
+
+const server = new Server({ name: "my-tools", version: "1.0.0" });
+
+server.tool("get_weather", { city: { type: "string" } }, async ({ city }) => {
+  return { content: [{ type: "text", text: `Weather in ${city}: 72°F sunny` }] };
+});
+
+server.connect({ transport: "stdio" });
+EOF
+
+<span class="cmt"># 2. Add to config.yaml</span>
+<span class="cmt"># mcp:</span>
+<span class="cmt">#   servers:</span>
+<span class="cmt">#     weather:</span>
+<span class="cmt">#       transport: stdio</span>
+<span class="cmt">#       command: node</span>
+<span class="cmt">#       args: ["my-mcp-server.js"]</span>
+
+<span class="cmt"># 3. Verify</span>
+<span class="cmt"># /mcp tools → lists "get_weather"</span></code></pre>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- 3. WORKFLOWS                                    -->
+<!-- ═══════════════════════════════════════════════ -->
+<h2 id="workflows">Workflows <span class="badge badge-stable">Stable</span></h2>
+<p>Workflows are saved Markdown-based prompt chains. Each <code>##</code> heading defines a step; Automergent executes them sequentially, passing results forward.</p>
+
+<h3 id="workflow-format">Format</h3>
+<p>Store workflows in <code>.automergent/workflows/</code>:</p>
+
+<pre><code><span class="cmt">## .automergent/workflows/deploy-check.md</span>
+
+## 1. Lint &amp; Type Check
+Run <code>npm run lint</code> and <code>npm run typecheck</code>. Report any errors.
+
+## 2. Unit Tests
+Run <code>npm test -- --coverage</code>. Fail if coverage drops below 80%.
+
+## 3. Build
+Run <code>npm run build</code>. Confirm the output exists at <code>dist/</code>.
+
+## 4. Deploy Preview
+Run <code>npx vercel --prebuilt</code>. Return the preview URL.
+
+## 5. Smoke Test
+Fetch the preview URL and verify the homepage returns HTTP 200.</code></pre>
+
+<h3 id="workflow-run">Running Workflows</h3>
+
+<table>
+  <thead>
+    <tr><th>Command</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>/workflow</code></td><td>List all available workflows</td></tr>
+    <tr><td><code>/workflow deploy-check</code></td><td>Run the deploy-check workflow</td></tr>
+    <tr><td><code>/workflow deploy-check --bg</code></td><td>Run in background with dock display</td></tr>
+  </tbody>
+</table>
+
+<h3>Background Dock Display</h3>
+<p>When running with <code>--bg</code>, the workflow appears in the bottom dock:</p>
+
+<pre><code><span class="cmt">// Bottom dock shows:</span>
+┌─ Workflow: deploy-check ─────────────────────────┐
+│ Step 1: Lint &amp; Type Check     ✓ passed (4.2s)    │
+│ Step 2: Unit Tests             ⏳ running (12s)   │
+│ Step 3: Build                  ⬜ pending          │
+│ Step 4: Deploy Preview         ⬜ pending          │
+│ Step 5: Smoke Test             ⬜ pending          │
+└───────────────────────────────────────────────────┘</code></pre>
+
+<h3>Per-step Results &amp; Run History</h3>
+<p>Each workflow run is logged. Access history with:</p>
+<ul>
+  <li><code>/workflow history</code> — list past runs with timestamps and status</li>
+  <li><code>/workflow history deploy-check --last 5</code> — last 5 runs</li>
+  <li>Click any step in the dock to see full output</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- 4. SKILLS SYSTEM                                -->
+<!-- ═══════════════════════════════════════════════ -->
+<h2 id="skills">Skills System <span class="badge badge-stable">Stable</span></h2>
+<p>Skills are specialized instructions and workflows loaded contextually. They provide domain-specific guidance without polluting the main context.</p>
+
+<h3 id="skills-paths">Skill Paths</h3>
+
+<table>
+  <thead>
+    <tr><th>Location</th><th>Scope</th><th>Priority</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>.automergent/skills/</code></td><td>Project-specific</td><td>Higher (project takes precedence)</td></tr>
+    <tr><td><code>~/.automergent/skills/</code></td><td>User-wide</td><td>Lower (global defaults)</td></tr>
+  </tbody>
+</table>
+
+<h3>Skill Discovery &amp; Loading</h3>
+<p>Automergent discovers skills on startup and when the <code>/skills</code> command runs. Skills are loaded on-demand when a task matches their description.</p>
+
+<pre><code><span class="cmt"># .automergent/skills/testing.md</span>
+---
+name: testing
+description: Best practices for writing and running tests in this project
+triggers:
+  - "write tests"
+  - "test coverage"
+  - "unit test"
+---
+
+## Testing Guidelines
+
+- Use Vitest for unit tests
+- Place tests adjacent to source: <code>src/foo.ts</code> → <code>src/foo.test.ts</code>
+- Aim for 80% coverage on new code
+- Mock external APIs with MSW
+- Use <code>describe/it/expect</code> pattern</code></pre>
+
+<h3>The /skills Command</h3>
+<pre><code><span class="cmt"># Browse available skills</span>
+/skills
+
+<span class="cmt"># Output:</span>
+<span class="cmt"># Available Skills:</span>
+<span class="cmt">#   testing     (.automergent/skills/)  — Test writing best practices</span>
+<span class="cmt">#   security    (.automergent/skills/)  — Security review checklist</span>
+<span class="cmt">#   rust        (~/.automergent/skills/) — Rust idioms and patterns</span>
+<span class="cmt">#   python      (~/.automergent/skills/) — Python conventions</span></code></pre>
+
+<h3>Creating Custom Skills</h3>
+<p>Skills are Markdown files with YAML frontmatter:</p>
+<ul>
+  <li><code>name</code> — identifier</li>
+  <li><code>description</code> — when to load this skill</li>
+  <li><code>triggers</code> — keywords that auto-activate the skill</li>
+  <li>Body — instructions, examples, constraints</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- 5. MEMORY SYSTEM                                -->
+<!-- ═══════════════════════════════════════════════ -->
+<h2 id="memory">Memory System <span class="badge badge-stable">Stable</span></h2>
+<p>Durable memory persists facts, decisions, and preferences across sessions. Memory is injected as context — not as commands — so the agent uses it as background knowledge.</p>
+
+<h3 id="memory-commands">Commands</h3>
+
+<table>
+  <thead>
+    <tr><th>Command</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>/memory add "fact"</code></td><td>Store a durable fact, decision, or preference</td></tr>
+    <tr><td><code>/memory remove &lt;id&gt;</code></td><td>Delete a specific memory by ID</td></tr>
+    <tr><td><code>/memory clear</code></td><td>Clear all stored memories</td></tr>
+    <tr><td><code>/memory list</code></td><td>Display all stored memories with IDs</td></tr>
+  </tbody>
+</table>
+
+<h3>Memory Examples</h3>
+
+<pre><code><span class="cmt"># Store a fact</span>
+/memory add "This project uses PostgreSQL 16 with Prisma ORM"
+
+<span class="cmt"># Store a preference</span>
+/memory add "Always use kebab-case for CSS class names"
+
+<span class="cmt"># Store a decision</span>
+/memory add "Decided to use Zustand over Redux for state management (simpler API)"
+
+<span class="cmt"># List all memories</span>
+/memory list
+<span class="cmt"># [1] This project uses PostgreSQL 16 with Prisma ORM</span>
+<span class="cmt"># [2] Always use kebab-case for CSS class names</span>
+<span class="cmt"># [3] Decided to use Zustand over Redux for state management</span></code></pre>
+
+<h3 id="dream">Dream Mode — /dream</h3>
+<p>The <code>/dream</code> command consolidates session memory. It reviews the current conversation, extracts durable facts, and stores them:</p>
+
+<pre><code><span class="cmt"># At end of a productive session</span>
+/dream
+
+<span class="cmt"># Automergent:</span>
+<span class="cmt"># Scanning session... found 4 durable facts:</span>
+<span class="cmt"># [1] API uses REST, not GraphQL</span>
+<span class="cmt"># [2] Auth middleware at src/middleware/auth.ts</span>
+<span class="cmt"># [3] Tests require DATABASE_URL env var</span>
+<span class="cmt"># [4] Build command is `make prod`</span>
+<span class="cmt"># Stored 4 memories. Use /memory list to review.</span></code></pre>
+
+<h3>Auto-recall in Later Sessions</h3>
+<p>Memories are automatically injected into new sessions as background context. The agent sees them as <em>knowledge</em>, not instructions:</p>
+
+<pre><code><span class="cmt">// System prompt automatically includes:</span>
+<span class="cmt">// Durable Memory:</span>
+<span class="cmt">// - This project uses PostgreSQL 16 with Prisma ORM</span>
+<span class="cmt">// - Always use kebab-case for CSS class names</span>
+<span class="cmt">// - Decided to use Zustand over Redux</span></code></pre>
+
+<div class="callout">
+  <strong>Memory as Context, Not Commands</strong>
+  Memories are injected as background knowledge. They inform the agent's decisions but don't override explicit instructions in the current prompt.
+</div>
+
+<h3>Best Practices</h3>
+<ul>
+  <li>Store <strong>facts</strong>: "This project uses X", "The API endpoint is /v2/users"</li>
+  <li>Store <strong>decisions</strong>: "Chose X over Y because Z"</li>
+  <li>Store <strong>preferences</strong>: "Always use tabs for indentation"</li>
+  <li>Avoid storing ephemeral state — use todos for that</li>
+  <li>Periodically <code>/dream</code> to consolidate important session findings</li>
+</ul>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- 6. ARTIFACT SYSTEM                              -->
+<!-- ═══════════════════════════════════════════════ -->
+<h2 id="artifacts">Artifact System <span class="badge badge-beta">Beta</span></h2>
+<p>Artifacts are structured deliverables — plan documents, goal specs, and review outputs — with built-in approval workflows.</p>
+
+<h3 id="plan-mode">Plan Mode</h3>
+<p>Switch to read-only analysis mode. The agent produces a plan artifact without modifying any files:</p>
+
+<pre><code><span class="cmt"># Enter plan mode</span>
+/plan
+
+<span class="cmt"># Agent analyzes the codebase and produces:</span>
+<span class="cmt"># ┌─ Plan Artifact ───────────────────────────┐</span>
+<span class="cmt"># │ Title: Refactor Auth Module                │</span>
+<span class="cmt"># │ Status: PENDING APPROVAL                   │</span>
+<span class="cmt"># │                                            │</span>
+<span class="cmt"># │ ## Current State                           │</span>
+<span class="cmt"># │ - Auth lives in src/auth.ts (420 lines)    │</span>
+<span class="cmt"># │ - Mixed concerns: JWT, sessions, OAuth     │</span>
+<span class="cmt"># │                                            │</span>
+<span class="cmt"># │ ## Proposed Changes                        │</span>
+<span class="cmt"># │ 1. Split into src/auth/jwt.ts              │</span>
+<span class="cmt"># │ 2. Split into src/auth/oauth.ts            │</span>
+<span class="cmt"># │ 3. Create src/auth/session.ts              │</span>
+<span class="cmt"># │                                            │</span>
+<span class="cmt"># │ ## Risk Assessment                         │</span>
+<span class="cmt"># │ - Low: No API changes                      │</span>
+<span class="cmt"># │ - Medium: Migration of existing tests      │</span>
+<span class="cmt"># │                                            │</span>
+<span class="cmt"># │ [Accept] [Reject] [Comment]               │</span>
+<span class="cmt"># └────────────────────────────────────────────┘</span></code></pre>
+
+<h3 id="artifact">Artifact Review Commands</h3>
+
+<table>
+  <thead>
+    <tr><th>Command</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>/artifact</code></td><td>View current artifact</td></tr>
+    <tr><td><code>/artifact accept</code></td><td>Approve the plan — agent executes it</td></tr>
+    <tr><td><code>/artifact reject</code></td><td>Reject the plan — agent revises or discards</td></tr>
+    <tr><td><code>/artifact comment "text"</code></td><td>Add feedback for the agent to incorporate</td></tr>
+  </tbody>
+</table>
+
+<h3 id="goal">Goal Mode</h3>
+<p>Set autonomy objectives with <code>/goal</code>. The agent works toward a high-level objective, making decisions autonomously:</p>
+
+<pre><code><span class="cmt"># Set a goal</span>
+/goal "Achieve 90% test coverage on src/api/"
+
+<span class="cmt"># Agent:</span>
+<span class="cmt"># Goal registered. I will:</span>
+<span class="cmt"># 1. Analyze current coverage (explore agent)</span>
+<span class="cmt"># 2. Identify uncovered code paths</span>
+<span class="cmt"># 3. Write tests for each uncovered path</span>
+<span class="cmt"># 4. Verify coverage threshold reached</span>
+<span class="cmt"># Starting...</span></code></pre>
+
+<h3>Approval Flow</h3>
+
+<div class="flow">
+  <div class="flow-step">Agent produces artifact</div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-step">User reviews</div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-step">Accept / Reject / Comment</div>
+  <div class="flow-arrow">→</div>
+  <div class="flow-step">Agent executes or revises</div>
+</div>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- 7. SECURITY                                     -->
+<!-- ═══════════════════════════════════════════════ -->
+<h2 id="security">Security Features <span class="badge badge-stable">Stable</span></h2>
+
+<h3 id="sandboxing">OS-level Sandboxing</h3>
+<p>Automergent enforces sandboxing at the OS level on every platform:</p>
+
+<table>
+  <thead>
+    <tr><th>Platform</th><th>Mechanism</th><th>Scope</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Linux</td><td>seccomp + landlock + user namespaces</td><td>Syscall filtering, filesystem isolation</td></tr>
+    <tr><td>macOS</td><td>App Sandbox + seatbelt profiles</td><td>File access, network, mach ports</td></tr>
+    <tr><td>Windows</td><td>AppContainer + restricted tokens</td><td>Filesystem, registry, network</td></tr>
+  </tbody>
+</table>
+
+<h3>Path Boundary Enforcement</h3>
+
+<pre><code><span class="cmt"># Blocked write paths (cannot be modified):</span>
+/etc/
+/usr/
+/bin/
+/boot/
+/sys/
+/proc/
+
+<span class="cmt"># Allowed write paths (default):</span>
+./              <span class="cmt"># Current project directory</span>
+/tmp/           <span class="cmt"># Temp files</span>
+~/              <span class="cmt"># User home</span>
+
+<span class="cmt"># Custom paths in config.yaml:</span>
+security:
+  allowed_paths:
+    - /opt/projects/
+    - /var/data/
+  blocked_paths:
+    - /etc/
+    - /usr/</code></pre>
+
+<h3 id="secrets">Secrets Scanning <span class="badge badge-stable">20+ patterns</span></h3>
+<p>Automergent scans all file writes and shell output for leaked secrets:</p>
+
+<table>
+  <thead>
+    <tr><th>Provider</th><th>Pattern</th><th>Example Match</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>AWS</td><td>AKIA[0-9A-Z]{16}</td><td><code>AKIAIOSFODNN7EXAMPLE</code></td></tr>
+    <tr><td>GitHub</td><td>ghp_[A-Za-z0-9]{36}</td><td><code>ghp_ABC...XYZ</code></td></tr>
+    <tr><td>Google</td><td>AIza[0-9A-Za-z\-_]{35}</td><td><code>AIzaSyA...example</code></td></tr>
+    <tr><td>Stripe</td><td>sk_live_[0-9a-zA-Z]{24,}</td><td><code>sk_live_abc...xyz</code></td></tr>
+    <tr><td>Slack</td><td>xox[bpoa]-[0-9A-Za-z\-]{10,}</td><td><code>xoxb-1234-...</code></td></tr>
+    <tr><td>Generic</td><td>password|secret|token|key.*=</td><td>Context-dependent</td></tr>
+  </tbody>
+</table>
+
+<div class="callout error">
+  <strong>Secret Detected — Action Blocked</strong>
+  If a secret is found in a file write or shell output, the action is blocked and you're prompted to redact the value before proceeding.
+</div>
+
+<h3 id="security-audit">Dependency Auditing</h3>
+
+<pre><code><span class="cmt"># Supported ecosystems:</span>
+<span class="cmt">#   Go      → govulncheck</span>
+<span class="cmt">#   npm     → npm audit</span>
+<span class="cmt">#   Python  → pip-audit</span>
+<span class="cmt">#   Rust    → cargo audit</span>
+
+<span class="cmt"># Run security review</span>
+/security-review
+
+<span class="cmt"># Output:</span>
+<span class="cmt"># ┌─ Security Review ─────────────────────────┐</span>
+<span class="cmt"># │ Dependencies:                              │</span>
+<span class="cmt"># │   npm: 234 packages, 0 vulnerabilities    │</span>
+<span class="cmt"># │   Go: 12 modules, 1 low-severity         │</span>
+<span class="cmt"># │                                            │</span>
+<span class="cmt"># │ Secrets scan: CLEAN                        │</span>
+<span class="cmt"># │ File permissions: OK                       │</span>
+<span class="cmt"># │ Git hooks: configured                      │</span>
+<span class="cmt"># │ Status: PASS                               │</span>
+<span class="cmt"># └────────────────────────────────────────────┘</span></code></pre>
+
+<h3>Tool Confirmation System</h3>
+<p>Every tool invocation can require confirmation depending on your approval mode. Dangerous operations always ask:</p>
+
+<pre><code><span class="cmt">// Always confirmed (regardless of mode):</span>
+rm -rf /
+sudo anything
+git push --force
+DROP TABLE</code></pre>
+
+<h3>Per-tool Permissions</h3>
+<p>Fine-grained control over which tools can run without confirmation:</p>
+
+<pre><code><span class="cmt"># /permissions command</span>
+/permissions
+
+<span class="cmt"># Output:</span>
+<span class="cmt"># Tool Permissions:</span>
+<span class="cmt">#   read_file       ✓ always allow</span>
+<span class="cmt">#   edit_file       ✓ always allow  (accept-edits mode)</span>
+<span class="cmt">#   bash            ⚠ ask each time</span>
+<span class="cmt">#   web_fetch       ✓ always allow</span>
+<span class="cmt">#   git             ⚠ ask each time</span></code></pre>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- 8. BACKGROUND SHELLS                            -->
+<!-- ═══════════════════════════════════════════════ -->
+<h2 id="bg-shells">Background Shells <span class="badge badge-stable">Stable</span></h2>
+<p>Persistent PTY sessions that survive across agent turns. Run long-lived processes, dev servers, or watchers without blocking the main conversation.</p>
+
+<h3>Shell Tools</h3>
+
+<table>
+  <thead>
+    <tr><th>Tool</th><th>Description</th><th>Returns</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>bash</code></td><td>Create a new background shell</td><td>Shell ID</td></tr>
+    <tr><td><code>read_shell</code></td><td>Read output tail from a shell</td><td>Recent stdout/stderr</td></tr>
+    <tr><td><code>write_shell</code></td><td>Send input to a shell</td><td>Confirmation</td></tr>
+    <tr><td><code>stop_shell</code></td><td>Kill a running shell process</td><td>Exit status</td></tr>
+    <tr><td><code>list_shells</code></td><td>List all active shells</td><td>Roster with status</td></tr>
+  </tbody>
+</table>
+
+<h3>Example: Dev Server</h3>
+
+<pre><code><span class="cmt"># Start a dev server in background</span>
+<span class="kw">bash</span>(command=<span class="str">"npm run dev"</span>, label=<span class="str">"dev-server"</span>)
+<span class="cmt"># → Shell ID: sh-001</span>
+
+<span class="cmt"># Read its output after a few seconds</span>
+<span class="kw">read_shell</span>(shell_id=<span class="str">"sh-001"</span>)
+<span class="cmt"># → "Server running at http://localhost:3000"</span>
+
+<span class="cmt"># List all active shells</span>
+<span class="kw">list_shells</span>()
+<span class="cmt"># → [{ id: "sh-001", label: "dev-server", status: "running", pid: 12345 }]</span>
+
+<span class="cmt"># Stop it when done</span>
+<span class="kw">stop_shell</span>(shell_id=<span class="str">"sh-001"</span>)</code></pre>
+
+<h3>Bottom Dock Display</h3>
+<p>Active shells appear in the bottom dock with live output tails:</p>
+
+<pre><code><span class="cmt">// Bottom dock shows:</span>
+┌─ Shells ─────────────────────────────────────────┐
+│ sh-001  dev-server    npm run dev    running  ⏱ 2m │
+│   → Server running at http://localhost:3000       │
+│   → 12 modules compiled successfully             │
+│ sh-002  test-watch    npm test -- -w running  ⏱ 5m │
+│   → 47 tests passing, 0 failing                  │
+└───────────────────────────────────────────────────┘</code></pre>
+
+<!-- ═══════════════════════════════════════════════ -->
+<!-- 9. APPROVAL MODES                               -->
+<!-- ═══════════════════════════════════════════════ -->
+<h2 id="approval-modes">Approval Modes Deep Dive <span class="badge badge-stable">Stable</span></h2>
+<p>Automergent offers five approval modes controlling how much autonomy the agent has. Choose based on your comfort level and task risk.</p>
+
+<h3 id="approval-table">Mode Comparison</h3>
+
+<table>
+  <thead>
+    <tr><th>Mode</th><th>File Edits</th><th>Shell Commands</th><th>Web Fetch</th><th>Git Operations</th><th>Best For</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Manual</strong></td>
+      <td>Confirm each</td>
+      <td>Confirm each</td>
+      <td>Confirm each</td>
+      <td>Confirm each</td>
+      <td>Maximum control, sensitive repos</td>
+    </tr>
+    <tr>
+      <td><strong>Accept-edits</strong></td>
+      <td>Auto-apply</td>
+      <td>Confirm each</td>
+      <td>Confirm each</td>
+      <td>Confirm each</td>
+      <td>Iterative coding, review before run</td>
+    </tr>
+    <tr>
+      <td><strong>Auto</strong></td>
+      <td>Auto-apply</td>
+      <td>Auto-execute*</td>
+      <td>Auto-fetch</td>
+      <td>Confirm push</td>
+      <td>Trusted environment, rapid iteration</td>
+    </tr>
+    <tr>
+      <td><strong>Plan</strong></td>
+      <td>Refused</td>
+      <td>Read-only</td>
+      <td>Auto-fetch</td>
+      <td>Read-only</td>
+      <td>Analysis only, no modifications</td>
+    </tr>
+    <tr>
+      <td><strong>Full Auto</strong></td>
+      <td>Auto-apply</td>
+      <td>Auto-execute</td>
+      <td>Auto-fetch</td>
+      <td>Auto-commit</td>
+      <td>CI/CD, unattended execution</td>
+    </tr>
+  </tbody>
+</table>
+
+<p><em>* Destructive operations (rm -rf, sudo, DROP TABLE) always require confirmation regardless of mode.</em></p>
+
+<h3>Per-tool Permissions</h3>
+<p>Override the mode on a per-tool basis:</p>
+
+<pre><code><span class="cmt"># Allow bash without confirmation in accept-edits mode</span>
+/permissions allow bash
+
+<span class="cmt"># Revoke auto-apply for edit_file</span>
+/permissions deny edit_file
+
+<span class="cmt"># Reset to default</span>
+/permissions reset</code></pre>
+
+<h3>Session-persisted Permissions</h3>
+<p>Permissions granted during a session persist until the session ends or you explicitly revoke them:</p>
+
+<pre><code><span class="cmt">// You approve "bash" once:</span>
+<span class="cmt">// Confirm: bash "npm test" [y/n]</span>
+<span class="cmt">// y → "Remember this choice for this session?" [y/n]</span>
+<span class="cmt">// y → bash is now auto-approved for this session</span></code></pre>
+
+<h3>Approval Flow UI</h3>
+
+<pre><code><span class="cmt">// When confirmation is needed:</span>
+┌─ Tool Confirmation ────────────────────────────┐
+│ Tool:    bash                                  │
+│ Command: npm test                              │
+│ Mode:    accept-edits (shell requires confirm)  │
+│                                                 │
+│ [y] Yes, execute    [n] No, skip               │
+│ [a] Always allow    [r] Remember for session    │
+└─────────────────────────────────────────────────┘</code></pre>
+
+<div class="callout warn">
+  <strong>Git Required for Auto Modes</strong>
+  Auto and Full Auto modes require a clean git state (committed or stashed changes). This ensures you can always revert if the agent makes unwanted changes.
+</div>
+
+<div class="callout success">
+  <strong>Recommended Workflow</strong>
+  Start with <code>accept-edits</code> mode. Use <code>/plan</code> for risky changes. Upgrade to <code>auto</code> only after verifying the agent behaves as expected on your codebase.
+</div>
+
+</main>
+<script src="../js/nav.js"></script>
+<script src="../js/footer.js"></script>
+</body>
+</html>
