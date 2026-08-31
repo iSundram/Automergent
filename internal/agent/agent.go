@@ -1146,6 +1146,21 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 			if continueTurn := a.injectLongRunContext(runMeta, false); continueTurn {
 				continue // anti-stall: nudge injected, loop again
 			}
+			// Explore exit gate: an explore phase that produced no tool
+			// calls must actually have covered its subject. If the task
+			// names files and none of them were read this run, the model
+			// answered from the file map alone — nudge once, then let it
+			// answer (the same one-nudge budget as the anti-stall path).
+			if a.phaseExploreUndercovered(result.TaskSpec) && !exploreNudged {
+				exploreNudged = true
+				a.sess.AddMessage(ai.Message{
+					Role: ai.RoleSystem,
+					Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: fmt.Sprintf(
+						"[Explore coverage] You are finishing the exploration task without having read any of the files it concerns. Read the relevant files (at minimum the ones named in the task) with read_file, then produce your findings report with path:line references.")}},
+				})
+				a.Emit(EventStatus, "explore under-covered — requesting deeper read")
+				continue
+			}
 			if isFinalLoop {
 				a.Emit(EventDone, text)
 			} else {

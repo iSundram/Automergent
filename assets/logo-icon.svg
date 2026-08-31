@@ -5,29 +5,28 @@
       <stop offset="100%" stop-color="#111111" />
     </linearGradient>
     <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6" />
-      <stop offset="100%" stop-color="#2b2b2b" stop-opacity="0.8" />
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.75" />
+      <stop offset="50%" stop-color="#d4d4d4" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#2b2b2b" stop-opacity="0.85" />
     </linearGradient>
     <filter id="glow" x="-25%" y="-25%" width="150%" height="150%">
-      <feGaussianBlur stdDeviation="2" result="blur" />
+      <feGaussianBlur stdDeviation="2.5" result="blur" />
       <feComposite in="SourceGraphic" in2="blur" operator="over" />
     </filter>
   </defs>
 
-  <rect x="6" y="6" width="88" height="88" rx="22" fill="url(#iconBg)" stroke="url(#borderGrad)" stroke-width="1.5" />
+  <rect x="6" y="6" width="88" height="88" rx="22" fill="url(#iconBg)" stroke="url(#borderGrad)" stroke-width="2" />
 
   <!-- Chevron -->
-  <path d="M 27 30 L 45 50 L 27 70" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" />
+  <path d="M 27 30 L 47 50 L 27 70" stroke="#ffffff" stroke-width="5.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" />
 
-  <!-- Top node + branch to convergence -->
-  <circle cx="55" cy="28" r="4" fill="#ffffff" />
-  <path d="M 55 28 L 70 48" stroke="#d4d4d4" stroke-width="4.5" stroke-linecap="round" />
+  <!-- Top node & branch to convergence -->
+  <circle cx="58" cy="28" r="4.5" fill="#ffffff" />
+  <path d="M 58 28 L 74 50" stroke="#d4d4d4" stroke-width="5" stroke-linecap="round" />
 
-  <!-- Bottom horizontal + branch down from convergence -->
-  <path d="M 45 70 L 70 70" stroke="#b3b3b3" stroke-width="4.5" stroke-linecap="round" />
-
-  <!-- Convergence node -->
-  <circle cx="70" cy="48" r="4.5" fill="#ffffff" />
-  <path d="M 70 48 L 70 70" stroke="#d4d4d4" stroke-width="4.5" stroke-linecap="round" />
-  <circle cx="70" cy="70" r="3.5" fill="#d4d4d4" />
+  <!-- Convergence node & branch down -->
+  <circle cx="74" cy="50" r="4.5" fill="#ffffff" />
+  <path d="M 74 50 L 74 72" stroke="#d4d4d4" stroke-width="5" stroke-linecap="round" />
+  <circle cx="74" cy="72" r="3.5" fill="#d4d4d4" />
+  <path d="M 48 72 L 74 72" stroke="#b3b3b3" stroke-width="5" stroke-linecap="round" />
 </svg>

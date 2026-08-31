@@ -77,6 +77,34 @@ func TestInfoUnknownStateFallsBackToIdle(t *testing.T) {
 	}
 }
 
+func TestIdleTipOverridesStaticIdleLine(t *testing.T) {
+	static := Info(StateIdle, Context{})
+	rotated := Info(StateIdle, Context{IdleTip: "tip: /compact — reclaim context"})
+	if rotated != "tip: /compact — reclaim context" {
+		t.Fatalf("IdleTip must win over the static idle line, got %q", rotated)
+	}
+	if static == rotated {
+		t.Fatal("sanity: the static idle line and the rotated line must differ")
+	}
+	// An empty IdleTip (no rotator) keeps the static hints.
+	if Info(StateIdle, Context{IdleTip: ""}) != static {
+		t.Fatal("empty IdleTip must fall back to the static idle line")
+	}
+}
+
+func TestCommandTipBeatsIdleTip(t *testing.T) {
+	ctx := Context{
+		CommandTip: "compacts the conversation",
+		IdleTip:    "tip: /model — switch models",
+	}
+	if got := Info(StateIdle, ctx); got != ctx.CommandTip {
+		t.Fatalf("CommandTip must outrank IdleTip, got %q", got)
+	}
+	if got := Info(StatePaletteOpen, ctx); got != ctx.CommandTip {
+		t.Fatalf("CommandTip must outrank the palette line too, got %q", got)
+	}
+}
+
 func TestRetryingInfoIncludesCodeAttemptAndDelay(t *testing.T) {
 	got := Info(StateRetrying, Context{
 		ErrCode: "529", Detail: "overloaded",
