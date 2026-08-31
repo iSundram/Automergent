@@ -1,43 +1,45 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 357 74" width="357" height="74" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 380 76" width="380" height="76" fill="none">
   <defs>
     <linearGradient id="iconBg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#2b2b2b" />
       <stop offset="100%" stop-color="#111111" />
     </linearGradient>
     <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.75" />
-      <stop offset="50%" stop-color="#d4d4d4" stop-opacity="0.3" />
-      <stop offset="100%" stop-color="#2b2b2b" stop-opacity="0.85" />
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6" />
+      <stop offset="100%" stop-color="#2b2b2b" stop-opacity="0.8" />
     </linearGradient>
-    <linearGradient id="silverGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+    <linearGradient id="silverGrad" x1="82" y1="0" x2="380" y2="0" gradientUnits="userSpaceOnUse">
       <stop offset="0%" stop-color="#ffffff" />
       <stop offset="60%" stop-color="#d4d4d4" />
       <stop offset="100%" stop-color="#b3b3b3" />
     </linearGradient>
-    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
-      <feGaussianBlur stdDeviation="2" result="blur" />
+    <filter id="glow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur stdDeviation="1.5" result="blur" />
       <feComposite in="SourceGraphic" in2="blur" operator="over" />
     </filter>
   </defs>
 
-  <!-- Left Icon Badge (60x60, centered vertically at y=7) -->
-  <g transform="translate(8, 7)">
-    <rect x="0" y="0" width="60" height="60" rx="16" fill="url(#iconBg)" stroke="url(#borderGrad)" stroke-width="1.75" />
-    <rect x="3" y="3" width="54" height="54" rx="13" fill="none" stroke="#2b2b2b" stroke-width="1" />
-    
-    <!-- Chevron -->
-    <path d="M 18 20 L 30 30 L 18 40" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" />
-    
-    <!-- Upper Node -->
-    <path d="M 36 18 L 47 30" stroke="#d4d4d4" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" />
-    <circle cx="36" cy="18" r="3" fill="#ffffff" />
-    
-    <!-- Lower Merge Line -->
-    <path d="M 30 42 L 47 42" stroke="#b3b3b3" stroke-width="3.5" stroke-linecap="round" />
-    <circle cx="47" cy="30" r="3" fill="#ffffff" />
+  <!-- Icon badge: 60x60, centered in 76px height → y=8 -->
+  <g transform="translate(8, 8)">
+    <rect x="0" y="0" width="60" height="60" rx="15" fill="url(#iconBg)" stroke="url(#borderGrad)" stroke-width="1.5" />
+
+    <!-- Chevron (pointing right) -->
+    <path d="M 16 18 L 30 30 L 16 42" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" filter="url(#glow)" />
+
+    <!-- Top branch: from node at (37,16) down-right to convergence at (48,30) -->
+    <circle cx="37" cy="16" r="3" fill="#ffffff" />
+    <path d="M 37 16 L 48 30" stroke="#d4d4d4" stroke-width="3.5" stroke-linecap="round" />
+
+    <!-- Bottom branch: horizontal from (30,44) to convergence at (48,44) -->
+    <path d="M 30 44 L 48 44" stroke="#b3b3b3" stroke-width="3.5" stroke-linecap="round" />
+
+    <!-- Convergence node -->
+    <circle cx="48" cy="30" r="3.5" fill="#ffffff" />
+    <path d="M 48 30 L 48 44" stroke="#d4d4d4" stroke-width="3.5" stroke-linecap="round" />
+    <circle cx="48" cy="44" r="3" fill="#d4d4d4" />
   </g>
 
-  <!-- Pure Vector Wordmark (Immune to Font Missing / Kerning Issues) -->
-  <path d="M 96 20 L 110 54 L 103 54 L 99.5 44 L 91 44 L 87.5 54 L 81 54 Z M 95 32.5 L 92.5 39 L 97.5 39 Z M 112 29 L 118 29 L 118 45.5 C 118 48.5 120 50 123 50 C 126 50 128 48.5 128 45.5 L 128 29 L 134 29 L 134 54 L 128.5 54 L 128.5 50.5 C 127 53 124.5 54.5 121.5 54.5 C 115.5 54.5 112 50.5 112 45 Z M 138.5 21 L 144.5 21 L 144.5 29 L 150 29 L 150 34.5 L 144.5 34.5 L 144.5 46 C 144.5 48.5 145.5 49.5 148 49.5 L 150 49.5 L 150 54.5 C 148.5 55 146 55 143.5 55 C 139 55 138.5 51 138.5 46 L 138.5 34.5 L 135 34.5 L 135 29 L 138.5 29 Z M 162 29.0 C 173 29.0 173 54.0 162 54.0 C 151 54.0 151 29.0 162 29.0 Z M 162 34.0 C 156.5 34.0 156.5 49.0 162 49.0 C 167.5 49.0 167.5 34.0 162 34.0 Z" fill="#ffffff" />
-  <path d="M 179 29 L 185 29 L 185 33 C 187 30.5 190 28.5 194 28.5 C 197.5 28.5 200 30.5 201 33.5 C 203 30.5 206 28.5 210 28.5 C 215 28.5 217.5 32 217.5 38 L 217.5 54 L 211.5 54 L 211.5 39.5 C 211.5 36.5 210 34.5 207.5 34.5 C 204.5 34.5 202.5 36.5 202.5 40.5 L 202.5 54 L 196.5 54 L 196.5 39.5 C 196.5 36.5 195 34.5 192.5 34.5 C 189.5 34.5 187.5 36.5 187.5 40.5 L 187.5 54 L 179 54 Z M 219 41.5 C 219 34 224 28.5 229.5 28.5 C 236 28.5 240 34 240 41 L 224.5 41 C 225 46 227.5 49.5 229.5 49.5 C 234.5 49.5 237 48 238.5 46 L 242.5 49 C 240 53 236 54.5 229.5 54.5 C 224 54.5 219 49 219 41.5 Z M 224.8 37 L 234.5 37 C 234 33.5 232 32.5 229.5 32.5 C 227 32.5 225.5 34.5 224.8 37 Z M 242 29 L 248 29 L 248 33.5 C 249.5 30.5 252.5 28.5 256 28.5 L 257 28.5 L 257 34.5 C 255.5 34 254 34 252.5 34 C 250 34 248 36.5 248 41 L 248 54 L 242 54 Z M 268.5 28.5 C 279.0 28.5 279.0 39 279.0 54 L 279.0 56 C 279.0 62.5 271.5 65.5 264.5 65.5 C 260.0 65.5 256.5 63.5 255.5 60.5 L 260.0 57.5 C 260.5 59 262.5 60.5 264.5 60.5 C 268.5 60.5 272.5 58.5 272.5 55 L 272.5 51.5 C 271.0 53.5 268.5 54.5 266.0 54.5 C 259.5 54.5 255.5 49 255.5 41.5 C 255.5 34 260.5 28.5 268.5 28.5 C 271.5 28.5 274.0 30 275.5 32.5 L 275.5 29 L 281.0 29 L 281.0 41.5 C 281.0 47.5 277.5 49.5 273.0 49.5 C 269.0 49.5 266.0 47.5 266.0 41.5 C 266.0 35.5 269.5 33.5 273.0 33.5 C 276.0 33.5 278.5 36 278.5 41.5 Z M 282 41.5 C 282 34 287 28.5 292.5 28.5 C 299 28.5 303 34 303 41 L 287.5 41 C 288 46 290.5 49.5 292.5 49.5 C 297.5 49.5 300 48 301.5 46 L 305.5 49 C 303 53 299 54.5 292.5 54.5 C 287 54.5 282 49 282 41.5 Z M 287.8 37 L 297.5 37 C 297 33.5 295 32.5 292.5 32.5 C 290 32.5 288.5 34.5 287.8 37 Z M 305 29 L 311 29 L 311 33 C 313 30.5 316 28.5 320 28.5 C 325 28.5 327.5 32 327.5 38 L 327.5 54 L 321.5 54 L 321.5 39.5 C 321.5 36.5 320 34.5 317.5 34.5 C 314.5 34.5 312.5 36.5 312.5 40.5 L 312.5 54 L 305 54 Z M 332.5 21 L 338.5 21 L 338.5 29 L 344 29 L 344 34.5 L 338.5 34.5 L 338.5 46 C 338.5 48.5 339.5 49.5 342 49.5 L 344 49.5 L 344 54.5 C 342.5 55 340 55 337.5 55 C 333 55 332.5 51 332.5 46 L 332.5 34.5 L 329 34.5 L 329 29 L 332.5 29 Z" fill="url(#silverGrad)" />
+  <!-- Wordmark: Auto in white, mergent in silver gradient -->
+  <path d="M 96 20 L 110 54 L 103 54 L 99.5 44 L 91 44 L 87.5 54 L 81 54 Z M 95 32.5 L 92.5 39 L 97.5 39 Z M 113 30 L 119 30 L 119 46 C 119 49 121.5 51 124.5 51 C 127.5 51 130 49 130 46 L 130 30 L 136 30 L 136 54 L 130.5 54 L 130.5 51 C 128.5 53.5 126 55 123 55 C 117 55 113 51 113 45 Z M 142.5 21 L 148.5 21 L 148.5 30 L 154 30 L 154 35 L 148.5 35 L 148.5 47 C 148.5 49.5 149.5 50.5 152 50.5 L 154 50.5 L 154 55 C 152.5 55.5 150 55.5 147.5 55.5 C 143 55.5 142.5 51.5 142.5 47 L 142.5 35 L 139 35 L 139 30 L 142.5 30 Z M 168.5 29 C 174.85145 29 180.0 34.8201 180.0 42 C 180.0 49.1799 174.85145 55 168.5 55 C 162.14855 55 157.0 49.1799 157.0 42 C 157.0 34.8201 162.14855 29 168.5 29 Z M 168.5 35 C 165.46235 35 163.0 38.1339 163.0 42 C 163.0 45.8661 165.46235 49 168.5 49 C 171.53765 49 174.0 45.8661 174.0 42 C 174.0 38.1339 171.53765 35 168.5 35 Z" fill="#ffffff" fill-rule="evenodd" />
+  <path d="M 187 30 L 193 30 L 193 34.5 C 195 31.5 198.5 29.5 202.5 29.5 C 206 29.5 209 31.5 210 35 C 212 31.5 215 29.5 219 29.5 C 224.5 29.5 227 33.5 227 40 L 227 54 L 221 54 L 221 41.5 C 221 37.5 219 35 216.5 35 C 213.5 35 211.5 37.5 211.5 42 L 211.5 54 L 205.5 54 L 205.5 41.5 C 205.5 37.5 203.5 35 201 35 C 198 35 196 37.5 196 42 L 196 54 L 187 54 Z M 230 42 C 230 34 235 29 241.5 29 C 248 29 253 34 253 42 L 235.5 42 C 236 47.5 239 51 243 51 C 246.5 51 249 49 250.5 46.5 L 255 49.5 C 252.5 53.5 248.5 55 242.5 55 C 235 55 230 49.5 230 42 Z M 236 38 L 247 38 C 246.5 34 244.5 33 241.5 33 C 238.5 33 236.5 35 236 38 Z M 257 30 L 263 30 L 263 35.5 C 264.5 31.5 268 29.5 272 29.5 L 273 29.5 L 273 35.5 C 271.5 35 270 35 268 35 C 265 35 263 37.5 263 42 L 263 54 L 257 54 Z M 276 42 C 276 34.5 281 29 287.5 29 C 294 29 299 34.5 299 42 C 299 49.5 294 55 287.5 55 C 281 55 276 49.5 276 42 Z M 287.5 34.5 C 291.5 34.5 293 37.5 293 42 C 293 46.5 291.5 49.5 287.5 49.5 C 283.5 49.5 282 46.5 282 42 C 282 37.5 283.5 34.5 287.5 34.5 Z M 293 50.5 L 299 50.5 L 299 58 C 299 65 294.5 68 287.5 68 C 282 68 277.5 65.5 276 62 L 281.5 59 C 282.5 61.5 285 63 287.5 63 C 292 63 293 60.5 293 58 Z M 303 42 C 303 34 308 29 314.5 29 C 321 29 326 34 326 42 L 308.5 42 C 309 47.5 312 51 316 51 C 319.5 51 322 49 323.5 46.5 L 328 49.5 C 325.5 53.5 321.5 55 315.5 55 C 308 55 303 49.5 303 42 Z M 309 38 L 320 38 C 319.5 34 317.5 33 314.5 33 C 311.5 33 309.5 35 309 38 Z M 330 30 L 336 30 L 336 34.5 C 338.5 31.5 342 29.5 346 29.5 C 351.5 29.5 354.5 33.5 354.5 40 L 354.5 54 L 348.5 54 L 348.5 41.5 C 348.5 37.5 347 35 344 35 C 341 35 339 37.5 339 42 L 339 54 L 330 54 Z M 361.5 21 L 367.5 21 L 367.5 30 L 373 30 L 373 35 L 367.5 35 L 367.5 47 C 367.5 49.5 368.5 50.5 371 50.5 L 373 50.5 L 373 55 C 371.5 55.5 369 55.5 366.5 55.5 C 362 55.5 361.5 51.5 361.5 47 L 361.5 35 L 358 35 L 358 30 L 361.5 30 Z" fill="url(#silverGrad)" fill-rule="evenodd" />
 </svg>
