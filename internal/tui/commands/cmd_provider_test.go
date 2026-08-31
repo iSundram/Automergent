@@ -216,3 +216,67 @@ func TestHandleModelReset(t *testing.T) {
 		t.Fatalf("unexpected errors: %v", m.errorMessages)
 	}
 }
+
+func TestProviderLoginVertex(t *testing.T) {
+	t.Run("valid ADC with project configured", func(t *testing.T) {
+		m := NewMockHost()
+		m.vertexAuthOK = true
+		m.vertexAuthDetail = "Application Default Credentials valid"
+		m.providerConfigs["google-vertex"] = config.ProviderConfig{Project: "my-gcp", Location: "us-central1"}
+		handleProvider(m, []string{"login", "google-vertex"})
+		if len(m.systemMessages) != 1 {
+			t.Fatalf("expected one message, got %d", len(m.systemMessages))
+		}
+		msg := m.systemMessages[0]
+		for _, want := range []string{"✓ Application Default Credentials valid", "Project: my-gcp", "/provider test google-vertex"} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("missing %q:\n%s", want, msg)
+			}
+		}
+	})
+
+	t.Run("missing ADC guides login and project", func(t *testing.T) {
+		m := NewMockHost()
+		m.vertexAuthOK = false
+		m.vertexAuthDetail = "no valid Application Default Credentials — run: gcloud auth application-default login"
+		handleProvider(m, []string{"login", "google-vertex"})
+		msg := m.systemMessages[0]
+		for _, want := range []string{"✗ no valid", "gcloud auth application-default login", "--project <gcp-project>"} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("missing %q:\n%s", want, msg)
+			}
+		}
+	})
+}
+
+func TestProviderLoginAIStudio(t *testing.T) {
+	t.Run("key present points at test", func(t *testing.T) {
+		m := NewMockHost()
+		m.authSources["google-aistudio"] = "config"
+		handleProvider(m, []string{"login", "google-aistudio"})
+		msg := m.systemMessages[0]
+		if !strings.Contains(msg, "✓ API key resolves from config") || !strings.Contains(msg, "/provider test") {
+			t.Fatalf("wrong guidance:\n%s", msg)
+		}
+	})
+
+	t.Run("no key guides setup", func(t *testing.T) {
+		m := NewMockHost()
+		m.authSources["google-aistudio"] = ""
+		handleProvider(m, []string{"login", "google-aistudio"})
+		msg := m.systemMessages[0]
+		for _, want := range []string{"✗ No API key", "aistudio.google.com/apikey", "GOOGLE_API_KEY", "--api-key"} {
+			if !strings.Contains(msg, want) {
+				t.Fatalf("missing %q:\n%s", want, msg)
+			}
+		}
+	})
+
+	t.Run("unknown provider errors", func(t *testing.T) {
+		m := NewMockHost()
+		handleProvider(m, []string{"login", "nope"})
+		if len(m.errorMessages) != 1 {
+			t.Fatalf("expected error, got %v", m.errorMessages)
+		}
+	})
+}
