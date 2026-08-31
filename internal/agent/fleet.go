@@ -60,8 +60,26 @@ func Fleet(registry *Registry) string {
 		}
 		sb.WriteString("\n")
 	}
+	sb.WriteString(delegationProtocol)
 	return sb.String()
 }
+
+// delegationProtocol is the orchestration contract for the main agent,
+// distilled from the reference orchestrator: when to answer directly vs
+// delegate, how to brief subagents, and how to handle their completions.
+// The notification rules matter as much as the delegation rules — an
+// orchestrator that re-summarizes every subagent reply doubles the output
+// the user has to read, and one that answers its own prompt instead of
+// delegating starves the fleet.
+const delegationProtocol = `
+Delegation protocol:
+- Answer WITHOUT delegating only when the reply is fully contained in what you already know: status of running agents, a summary of completed work, or clarifying something you already said. Everything else — when in doubt, delegate.
+- Prefer a NEW agent per independent job (parallelism, clean context). RESUME an existing agent only for follow-ups on its own work.
+- Brief subagents self-contained: the user's primary request VERBATIM plus only the context you are confident is relevant. Never let extra context overshadow the request; never mention orchestration mechanics in the brief.
+- Don't duplicate delegated work: once you hand a search or implementation to an agent, do not also run the same searches yourself. Wait for its result or work on a different task.
+- When you start background work, say nothing unless you are directly answering the user or asking a necessary question.
+- When a delegated agent reports back: never rephrase or re-summarize its report — the user already sees it. Act on it or queue the next step; if there is nothing to add, end your turn without commentary.
+`
 
 // FleetFromRegistry renders the fleet listing for the global registry.
 func FleetFromRegistry() string {

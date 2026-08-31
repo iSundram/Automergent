@@ -84,6 +84,11 @@ type Agent struct {
 	// paths.
 	lastTransition ContinueReason
 
+	// runBudget is the user-specified token target for the current Run
+	// ("+500k"), parsed from the prompt and consumed by the phase loop's
+	// budget tracker (see tokenbudget.go). Zero disables continuation.
+	runBudget int
+
 	// Context-window management state (see autocompact.go). usageAnchor is
 	// the message count covered by the last provider-reported usage;
 	// usageAnchoredTokens is that usage total. Compaction rewrites messages
@@ -797,6 +802,10 @@ func (a *Agent) SetSession(sess *session.Session) {
 func (a *Agent) Run(ctx context.Context, prompt string) error {
 	originalUserPrompt := prompt
 
+	// A token target in the user's message ("+500k", "use 2M tokens")
+	// switches the turn into budget-continuation mode (see tokenbudget.go).
+	a.runBudget = parseTokenBudget(prompt)
+
 	// Agents constructed directly (tests, embedders) skip New's wiring; make
 	// sure the phase machinery exists before it is used.
 	a.ensurePhaseComponents()
@@ -1008,6 +1017,10 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 	// exploreNudged bounds the explore exit gate to one nudge per phase.
 	exploreNudged := false
 	runMeta := &runMetadata{}
+	// Token-budget continuation ("+500k" / "use 2M tokens" in the user's
+	// message): keeps the turn alive until the budget is spent or returns
+	// diminish. See tokenbudget.go.
+	budget := &budgetTracker{budget: a.runBudget}
 	phaseSteps := 0
 	maxSteps := result.MaxSteps
 	if maxSteps <= 0 {
@@ -1192,6 +1205,18 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		}
 
 		if stop != ai.StopReasonTools || len(toolCalls) == 0 {
+			// Token-budget continuation: with a user-set token target, a
+			// natural stop before the target continues the turn with a
+			// nudge (bounded by diminishing-returns detection; see
+			// tokenbudget.go). Runs before the exit gates — a budget set on
+			// an informational task keeps deepening the answer too.
+			if decision := budget.checkBudget(int(usage.OutputTokens)); decision.continueTurn {
+				a.injectEphemeral(ephemeralReminderText("Token budget", decision.nudge))
+				state.transition = ContinueTokenBudget
+				a.Emit(EventStatus, fmt.Sprintf("token budget %d%% spent — continuing", budget.spent*100/budget.budget))
+				continue
+			}
+
 			// Explore exit gate runs BEFORE the anti-stall nudge and before
 			// the phase's answer is accepted: an explore task must have
 			// actually read its subject files, not answered from the file
