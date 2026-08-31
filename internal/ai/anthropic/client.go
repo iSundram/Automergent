@@ -13,21 +13,13 @@ import (
 
 	"github.com/iSundram/Automergent/internal/ai"
 	automergentErrors "github.com/iSundram/Automergent/internal/errors"
+	"github.com/iSundram/Automergent/internal/modelsdev"
 )
 
 const (
 	defaultBaseURL = "https://api.anthropic.com/v1"
-	defaultModel   = "claude-3-5-sonnet-20241022"
-	modelsCacheTTL = 5 * time.Minute
+	defaultModel   = "claude-sonnet-4-5"
 )
-
-var anthropicModels = []ai.Model{
-	{ID: "claude-3-5-sonnet-20241022", Name: "Claude 3.5 Sonnet", ContextLimit: 200000, InputPrice: 3, OutputPrice: 15},
-	{ID: "claude-3-5-haiku-20241022", Name: "Claude 3.5 Haiku", ContextLimit: 200000, InputPrice: 1, OutputPrice: 5},
-	{ID: "claude-3-opus-20240229", Name: "Claude 3 Opus", ContextLimit: 200000, InputPrice: 15, OutputPrice: 75},
-	{ID: "claude-3-sonnet-20240229", Name: "Claude 3 Sonnet", ContextLimit: 200000, InputPrice: 3, OutputPrice: 15},
-	{ID: "claude-3-haiku-20240307", Name: "Claude 3 Haiku", ContextLimit: 200000, InputPrice: 0.25, OutputPrice: 1.25},
-}
 
 type Client struct {
 	httpClient *http.Client
@@ -117,8 +109,11 @@ func (c *Client) notifyRetry(attempt, maxAttempts int, err error, delay time.Dur
 }
 
 func (c *Client) Models(ctx context.Context) ([]ai.Model, error) {
-	// Return curated list since Anthropic doesn't have a public models endpoint
-	return anthropicModels, nil
+	// Anthropic has no public models listing on every SKU, so the models.dev
+	// community catalog is the source of truth: names, context/output limits,
+	// pricing (including cache pricing) and capabilities all come from it.
+	// It never fails — the embedded snapshot answers fully offline.
+	return modelsdev.Models(ctx, "anthropic"), nil
 }
 
 func (c *Client) Complete(ctx context.Context, req ai.CompletionRequest) (ai.CompletionResponse, error) {

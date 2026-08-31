@@ -44,18 +44,31 @@ func (a *App) maybeGenerateSessionTitle() tea.Cmd {
 
 // applySessionTitle stores a generated title. A manual /rename in the interim
 // (or a session switch) wins: the title is only applied when the session is
-// still active and still unnamed.
-func (a *App) applySessionTitle(m sessionTitledMsg) {
+// still active and still unnamed. The title lands silently — no status noise —
+// and is saved immediately so it survives exit; when the session browser is
+// open it is refreshed so the new name shows up live.
+func (a *App) applySessionTitle(m sessionTitledMsg) tea.Cmd {
 	title := strings.TrimSpace(m.title)
 	if title == "" || a.sess == nil || a.sess.ID != m.sessionID || a.sess.Title != "" {
-		return
+		return nil
 	}
 	a.sess.Title = title
 	if a.storage != nil {
 		if err := a.storage.Save(a.sess); err != nil {
-			a.statusBar.SetStatus("Session titled (save failed): " + title)
-			return
+			// Silent on success; a lost save is worth one status line
+			// because the title would silently vanish on exit.
+			a.statusBar.SetStatus("Session title save failed")
+			return nil
 		}
 	}
-	a.statusBar.SetStatus("Session titled: " + title)
+	if a.sessionBrowser.Visible() {
+		return func() tea.Msg {
+			sessions, err := a.storage.List()
+			if err != nil {
+				return nil
+			}
+			return sessionsLoadedMsg{sessions: a.projectSessions(sessions)}
+		}
+	}
+	return nil
 }

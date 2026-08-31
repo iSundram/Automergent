@@ -325,25 +325,23 @@ func (a *App) showArtifacts() {
 	a.layout()
 }
 
-// applyArtifactDecision records one approve/reject outcome.
-// applyArtifactDecision records one approve/reject outcome. Plans only: a
-// reject requires a reason (surfaced to the agent as revision feedback), and
-// an approved plan kicks off implementation when the agent is idle and no
-// plan-review call is already waiting for the answer.
-func (a *App) applyArtifactDecision(path string, approved bool, reason string) {
+// applyArtifactDecision records one approve/reject outcome and returns the
+// tea.Cmd of the follow-up run it launches (approved/rejected plan
+// implementation), so the caller keeps the agent event listener armed.
+func (a *App) applyArtifactDecision(path string, approved bool, reason string) tea.Cmd {
 	rec, ok := a.findArtifact(path)
 	if !ok {
-		return
+		return nil
 	}
 	if !isPlanKind(rec.Kind) {
-		return // informational artifacts carry no approve/reject semantics
+		return nil // informational artifacts carry no approve/reject semantics
 	}
 	if approved {
 		rec.Status = components.ArtifactApproved
 		a.statusBar.SetStatus("Plan approved: " + filepath.Base(path))
 	} else {
 		if strings.TrimSpace(reason) == "" {
-			return // rejects without a reason never land
+			return nil // rejects without a reason never land
 		}
 		rec.Status = components.ArtifactRejected
 		rec.Comments = append(rec.Comments, "rejected: "+reason)
@@ -357,17 +355,16 @@ func (a *App) applyArtifactDecision(path string, approved bool, reason string) {
 	// put to work on the plan.
 	if a.pendingPlanReview != nil && a.pendingPlanReview.planPath == path {
 		a.resolvePlanReview(approved, reason)
-		return
+		return nil
 	}
 	if a.thinking {
-		return
+		return nil
 	}
 	if approved {
-		a.startAgent(fmt.Sprintf(
+		return a.startAgent(fmt.Sprintf(
 			"The plan at %s was approved by the user. Implement it now: read the plan file, work through it step by step, and verify each change.", path))
-		return
 	}
-	a.startAgent(fmt.Sprintf(
+	return a.startAgent(fmt.Sprintf(
 		"The plan at %s was rejected by the user. Revise it: %s. Rewrite the plan artifact addressing the feedback, then present it again for approval.",
 		path, reason))
 }

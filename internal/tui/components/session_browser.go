@@ -79,6 +79,9 @@ func (s sessionItem) firstUserLine() string {
 // present, otherwise the lite-listing count carried in metadata (the picker
 // lists transcripts without parsing messages).
 func (s sessionItem) messageCount() int {
+	if s.sess == nil {
+		return 0
+	}
 	if len(s.sess.Messages) > 0 || s.sess.Metadata == nil {
 		return len(s.sess.Messages)
 	}
@@ -89,6 +92,9 @@ func (s sessionItem) messageCount() int {
 }
 
 func (s sessionItem) Description() string {
+	if s.sess == nil {
+		return ""
+	}
 	parts := []string{}
 	if !s.sess.UpdatedAt.IsZero() {
 		parts = append(parts, formatRelativeTime(s.sess.UpdatedAt))
@@ -632,13 +638,26 @@ func (sb SessionBrowser) renderTitle(i int, selected bool, width int) string {
 		title = sb.draft
 		titleStyle = titleStyle.Underline(true)
 	}
+	// Badges render after the title. Their width is budgeted up front so the
+	// title is truncated (cleanly, on plain text) instead of the whole styled
+	// row being clipped by MaxWidth — clipping a styled string mid-badge
+	// garbles the escape sequences and shreds the row.
+	badges := ""
+	badgesW := 0
 	if sb.items[i].sess != nil && sb.items[i].sess.ID == sb.currentID {
-		title += "  " + lipgloss.NewStyle().Foreground(sb.styles.T.Green).Bold(true).Render("✓ Current")
+		badges += "  " + lipgloss.NewStyle().Foreground(sb.styles.T.Green).Bold(true).Render("✓ Current")
+		badgesW += 2 + lipgloss.Width("✓ Current")
 	}
 	if sb.items[i].sess != nil && sb.items[i].sess.ID == sb.pendingDeleteID {
-		title += "  " + lipgloss.NewStyle().Foreground(sb.styles.T.Red).Bold(true).Render("✗ delete?")
+		badges += "  " + lipgloss.NewStyle().Foreground(sb.styles.T.Red).Bold(true).Render("✗ delete?")
+		badgesW += 2 + lipgloss.Width("✗ delete?")
 	}
-	left := "  " + indicator + titleStyle.Render(title)
+	// "  " + indicator (2) + title + badges must fit in width.
+	avail := width - 4 - badgesW
+	if avail < 1 {
+		avail = 1
+	}
+	left := "  " + indicator + titleStyle.Render(truncateCells(title, avail)) + badges
 	return lipgloss.NewStyle().Width(width).MaxWidth(width).Render(left)
 }
 

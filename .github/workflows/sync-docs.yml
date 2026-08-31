@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - 'docs-site/**'
+      - 'install.sh'
   workflow_dispatch:
 
 jobs:
@@ -30,6 +31,9 @@ jobs:
           cd /tmp/docs-repo
           git rm -rf . 2>/dev/null || true
           cp -r $GITHUB_WORKSPACE/docs-site/* .
+          # install.sh must live at the site root: the README's one-liner
+          # fetches https://automergent.github.io/install.sh
+          cp $GITHUB_WORKSPACE/install.sh .
           touch .nojekyll
 
           # Commit and push

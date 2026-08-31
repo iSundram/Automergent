@@ -165,10 +165,20 @@ type Model struct {
 	OutputLimit int
 	// Reasoning marks thinking-capable models (effort control applies).
 	Reasoning bool
+	// Efforts lists the reasoning effort levels the model accepts
+	// ({"low", "medium", "high"}), from the models.dev catalog. Empty means
+	// the model either doesn't reason or exposes no effort control.
+	Efforts []string
 	// Attachment marks models that accept file/image attachments.
 	Attachment bool
 	// Knowledge is the model's knowledge cutoff ("2026-03"), when known.
 	Knowledge string
+	// Released is the model's release date ("2026-06-29"), when known.
+	Released string
+	// CacheReadPrice / CacheWritePrice are the per-1M-token prompt cache
+	// prices (USD) when the provider bills cache traffic separately.
+	CacheReadPrice  float64
+	CacheWritePrice float64
 }
 
 // ProviderConfig holds provider-level credentials and defaults.

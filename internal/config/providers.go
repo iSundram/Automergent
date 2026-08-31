@@ -125,10 +125,12 @@ var hiddenProviderSpecs = map[string]ProviderSpec{
 		SupportsEffort:  true,
 		SupportedEfforts: []string{"minimal", "low", "medium", "high"},
 	},
-	"openai":    legacySpec("openai", "OpenAI", "gpt-4o", "openai"),
-	"anthropic": legacySpec("anthropic", "Anthropic", "claude-3-5-sonnet-20241022", "anthropic"),
-	"deepseek":  legacySpec("deepseek", "DeepSeek", "deepseek-chat", "openai"),
-	"ollama":    legacySpec("ollama", "Ollama (Local)", "llama3.2", "openai"),
+	// Defaults must pass the models.dev listing filter (tool calling,
+	// >= 1M context) so a fresh install starts on a listed model.
+	"openai":    legacySpec("openai", "OpenAI", "gpt-5.5", "openai"),
+	"anthropic": legacySpec("anthropic", "Anthropic", "claude-sonnet-4-5", "anthropic"),
+	"deepseek":  legacySpec("deepseek", "DeepSeek", "deepseek-v4-pro", "openai"),
+	"ollama":    legacySpec("ollama", "Ollama (Local)", "gpt-oss:120b", "openai"),
 }
 
 func legacySpec(name, display, defaultModel, apiType string) ProviderSpec {

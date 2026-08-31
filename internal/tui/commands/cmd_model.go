@@ -127,8 +127,26 @@ func modelInfo(host Host, provider, name string) Result {
 		if m.ID == name {
 			var b strings.Builder
 			fmt.Fprintf(&b, "Model: %s\nName: %s\nContext limit: %s", m.ID, m.Name, formatContextLimit(m.ContextLimit))
+			if m.OutputLimit > 0 {
+				fmt.Fprintf(&b, "\nMax output: %s", formatContextLimit(m.OutputLimit))
+			}
 			if m.InputPrice > 0 || m.OutputPrice > 0 {
 				fmt.Fprintf(&b, "\nPrice: $%.4g input / $%.4g output per 1M tokens", m.InputPrice, m.OutputPrice)
+			}
+			if m.CacheReadPrice > 0 || m.CacheWritePrice > 0 {
+				fmt.Fprintf(&b, "\nCache price: $%.4g read / $%.4g write per 1M tokens", m.CacheReadPrice, m.CacheWritePrice)
+			}
+			if m.Reasoning {
+				b.WriteString("\nReasoning: yes (effort control applies)")
+			}
+			if m.Attachment {
+				b.WriteString("\nAttachments: images and files supported")
+			}
+			if m.Knowledge != "" {
+				fmt.Fprintf(&b, "\nKnowledge cutoff: %s", m.Knowledge)
+			}
+			if m.Released != "" {
+				fmt.Fprintf(&b, "\nReleased: %s", m.Released)
 			}
 			if pc := host.ProviderConfig(provider); pc.Models != nil {
 				if mc, ok := pc.Models[name]; ok {
@@ -137,6 +155,8 @@ func modelInfo(host Host, provider, name string) Result {
 						fmt.Fprintf(&b, "\nRegistered context limit: %s", formatContextLimit(mc.ContextLimit))
 					}
 				}
+			} else {
+				b.WriteString("\nSource: models.dev catalog")
 			}
 			b.WriteString(fmt.Sprintf("\nProvider: %s", provider))
 			host.AddSystemMessage(b.String())

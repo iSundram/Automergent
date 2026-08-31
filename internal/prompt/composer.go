@@ -452,25 +452,21 @@ func (c *PromptComposer) buildToolLayer() {
 	}
 }
 
-// getAvailableTools returns the list of available tools for the current phase/agent.
+// getAvailableTools returns the list of available tools for the current
+// phase/agent. The default lists come from DefaultPhaseTools — the SAME
+// table the PhaseManager's tool masks use — so the guidance the model reads
+// can never drift from the tools actually offered.
 func (c *PromptComposer) getAvailableTools() []string {
 	if c.agent != nil && c.agent.PhaseTools != nil {
 		if tools, ok := c.agent.PhaseTools[c.phase]; ok {
 			return tools
 		}
 	}
-	
-	phaseTools := map[shared.AgentPhase][]string{
-		shared.PhaseInit:    {"bash", "read_file", "glob", "grep"},                              // classify only, no task
-		shared.PhaseExplore: {"glob", "grep", "read_file", "bash"},                              // read-only exploration, NO task
-		shared.PhasePlan:    {"read_file", "write_file", "bash", "task"},                        // planning + can delegate research
-		shared.PhaseBuild:   {"edit_file", "bash", "write_file", "read_file", "task", "glob", "grep"}, // full + todo
-	}
-	
-	if tools, ok := phaseTools[c.phase]; ok {
+
+	if tools, ok := DefaultPhaseTools(c.phase); ok {
 		return tools
 	}
-	return []string{"bash", "read", "glob", "grep"}
+	return []string{"bash", "read_file", "glob", "grep"}
 }
 
 // buildDynamicLayer adds dynamic reminders (plan mode, compaction, etc.).
@@ -480,9 +476,8 @@ func (c *PromptComposer) buildDynamicLayer() {
 	// Pre-explored context notice
 	if c.initResults != nil && len(c.initResults.FilesFound) > 0 {
 		var sb strings.Builder
-		sb.WriteString("## Pre-Explored Context (Prep Phase ALREADY Executed)\n")
-		sb.WriteString("IMPORTANT: The codebase was already explored for this request. Do NOT call glob, list_directory, or broad search tools.\n")
-		sb.WriteString("START by reading the most relevant files below with read_file.\n\n")
+		sb.WriteString("## Pre-Explored File Map (from the prep phase)\n")
+		sb.WriteString("A quick discovery pass already located the files relevant to this request — use them as your starting map instead of re-searching from scratch. The map is a HEAD START, not a substitute for reading: read the files your task actually needs (read_file), and search further when the map does not cover something your task requires.\n\n")
 		sb.WriteString(fmt.Sprintf("Discovered files (%d):\n", len(c.initResults.FilesFound)))
 		for i, f := range c.initResults.FilesFound {
 			if i >= 30 {

@@ -132,6 +132,7 @@ type mockHost struct {
 	showArtifactCalls      int
 	resumeSessionCalls     []string
 	deleteSessionCalls     []string
+	sessionReferences      []SessionReference
 
 	reviewMode      bool
 	showingFileTree bool
@@ -598,6 +599,12 @@ func (m *mockHost) ShowSessions() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.showSessionsCalls++
+}
+
+func (m *mockHost) SessionReferences() []SessionReference {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sessionReferences
 }
 
 func (m *mockHost) ShowArtifacts() {

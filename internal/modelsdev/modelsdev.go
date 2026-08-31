@@ -1,15 +1,19 @@
 // Package modelsdev loads the community model catalog from models.dev
-// (https://models.dev/api.json). The catalog
-// gives every model its display name, context/output limits, pricing,
-// reasoning capability and knowledge cutoff without a live provider API
-// call.
+// (https://models.dev/api.json). The catalog gives every model its display
+// name, context/output limits, pricing (including cache pricing), reasoning
+// capability and knowledge cutoff without a live provider API call.
 //
-// Resolution order:
+// The raw catalog JSON is cached once on disk and filtered per provider at
+// read time, so a single fetch serves every provider. Resolution order:
 //
 //  1. disk cache (~/.automergent/cache/models-dev.json) while fresh,
 //  2. the network (written atomically to that cache),
 //  3. the stale disk cache when the network is unreachable,
 //  4. the embedded snapshot as the final fallback.
+//
+// Filters applied to every list (user-registered custom models bypass them):
+// models must support tool calling and a context window of at least
+// MinContextTokens — the agent loop needs long context.
 //
 // The cache path can be overridden with AUTOMERGENT_MODELS_DEV_PATH (tests)
 // and the network fetch disabled with AUTOMERGENT_MODELS_DEV_OFFLINE=1.
@@ -29,63 +33,78 @@ import (
 )
 
 const (
-	sourceURL   = "https://models.dev/api.json"
-	cacheTTL    = 5 * time.Minute
+	sourceURL    = "https://models.dev/api.json"
+	cacheTTL     = 5 * time.Minute
 	refreshEvery = time.Hour
 )
 
+// MinContextTokens is the minimum context window a catalog model needs to be
+// listed. The agent's conversation loop (system prompt, tools, artifacts,
+// compaction headroom) only fits comfortably in a 1M-token window.
+const MinContextTokens = 1_000_000
+
 var (
 	mu        sync.Mutex
-	cached    []ai.Model
+	cached    map[string][]ai.Model // provider slug -> models
 	cachedAt  time.Time
 	cachePath string
 )
 
-// googleProviderID is the catalog's provider key both Google backends use.
-const googleProviderID = "google"
+// providerSlugs maps Automergent provider names to models.dev provider keys.
+// Legacy names resolve through the same map; unknown providers (custom
+// endpoints) have no catalog entry and get an empty list.
+var providerSlugs = map[string]string{
+	"google-aistudio": "google",
+	"google-vertex":   "google",
+	"google":          "google",
+	"anthropic":       "anthropic",
+	"openai":          "openai",
+	"deepseek":        "deepseek",
+	"ollama":          "ollama-cloud",
+}
 
-// Models returns the catalog's model list for the google provider (shared
-// by google-aistudio and google-vertex). It never fails: every fallback
-// ends at the embedded snapshot, so callers get a usable list even fully
-// offline on first run.
-func Models(ctx context.Context) []ai.Model {
-	mu.Lock()
-	defer mu.Unlock()
-	if cached != nil && time.Since(cachedAt) < cacheTTL {
-		return append([]ai.Model{}, cached...)
+// SlugFor resolves a provider name to its models.dev provider key. The second
+// return is false when the provider has no catalog counterpart (custom
+// endpoints), in which case callers fall back to their own listing.
+func SlugFor(provider string) (string, bool) {
+	slug, ok := providerSlugs[provider]
+	return slug, ok
+}
+
+// Models returns the catalog's model list for a provider, filtered to
+// tool-call capable models with at least MinContextTokens of context. It
+// never fails: every fallback ends at the embedded snapshot, so callers get
+// a usable list even fully offline on first run.
+func Models(ctx context.Context, provider string) []ai.Model {
+	slug, ok := SlugFor(provider)
+	if !ok {
+		return nil
 	}
+	models := catalog(ctx)[slug]
+	return append([]ai.Model{}, models...)
+}
 
-	models := loadCachedFile()
-	if models != nil {
-		cached, cachedAt = models, time.Now()
-		return append([]ai.Model{}, models...)
+// ModelInfo returns the full catalog entry for one model. It answers
+// "tell me about this model" (/model info) from the same cache as Models.
+func ModelInfo(ctx context.Context, provider, id string) (ai.Model, bool) {
+	for _, m := range Models(ctx, provider) {
+		if m.ID == id {
+			return m, true
+		}
 	}
-
-	models = fetchCatalog(ctx)
-	if models != nil {
-		cached, cachedAt = models, time.Now()
-		return append([]ai.Model{}, models...)
-	}
-
-	// Network unavailable: keep the embedded snapshot. cached stays nil so a
-	// later call can retry when connectivity returns.
-	return append([]ai.Model{}, snapshotModels...)
+	return ai.Model{}, false
 }
 
 // Refresh forces a network refresh (backs /model refresh and the hourly
 // background refresh). Failure is silent: the existing cache stays valid.
 func Refresh(ctx context.Context) {
-	models := fetchCatalog(ctx)
-	if models == nil {
-		return
-	}
 	mu.Lock()
-	cached, cachedAt = models, time.Now()
-	mu.Unlock()
+	defer mu.Unlock()
+	fetchCatalogLocked(ctx)
 }
 
-// StartRefresher runs the periodic background refresh (hourly, like
-// until ctx is cancelled.
+// StartRefresher runs the periodic background refresh (hourly) until ctx is
+// cancelled.
 func StartRefresher(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(refreshEvery)
@@ -99,6 +118,27 @@ func StartRefresher(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// catalog returns the memoized per-provider model map, refreshing from disk
+// or network when the in-memory copy is stale.
+func catalog(ctx context.Context) map[string][]ai.Model {
+	mu.Lock()
+	defer mu.Unlock()
+	if cached != nil && time.Since(cachedAt) < cacheTTL {
+		return cached
+	}
+	models := loadCachedFile()
+	if models != nil {
+		cached, cachedAt = models, time.Now()
+		return cached
+	}
+	if fetchCatalogLocked(ctx) {
+		return cached
+	}
+	// Network unavailable: keep the embedded snapshot. cached stays nil so a
+	// later call can retry when connectivity returns.
+	return snapshotCatalog
 }
 
 // cacheFile resolves the cache location, memoized.
@@ -123,7 +163,7 @@ func cacheFile() string {
 // loadCachedFile reads the disk cache. A fresh mtime is not required here:
 // staleness is acceptable when the network is down; only the in-memory copy
 // obeys the strict TTL.
-func loadCachedFile() []ai.Model {
+func loadCachedFile() map[string][]ai.Model {
 	data, err := os.ReadFile(cacheFile())
 	if err != nil {
 		return nil
@@ -137,51 +177,65 @@ type catalogProvider struct {
 }
 
 type catalogModel struct {
-	Name       string `json:"name"`
-	Reasoning  bool   `json:"reasoning"`
-	Attachment bool   `json:"attachment"`
-	ToolCall   bool   `json:"tool_call"`
-	Knowledge  string `json:"knowledge"`
-	Limit      struct {
+	Name        string `json:"name"`
+	Reasoning   bool   `json:"reasoning"`
+	Attachment  bool   `json:"attachment"`
+	ToolCall    bool   `json:"tool_call"`
+	Knowledge   string `json:"knowledge"`
+	ReleaseDate string `json:"release_date"`
+	Limit       struct {
 		Context int `json:"context"`
 		Output  int `json:"output"`
 	} `json:"limit"`
 	Cost struct {
-		Input  float64 `json:"input"`
-		Output float64 `json:"output"`
+		Input      float64 `json:"input"`
+		Output     float64 `json:"output"`
+		CacheRead  float64 `json:"cache_read"`
+		CacheWrite float64 `json:"cache_write"`
 	} `json:"cost"`
+	ReasoningOptions []struct {
+		Type   string   `json:"type"`
+		Values []string `json:"values"`
+	} `json:"reasoning_options"`
 }
 
-// parseCatalog extracts the google provider's tool-call capable models.
-func parseCatalog(data []byte) []ai.Model {
+// parseCatalog extracts every provider's tool-call capable, long-context
+// models. Providers with no qualifying models are omitted.
+func parseCatalog(data []byte) map[string][]ai.Model {
 	var catalog map[string]catalogProvider
 	if err := json.Unmarshal(data, &catalog); err != nil {
 		return nil
 	}
-	gp, ok := catalog[googleProviderID]
-	if !ok || len(gp.Models) == 0 {
-		return nil
-	}
-	var out []ai.Model
-	for id, m := range gp.Models {
-		if !m.ToolCall {
-			continue // coding agents need tool calling
+	out := make(map[string][]ai.Model)
+	for slug, prov := range catalog {
+		var models []ai.Model
+		for id, m := range prov.Models {
+			if !passesFilter(m) {
+				continue
+			}
+			name := m.Name
+			if name == "" {
+				name = id
+			}
+			models = append(models, ai.Model{
+				ID:              id,
+				Name:            name,
+				ContextLimit:    m.Limit.Context,
+				OutputLimit:     m.Limit.Output,
+				InputPrice:      m.Cost.Input,
+				OutputPrice:     m.Cost.Output,
+				CacheReadPrice:  m.Cost.CacheRead,
+				CacheWritePrice: m.Cost.CacheWrite,
+				Reasoning:       m.Reasoning,
+				Efforts:         effortValues(m),
+				Attachment:      m.Attachment,
+				Knowledge:       m.Knowledge,
+				Released:        m.ReleaseDate,
+			})
 		}
-		name := m.Name
-		if name == "" {
-			name = id
+		if len(models) > 0 {
+			out[slug] = models
 		}
-		out = append(out, ai.Model{
-			ID:           id,
-			Name:         name,
-			ContextLimit: m.Limit.Context,
-			OutputLimit:  m.Limit.Output,
-			InputPrice:   m.Cost.Input,
-			OutputPrice:  m.Cost.Output,
-			Reasoning:    m.Reasoning,
-			Attachment:   m.Attachment,
-			Knowledge:    m.Knowledge,
-		})
 	}
 	if len(out) == 0 {
 		return nil
@@ -189,8 +243,42 @@ func parseCatalog(data []byte) []ai.Model {
 	return out
 }
 
-// fetchCatalog downloads the catalog and writes it atomically to the cache.
-func fetchCatalog(ctx context.Context) []ai.Model {
+// passesFilter enforces the listing policy: tool calling plus a context
+// window the agent loop can actually use.
+func passesFilter(m catalogModel) bool {
+	return m.ToolCall && m.Limit.Context >= MinContextTokens
+}
+
+// effortValues extracts the effort levels a model accepts from its
+// reasoning_options: the "effort"-typed option carries the values; models
+// with only a toggle or a token budget expose no effort list.
+func effortValues(m catalogModel) []string {
+	for _, opt := range m.ReasoningOptions {
+		if opt.Type == "effort" && len(opt.Values) > 0 {
+			return append([]string{}, opt.Values...)
+		}
+	}
+	return nil
+}
+
+// fetchCatalogLocked downloads the catalog, writes it atomically to the
+// cache, and memoizes the parsed copy. Callers must hold mu.
+func fetchCatalogLocked(ctx context.Context) bool {
+	data := fetchRaw(ctx)
+	if data == nil {
+		return false
+	}
+	models := parseCatalog(data)
+	if models == nil {
+		return false
+	}
+	cached, cachedAt = models, time.Now()
+	writeCache(data)
+	return true
+}
+
+// fetchRaw performs the HTTP GET and returns the body, or nil on any failure.
+func fetchRaw(ctx context.Context) []byte {
 	if os.Getenv("AUTOMERGENT_MODELS_DEV_OFFLINE") != "" {
 		return nil
 	}
@@ -211,12 +299,7 @@ func fetchCatalog(ctx context.Context) []ai.Model {
 	if err != nil || len(body) == 0 {
 		return nil
 	}
-	models := parseCatalog(body)
-	if models == nil {
-		return nil
-	}
-	writeCache(body)
-	return models
+	return body
 }
 
 // writeCache persists the raw catalog atomically (temp + rename), creating
@@ -249,5 +332,12 @@ func CacheInfo() (path string, exists bool, age time.Duration, err error) {
 	return path, true, time.Since(info.ModTime()), nil
 }
 
-// SnapshotSize reports how many models the embedded fallback carries.
-func SnapshotSize() int { return len(snapshotModels) }
+// SnapshotSize reports how many models the embedded fallback carries for a
+// provider (0 when the provider has no snapshot).
+func SnapshotSize(provider string) int {
+	slug, ok := SlugFor(provider)
+	if !ok {
+		return 0
+	}
+	return len(snapshotCatalog[slug])
+}

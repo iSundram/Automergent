@@ -1,68 +1,56 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 100" width="560" height="100" fill="none">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 90" width="540" height="90" fill="none">
   <defs>
-    <!-- Background Gradient for Icon -->
-    <linearGradient id="iconBg" x1="0%" y1="0%" x2="100%" y2="100%">
+    <linearGradient id="fullIconBg" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#2b2b2b" />
-      <stop offset="100%" stop-color="#141414" />
+      <stop offset="100%" stop-color="#111111" />
     </linearGradient>
-
-    <!-- Accent Gradient -->
-    <linearGradient id="silverGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+    <linearGradient id="fullBorderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.7" />
+      <stop offset="50%" stop-color="#d4d4d4" stop-opacity="0.3" />
+      <stop offset="100%" stop-color="#2b2b2b" stop-opacity="0.9" />
+    </linearGradient>
+    <linearGradient id="textSilver" x1="0%" y1="0%" x2="100%" y2="0%">
       <stop offset="0%" stop-color="#ffffff" />
-      <stop offset="60%" stop-color="#d4d4d4" />
+      <stop offset="70%" stop-color="#d4d4d4" />
       <stop offset="100%" stop-color="#b3b3b3" />
     </linearGradient>
-
-    <!-- Metallic Border Gradient -->
-    <linearGradient id="borderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6" />
-      <stop offset="50%" stop-color="#b3b3b3" stop-opacity="0.3" />
-      <stop offset="100%" stop-color="#2b2b2b" stop-opacity="0.8" />
-    </linearGradient>
-
-    <!-- Glow Filter -->
-    <filter id="softGlow" x="-20%" y="-20%" width="140%" height="140%">
+    <filter id="fullGlow" x="-20%" y="-20%" width="140%" height="140%">
       <feGaussianBlur stdDeviation="2" result="blur" />
       <feComposite in="SourceGraphic" in2="blur" operator="over" />
     </filter>
   </defs>
 
-  <!-- Left Icon Container (Rectangular Badge) -->
-  <g transform="translate(10, 10)">
-    <!-- Badge Background -->
-    <rect x="0" y="0" width="80" height="80" rx="18" fill="url(#iconBg)" stroke="url(#borderGrad)" stroke-width="1.5" />
+  <!-- Left Icon Badge -->
+  <g transform="translate(8, 9)">
+    <rect x="0" y="0" width="72" height="72" rx="18" fill="url(#fullIconBg)" stroke="url(#fullBorderGrad)" stroke-width="1.75" />
+    <rect x="3" y="3" width="66" height="66" rx="15" fill="none" stroke="#2b2b2b" stroke-width="1" />
     
-    <!-- Outer Glow Accent Ring -->
-    <rect x="3" y="3" width="74" height="74" rx="15" fill="none" stroke="#2b2b2b" stroke-width="1" />
-
-    <!-- Terminal & Autonomous Merge Convergence Symbol -->
-    <!-- Left Branch (Chevron/Input) -->
-    <path d="M 22 28 L 36 40 L 22 52" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#softGlow)" />
+    <!-- Chevron -->
+    <path d="M 20 24 L 35 36 L 20 48" stroke="#ffffff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#fullGlow)" />
     
-    <!-- Merging Upper Node -->
-    <path d="M 44 26 L 58 40" stroke="#d4d4d4" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
-    <circle cx="44" cy="26" r="3.5" fill="#ffffff" />
+    <!-- Upper Branch -->
+    <path d="M 42 22 L 56 36" stroke="#d4d4d4" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="42" cy="22" r="3.5" fill="#ffffff" />
     
-    <!-- Merging Lower Horizontal Line -->
-    <path d="M 38 54 L 58 54" stroke="#b3b3b3" stroke-width="4" stroke-linecap="round" />
-    <circle cx="58" cy="40" r="3.5" fill="#ffffff" />
+    <!-- Lower Merge Line -->
+    <path d="M 36 50 L 56 50" stroke="#b3b3b3" stroke-width="4" stroke-linecap="round" />
+    <circle cx="56" cy="36" r="3.5" fill="#ffffff" />
   </g>
 
-  <!-- Brand Typography: White text & Silver tones -->
-  <g transform="translate(108, 0)">
-    <!-- "Auto" in Pure White Bold -->
-    <text x="0" y="58" font-family="-apple-system, BlinkMacSystemFont, 'Plus Jakarta Sans', 'Inter', 'Segoe UI', sans-serif" font-size="44" font-weight="900" letter-spacing="-0.5" fill="#ffffff">Auto</text>
+  <!-- Typography & Wordmark -->
+  <g transform="translate(98, 0)">
+    <!-- Auto (White) -->
+    <text x="0" y="52" font-family="'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="42" font-weight="900" letter-spacing="-0.5" fill="#ffffff">Auto</text>
     
-    <!-- "mergent" in Metallic Silver -->
-    <text x="110" y="58" font-family="-apple-system, BlinkMacSystemFont, 'Plus Jakarta Sans', 'Inter', 'Segoe UI', sans-serif" font-size="44" font-weight="800" letter-spacing="-0.5" fill="url(#silverGrad)">mergent</text>
+    <!-- mergent (Silver gradient) -->
+    <text x="104" y="52" font-family="'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="42" font-weight="800" letter-spacing="-0.5" fill="url(#textSilver)">mergent</text>
 
-    <!-- Subtitle / Tagline Badge in Silver & Slate -->
-    <g transform="translate(0, 68)">
-      <rect x="0" y="0" width="168" height="18" rx="4" fill="#2b2b2b" fill-opacity="0.8" stroke="#b3b3b3" stroke-width="0.75" stroke-opacity="0.4" />
-      <text x="8" y="13" font-family="-apple-system, BlinkMacSystemFont, 'JetBrains Mono', 'SF Mono', monospace" font-size="9.5" font-weight="700" letter-spacing="1.5" fill="#d4d4d4">AUTONOMOUS AGENT</text>
-      
-      <circle cx="180" cy="9" r="2.5" fill="#b3b3b3" />
-      <text x="190" y="13" font-family="-apple-system, BlinkMacSystemFont, 'Inter', sans-serif" font-size="11" font-weight="500" letter-spacing="0.5" fill="#b3b3b3">AI Coding Engine</text>
+    <!-- Subtitle Pill -->
+    <g transform="translate(0, 62)">
+      <rect x="0" y="0" width="152" height="18" rx="4" fill="#2b2b2b" fill-opacity="0.75" stroke="#b3b3b3" stroke-width="0.75" stroke-opacity="0.35" />
+      <text x="8" y="13" font-family="'JetBrains Mono', 'SF Mono', monospace" font-size="9" font-weight="700" letter-spacing="1.2" fill="#d4d4d4">AUTONOMOUS AGENT</text>
+      <circle cx="164" cy="9" r="2" fill="#b3b3b3" />
+      <text x="174" y="13" font-family="'Inter', -apple-system, sans-serif" font-size="11" font-weight="500" letter-spacing="0.3" fill="#b3b3b3">AI Coding Engine</text>
     </g>
   </g>
 </svg>

@@ -311,7 +311,7 @@ func (c *Client) Models(ctx context.Context) ([]ai.Model, error) {
 	if err != nil {
 		// Offline: the models.dev catalog (disk cache or embedded snapshot)
 		// is richer than the curated list; curated stays beneath it.
-		if catalog := modelsdev.Models(ctx); len(catalog) > 0 {
+		if catalog := modelsdev.Models(ctx, "google"); len(catalog) > 0 {
 			return catalog, nil
 		}
 		return append([]ai.Model{}, curatedModels...), nil
@@ -462,7 +462,7 @@ func mergeCuratedModels(live []ai.Model) []ai.Model {
 	}
 	// The models.dev community catalog first (rich metadata), then the
 	// curated static list for entries the catalog has not caught up with.
-	merge(modelsdev.Models(context.Background()), true)
+	merge(modelsdev.Models(context.Background(), "google"), true)
 	merge(curatedModels, false)
 	return live
 }

@@ -349,6 +349,19 @@ func (m *Manager) GetBudgetSummary() BudgetSummary {
 	return m.budget.Summary()
 }
 
+// RecordSystemPromptTokens records the system prompt's token usage on the
+// budget. Best-effort: an over-reserve prompt is recorded clamped rather
+// than rejected, so observability never breaks the run.
+func (m *Manager) RecordSystemPromptTokens(tokens int) {
+	_ = m.budget.UseSystemPrompt(tokens)
+}
+
+// RecordToolDefinitionTokens records the tool definitions' token usage on
+// the budget (same best-effort semantics as RecordSystemPromptTokens).
+func (m *Manager) RecordToolDefinitionTokens(tokens int) {
+	_ = m.budget.UseToolDefinitions(tokens)
+}
+
 // GetStalenessReport returns staleness information for all cached files.
 func (m *Manager) GetStalenessReport(ctx context.Context) (map[string]*FileStatus, error) {
 	m.mu.RLock()

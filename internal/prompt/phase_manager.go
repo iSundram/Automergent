@@ -117,6 +117,21 @@ func (m *PhaseManager) Transition(to shared.AgentPhase, reason, trigger string) 
 	return nil
 }
 
+// DefaultPhaseTools is the SINGLE source of truth for the tools each phase
+// offers: the PhaseManager's tool masks, the composer's tool-guidance layer,
+// and any other per-phase listing all read from here. Tool names MUST match
+// the registry names (read_file/edit_file/write_file).
+func DefaultPhaseTools(phase shared.AgentPhase) ([]string, bool) {
+	tools := map[shared.AgentPhase][]string{
+		shared.PhaseInit:    {"bash", "read_file", "glob", "grep", "edit_file", "task"},
+		shared.PhaseExplore: {"glob", "grep", "read_file", "bash", "list_directory"},
+		shared.PhasePlan:    {"read_file", "write_file", "bash", "task", "grep", "glob"},
+		shared.PhaseBuild:   {"edit_file", "bash", "write_file", "read_file", "task", "glob", "grep", "multi_edit"},
+	}
+	t, ok := tools[phase]
+	return t, ok
+}
+
 // GetPhaseConfig returns the configuration for a phase.
 func (m *PhaseManager) GetPhaseConfig(phase shared.AgentPhase) shared.PhaseConfig {
 	// Check agent-specific phase config first
@@ -131,47 +146,24 @@ func (m *PhaseManager) GetPhaseConfig(phase shared.AgentPhase) shared.PhaseConfi
 			}
 		}
 	}
-	
-	// Default phase configs. Tool names MUST match the registry names
-	// (read_file/edit_file/write_file) — these lists drive the per-phase
-	// tool masks, and a stale name silently fails the filter.
-	defaultConfigs := map[shared.AgentPhase]shared.PhaseConfig{
-		shared.PhaseInit: {
-			// INIT: bash, read, edits, task — deliberately NO todo tools.
-			Tools:       []string{"bash", "read_file", "glob", "grep", "edit_file", "task"},
-			ToolSet:     shared.ToolSetBasic,
-			PromptStyle: "serious, concise, classifier",
-			Agent:       "main",
-			MaxSteps:    3,
-		},
-		shared.PhaseExplore: {
-			Tools:       []string{"glob", "grep", "read_file", "bash", "list_directory"},
-			ToolSet:     shared.ToolSetReadOnly,
-			PromptStyle: "thorough, investigative",
-			Agent:       "explore",
-			MaxSteps:    10,
-		},
-		shared.PhasePlan: {
-			Tools:       []string{"read_file", "write_file", "bash", "task", "grep", "glob"},
-			ToolSet:     shared.ToolSetModerate,
-			PromptStyle: "structured, analytical",
-			Agent:       "general",
-			MaxSteps:    5,
-		},
-		shared.PhaseBuild: {
-			Tools:       []string{"edit_file", "bash", "write_file", "read_file", "task", "glob", "grep", "multi_edit"},
-			ToolSet:     shared.ToolSetFull,
-			PromptStyle: "focused, pragmatic + testing + todo",
-			Agent:       "general",
-			MaxSteps:    20,
-		},
+
+	if tools, ok := DefaultPhaseTools(phase); ok {
+		return shared.PhaseConfig{
+			Tools:       tools,
+			ToolSet:     m.toolSetForPhase(phase),
+			PromptStyle: m.promptStyleForPhase(phase),
+			Agent:       m.agentForPhase(phase),
+			MaxSteps:    m.maxStepsForPhase(phase),
+		}
 	}
-	
-	if config, ok := defaultConfigs[phase]; ok {
-		return config
+
+	return shared.PhaseConfig{
+		Tools:       []string{"bash", "read_file", "glob", "grep", "edit_file", "task"},
+		ToolSet:     shared.ToolSetBasic,
+		PromptStyle: m.promptStyleForPhase(shared.PhaseInit),
+		Agent:       "main",
+		MaxSteps:    3,
 	}
-	
-	return defaultConfigs[shared.PhaseInit]
 }
 
 // ExecutePhase executes a specific phase with the given task.
@@ -404,7 +396,7 @@ func (m *PhaseManager) checkClarification(message string) []string {
 	// Check for ambiguous requests that could mean multiple things
 	lower := strings.ToLower(message)
 	var questions []string
-	
+
 	// Multiple intents detected
 	intentKeywords := map[string][]string{
 		"explore": {"find", "search", "look for", "where is", "how does", "explore"},
@@ -413,7 +405,7 @@ func (m *PhaseManager) checkClarification(message string) []string {
 		"plan": {"plan", "design", "architecture", "approach", "strategy"},
 		"question": {"what", "how", "why", "explain", "tell me"},
 	}
-	
+
 	detectedIntents := []string{}
 	for intent, keywords := range intentKeywords {
 		for _, kw := range keywords {
@@ -423,18 +415,11 @@ func (m *PhaseManager) checkClarification(message string) []string {
 			}
 		}
 	}
-	
+
 	if len(detectedIntents) > 1 {
 		questions = append(questions, fmt.Sprintf("Your request could mean: %s. Which do you want?", strings.Join(detectedIntents, ", ")))
 	}
-	
-	// Unrelated content (e.g., "I like coffee" mixed with code request)
-	if strings.Contains(lower, "coffee") || strings.Contains(lower, "sleep") || strings.Contains(lower, "tired") {
-		if len(detectedIntents) > 0 {
-			questions = append(questions, "Your message contains unrelated content. Should I focus on the coding task?")
-		}
-	}
-	
+
 	return questions
 }
 

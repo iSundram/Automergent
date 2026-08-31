@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 65" width="440" height="65" fill="none">
+  <defs>
+    <linearGradient id="textOnlySilver" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#ffffff" />
+      <stop offset="70%" stop-color="#d4d4d4" />
+      <stop offset="100%" stop-color="#b3b3b3" />
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(4, 0)">
+    <!-- Auto (White) -->
+    <text x="0" y="46" font-family="'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="46" font-weight="900" letter-spacing="-0.5" fill="#ffffff">Auto</text>
+    
+    <!-- mergent (Silver gradient) -->
+    <text x="116" y="46" font-family="'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="46" font-weight="800" letter-spacing="-0.5" fill="url(#textOnlySilver)">mergent</text>
+  </g>
+</svg>

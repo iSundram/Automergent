@@ -82,7 +82,7 @@ func (t *ArtifactTool) Schema() map[string]any {
 	}
 }
 
-func (t *ArtifactTool) Execute(_ context.Context, args map[string]any) (tools.Result, error) {
+func (t *ArtifactTool) Execute(ctx context.Context, args map[string]any) (tools.Result, error) {
 	path, ok := tools.StringArg(args, "path")
 	if !ok || path == "" {
 		return tools.Result{IsError: true, Content: "path is required"}, nil
@@ -94,6 +94,14 @@ func (t *ArtifactTool) Execute(_ context.Context, args map[string]any) (tools.Re
 	title, _ := tools.StringArg(args, "title")
 	kind, _ := tools.StringArg(args, "kind")
 	requestFeedback, _ := tools.ArgBool(args, "request_feedback")
+
+	// Artifacts are scoped per session: two sessions writing "plan.md" must
+	// not overwrite each other. The result reports the rewritten path, so
+	// the model (and the review UI) see where the file actually landed.
+	if scoped := tools.ScopeArtifactPath(path, tools.SessionIDFromContext(ctx)); scoped != path {
+		args["path"] = scoped
+		path = scoped
+	}
 
 	if t.cfg != nil {
 		if err := validateWritePath(path, t.cfg.Security.BlockedWritePaths, t.cfg.Security.AllowedWritePaths); err != nil {

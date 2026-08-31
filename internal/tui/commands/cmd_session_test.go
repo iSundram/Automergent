@@ -41,6 +41,40 @@ func TestResumeDelegatesWithAndWithoutID(t *testing.T) {
 	}
 }
 
+func TestResumeCompletionOffersStoredSessions(t *testing.T) {
+	m := NewMockHost()
+	m.sessionReferences = []SessionReference{
+		{ID: "sess-1", Label: "Fix login bug — today"},
+		{ID: "sess-2", Label: "Refactor config — 3d ago"},
+	}
+
+	cmd := resumeCommand()
+	if cmd.Completion == nil {
+		t.Fatal("/resume must declare Completion")
+	}
+
+	all := cmd.Completion(m, "")
+	if len(all) != 2 {
+		t.Fatalf("empty partial must offer every session, got %v", all)
+	}
+
+	filtered := cmd.Completion(m, "login")
+	if len(filtered) != 1 || filtered[0] != "Fix login bug — today" {
+		t.Fatalf("partial should filter by label, got %v", filtered)
+	}
+
+	// ID fragments match too, so resuming by a remembered ID prefix still
+	// gets completion.
+	byID := cmd.Completion(m, "sess-2")
+	if len(byID) != 1 {
+		t.Fatalf("ID prefix should match, got %v", byID)
+	}
+
+	if got := cmd.Completion(NewMockHost(), ""); got != nil {
+		t.Fatalf("no stored sessions must yield no completion, got %v", got)
+	}
+}
+
 func TestExportPassesPathAndReportsSuccess(t *testing.T) {
 	m := NewMockHost()
 

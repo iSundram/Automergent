@@ -157,6 +157,59 @@ func (d *Decomposition) ToTaskSpecs() []shared.TaskSpec {
 	return specs
 }
 
+// IntentSetFromDecomposition derives the prompt system's IntentSet from the
+// decomposer's output instead of running a SECOND LLM call. The decomposer
+// already classified every part; mapping part kinds onto intent types is
+// deterministic. This halves the per-message classification cost and removes
+// a whole class of decomposer/intent-disagreement bugs.
+func IntentSetFromDecomposition(d *Decomposition) *shared.IntentSet {
+	if d == nil {
+		return nil
+	}
+	set := &shared.IntentSet{OriginalPrompt: d.Summary}
+	if set.OriginalPrompt == "" && len(d.Parts) > 0 {
+		set.OriginalPrompt = d.Parts[0].Text
+	}
+	kindToIntent := map[PartKind]shared.IntentType{
+		PartKindTask:      shared.IntentImplement,
+		PartKindDirect:    shared.IntentDirect,
+		PartKindQuestion:  shared.IntentQuestion,
+		PartKindRule:      shared.IntentPlan, // standing instructions ride as plan-intent
+		PartKindClarify:   shared.IntentQuestion,
+		PartKindViolation: shared.IntentReview,
+	}
+	for _, p := range d.Parts {
+		it, ok := kindToIntent[p.Kind]
+		if !ok {
+			continue // noise: no intent
+		}
+		// A task part's phase refines the intent type.
+		if p.Kind == PartKindTask {
+			switch p.Phase {
+			case "explore":
+				it = shared.IntentExplore
+			case "plan":
+				it = shared.IntentPlan
+			case "build":
+				it = shared.IntentImplement
+			}
+		}
+		priority := p.Priority
+		if priority == 0 {
+			priority = 1
+		}
+		set.Intents = append(set.Intents, shared.Intent{
+			ID:         p.ID,
+			Type:       it,
+			Priority:   priority,
+			RawText:    p.Text,
+			Confidence: p.Confidence,
+		})
+		set.RequiresInit = set.RequiresInit || p.Kind == PartKindTask
+	}
+	return set
+}
+
 // newTaskSpecFromPart builds a TaskSpec from a routed task part.
 // phaseForPart resolves the arc phase for a task part: explicit phase wins;
 // otherwise the task type maps (explore→explore, plan→plan, anything else

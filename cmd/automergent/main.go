@@ -439,6 +439,10 @@ func run(cmd *cobra.Command, args []string) error {
 	// provider call. Fully offline-safe — every fallback ends at the
 	// embedded snapshot.
 	modelsdev.StartRefresher(cmd.Context())
+	// Warn (never block) when the configured model is outside the catalog's
+	// listing policy — the user may have picked deliberately, so this is a
+	// heads-up, not a veto.
+	warnIfModelUnlisted(cmd.Context(), cfg)
 
 	// Build agent
 	ag := agent.New(cfg, provider, sess, reg)
@@ -1288,8 +1292,28 @@ func printTextStructuredError(e structuredError) {
 	fmt.Fprintf(os.Stderr, "\nError: code=%s category=%s message=%q details=%s\n", e.Code, e.Category, e.Message, encodedDetails)
 }
 
-func resolveProvider(cfg *config.Config) (aiPkg.Provider, error) {
+// warnIfModelUnlisted prints a notice when the active provider+model has no
+// models.dev catalog entry (custom endpoints aside). Custom, user-registered
+// models are a deliberate escape hatch and stay silent; the warning targets
+// stale defaults left behind by catalog churn.
+func warnIfModelUnlisted(ctx context.Context, cfg *config.Config) {
+	if cfg.Model == "" {
+		return
+	}
+	if _, known := modelsdev.SlugFor(cfg.Provider); !known {
+		return // custom endpoints have no catalog
+	}
 	pc := cfg.Providers[cfg.Provider]
+	if _, custom := pc.Models[cfg.Model]; custom {
+		return // user-registered model: deliberate choice
+	}
+	if _, ok := modelsdev.ModelInfo(ctx, cfg.Provider, cfg.Model); ok {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "note: model %q for provider %q is not in the models.dev catalog (tool-call, >= 1M context required) — /model list shows the supported set\n", cfg.Model, cfg.Provider)
+}
+
+func resolveProvider(cfg *config.Config) (aiPkg.Provider, error) {	pc := cfg.Providers[cfg.Provider]
 	enablePromptCache := shouldEnablePromptCache(cfg, cfg.Provider)
 	aiCfg := aiPkg.ProviderConfig{
 		APIKey:             pc.APIKey,

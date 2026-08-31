@@ -176,6 +176,11 @@ type Host interface {
 	// Session lifecycle
 	NewSession()
 	ShowSessions()
+	// SessionReferences lists stored sessions (most recently updated first)
+	// as "<title> — <relative time>" display entries for argument
+	// completion. The completion value is the raw session ID, so resuming
+	// keeps working after a rename.
+	SessionReferences() []SessionReference
 	// ShowArtifacts opens the /artifact review browser for artifacts the
 	// agent produced this session.
 	ShowArtifacts()
@@ -292,6 +297,14 @@ type Host interface {
 	MCPDeleteToolCache(pattern string)
 	MCPAddServer(name, transport, urlOrCmd string, args []string) error
 	MCPRemoveServer(name string) error
+}
+
+// SessionReference pairs a stored session's ID with a display label for
+// argument completion (backing /resume): the title (or first user line when
+// untitled) plus its age, so sessions are recognizable without IDs.
+type SessionReference struct {
+	ID    string
+	Label string
 }
 
 // MCPServerStatus is the status info for a connected MCP server.

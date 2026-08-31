@@ -45,6 +45,17 @@ func (a *Agent) executeDecomposition(ctx context.Context, d *promptpkg.Decomposi
 		a.Emit(EventStatus, "init: "+d.Summary)
 	}
 
+	// Run the prompt-system pipeline with intents DERIVED from the
+	// decomposition — no second LLM intent-identification call. The pipeline
+	// contributes the init file map and the task plan; a failure degrades to
+	// the decomposition's own routing.
+	if a.promptSystem != nil && a.provider != nil {
+		intents := promptpkg.IntentSetFromDecomposition(d)
+		if _, err := a.promptSystem.ProcessUserMessageWithIntents(ctx, intents, originalPrompt, a.workDir, a.getAvailableFiles()); err != nil {
+			a.Emit(EventStatus, "prompt pipeline degraded: "+err.Error())
+		}
+	}
+
 	// Clarification: ask with concrete options before acting on the
 	// ambiguous part. Other parts still run — the answer only affects the
 	// ambiguous one.
@@ -239,7 +250,7 @@ func (a *Agent) answerDirectParts(ctx context.Context, parts []promptpkg.Decompo
 	if err != nil {
 		return err
 	}
-	text, _, _, err := a.drainStream(resp)
+	text, _, _, err := a.drainStream(resp, true)
 	if err != nil {
 		return err
 	}

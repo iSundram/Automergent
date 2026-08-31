@@ -8,6 +8,7 @@ import (
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/sandbox"
+	"github.com/iSundram/Automergent/internal/session"
 	toolsagent "github.com/iSundram/Automergent/internal/tools/agent"
 	"github.com/iSundram/Automergent/internal/tui/commands"
 	"github.com/iSundram/Automergent/internal/tui/components"
@@ -318,6 +319,81 @@ func (a *App) NewSession() {
 
 func (a *App) ShowSessions() {
 	a.showSessions()
+}
+
+// SessionReferences lists stored sessions (most recently updated first) as
+// completion entries for /resume: "<title> — <age>" when titled, otherwise
+// the first user line serves as the label. The active session is skipped —
+// resuming it is a no-op that would only confuse the picker.
+func (a *App) SessionReferences() []commands.SessionReference {
+	if a.storage == nil {
+		return nil
+	}
+	sessions, err := a.storage.List()
+	if err != nil {
+		return nil
+	}
+	sessions = a.projectSessions(sessions)
+	refs := make([]commands.SessionReference, 0, len(sessions))
+	for _, s := range sessions {
+		if s == nil || s.ID == a.sess.ID {
+			continue
+		}
+		label := s.Title
+		if label == "" {
+			// Untitled sessions still show their opening ask; trimmed to a
+			// single short line so one long message doesn't blow out the
+			// palette column.
+			label = firstUserLineOf(s)
+		}
+		if label == "" {
+			label = s.ID
+		}
+		if !s.UpdatedAt.IsZero() {
+			label += " — " + formatRelativeAge(s.UpdatedAt)
+		}
+		refs = append(refs, commands.SessionReference{ID: s.ID, Label: label})
+	}
+	return refs
+}
+
+// firstUserLineOf returns the first line of a session's first user message,
+// capped to a completion-friendly length. Empty when the session has no user
+// turns (its ID will serve as the label instead).
+func firstUserLineOf(s *session.Session) string {
+	if s == nil {
+		return ""
+	}
+	for _, m := range s.Messages {
+		if m.Role != ai.RoleUser {
+			continue
+		}
+		line := strings.TrimSpace(m.PlaintextForHistory())
+		if idx := strings.IndexAny(line, "\n"); idx >= 0 {
+			line = line[:idx]
+		}
+		if len(line) > 40 {
+			line = line[:37] + "..."
+		}
+		return line
+	}
+	return ""
+}
+
+// formatRelativeAge renders a session's age for completion labels. Shorter
+// than the browser's formatRelativeTime since palette rows are tighter.
+func formatRelativeAge(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Hour:
+		return "today"
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	case d < 7*24*time.Hour:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	default:
+		return t.Format("Jan 2")
+	}
 }
 
 func (a *App) ShowArtifacts() {

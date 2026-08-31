@@ -84,6 +84,15 @@ func NewPromptManager(config *PromptConfig, contextManager *contextpkg.Manager, 
 
 // ProcessUserMessage processes a user message and returns the appropriate prompt parts.
 func (pm *PromptManager) ProcessUserMessage(ctx context.Context, userMessage string, workingDir string, availableFiles []string) ([]PromptPart, error) {
+	return pm.ProcessUserMessageWithIntents(ctx, nil, userMessage, workingDir, availableFiles)
+}
+
+// ProcessUserMessageWithIntents processes a user message with a pre-derived
+// intent set. When intents is non-nil the LLM intent-identification call is
+// SKIPPED — the caller (the agent loop) derives it from the INIT decomposer's
+// output, which already classified the message. One classification call per
+// message, not two.
+func (pm *PromptManager) ProcessUserMessageWithIntents(ctx context.Context, intents *shared.IntentSet, userMessage string, workingDir string, availableFiles []string) ([]PromptPart, error) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
@@ -92,6 +101,13 @@ func (pm *PromptManager) ProcessUserMessage(ctx context.Context, userMessage str
 		Content:   userMessage,
 		Timestamp: time.Now(),
 	})
+
+	if intents != nil {
+		// Pre-classified path: adopt the derived intents and run the
+		// init/task planning directly.
+		pm.currentIntentSet = intents
+		return pm.runIntentFlow(ctx, intents, userMessage, workingDir, availableFiles)
+	}
 
 	if pm.currentIntentSet == nil {
 		return pm.startNewIntentFlow(ctx, userMessage, workingDir, availableFiles)
@@ -109,6 +125,94 @@ func (pm *PromptManager) ProcessUserMessage(ctx context.Context, userMessage str
 	}
 
 	return pm.continueRequest(userMessage)
+}
+
+// runIntentFlow executes the intent pipeline (init exploration + task
+// planning) for an already-identified intent set, mirroring
+// startNewIntentFlow's stages without the LLM intent call.
+func (pm *PromptManager) runIntentFlow(ctx context.Context, intentSet *shared.IntentSet, userMessage, workingDir string, availableFiles []string) ([]PromptPart, error) {
+	var parts []PromptPart
+
+	var intentNames []string
+	for _, intent := range intentSet.Intents {
+		intentNames = append(intentNames, string(intent.Type))
+	}
+	pm.notifyProgress("Intents", strings.Join(intentNames, ", "))
+
+	pm.taskState.SetIntentAndInit(intentSet, nil)
+
+	pm.initExecutor.OnStart = func(action InitAction) {
+		pm.notifyAction(shared.InitActionEvent{
+			RawTool: action.Tool,
+			Tool:    NormalizeInitTool(action.Tool),
+			Target:  action.Target,
+			Running: true,
+		})
+	}
+
+	pm.initExecutor.OnAction = func(action InitAction, execErr error, duration time.Duration) {
+		evt := shared.InitActionEvent{
+			RawTool:  action.Tool,
+			Tool:     NormalizeInitTool(action.Tool),
+			Target:   action.Target,
+			Duration: duration,
+		}
+		if execErr != nil {
+			evt.Failed = true
+			evt.Err = execErr.Error()
+			pm.notifyAction(evt)
+			return
+		}
+		switch action.Tool {
+		case "glob", "grep":
+			lines := strings.Count(strings.TrimSpace(action.Result), "\n") + 1
+			if strings.TrimSpace(action.Result) == "" {
+				lines = 0
+			}
+			evt.Summary = fmt.Sprintf("%d results", lines)
+		case "read":
+			evt.Summary = fmt.Sprintf("%d chars", len(action.Result))
+		default:
+			if out := strings.TrimSpace(action.Result); out != "" {
+				if idx := strings.IndexByte(out, '\n'); idx >= 0 {
+					out = out[:idx]
+				}
+				evt.Summary = out
+			}
+		}
+		pm.notifyAction(evt)
+	}
+
+	if intentSet.RequiresInit && intentSet.InitPhase != nil {
+		pm.currentInitPhase = intentSet.InitPhase
+		initResults, err := pm.initExecutor.Execute(ctx, intentSet.InitPhase, workingDir, pm.toolExecutor)
+		if err != nil {
+			return parts, fmt.Errorf("init phase failed: %w", err)
+		}
+		pm.currentInitResults = initResults
+		pm.taskState.SetIntentAndInit(intentSet, initResults)
+
+		tasks, err := pm.taskPlanner.PlanTasks(ctx, intentSet, initResults)
+		if err != nil {
+			return parts, fmt.Errorf("task planning failed: %w", err)
+		}
+		pm.currentTasks = tasks
+		pm.taskState.SetPlan(tasks, pm.convertTasksToTodos(tasks))
+		pm.notifyTaskPlan(tasks)
+		pm.attachTodos(workingDir, initResults.FilesFound, initResults.CodeSnippets, tasks)
+		return parts, nil
+	}
+
+	tasks, err := pm.taskPlanner.PlanTasks(ctx, intentSet, &shared.InitResults{})
+	if err != nil {
+		return parts, fmt.Errorf("task planning failed: %w", err)
+	}
+	pm.currentTasks = tasks
+	pm.taskState.SetPlan(tasks, pm.convertTasksToTodos(tasks))
+	pm.taskState.SetIntentAndInit(intentSet, &shared.InitResults{})
+	pm.notifyTaskPlan(tasks)
+	pm.attachTodos(workingDir, nil, nil, tasks)
+	return parts, nil
 }
 
 // startNewIntentFlow starts processing a new user request using intent identification.

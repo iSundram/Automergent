@@ -35,6 +35,12 @@ func (ps *PromptSystem) ProcessUserMessage(ctx context.Context, userMessage, wor
 	return ps.Manager.ProcessUserMessage(ctx, userMessage, workingDir, availableFiles)
 }
 
+// ProcessUserMessageWithIntents processes a user message with a pre-derived
+// intent set (from the INIT decomposer), skipping the LLM intent call.
+func (ps *PromptSystem) ProcessUserMessageWithIntents(ctx context.Context, intents *shared.IntentSet, userMessage, workingDir string, availableFiles []string) ([]PromptPart, error) {
+	return ps.Manager.ProcessUserMessageWithIntents(ctx, intents, userMessage, workingDir, availableFiles)
+}
+
 // GetNextAction gets the next prompt part for execution.
 func (ps *PromptSystem) GetNextAction() *PromptPart {
 	if todoPrompt := ps.Manager.GetNextTodoPrompt(); todoPrompt != nil {

@@ -150,6 +150,9 @@ func (t *ExitPlanModeTool) Execute(ctx context.Context, args map[string]any) (to
 	if planPath == "" {
 		planPath = filepath.Join(".automergent", "artifacts", "plan.md")
 	}
+	// Plans are artifacts: scope the path to the session so concurrent
+	// sessions' plans never collide, exactly like the artifact tool.
+	planPath = tools.ScopeArtifactPath(planPath, tools.SessionIDFromContext(ctx))
 
 	hookMu.RLock()
 	reviewer := planReviewer
@@ -251,6 +254,9 @@ func (t *VerifyPlanExecutionTool) Execute(ctx context.Context, args map[string]a
 	if planPath == "" {
 		planPath = filepath.Join(".automergent", "artifacts", "plan.md")
 	}
+	// Plans live in session-scoped artifact paths; resolve the same way the
+	// plan was written.
+	planPath = tools.ScopeArtifactPath(planPath, tools.SessionIDFromContext(ctx))
 	planDir := filepath.Dir(planPath)
 	planBytes, err := readFile(planPath)
 	if err != nil {

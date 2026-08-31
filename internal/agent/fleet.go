@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/iSundram/Automergent/internal/agent/agentdef"
@@ -68,8 +69,9 @@ func FleetFromRegistry() string {
 }
 
 // currentTaskBlock renders the task a phase run is executing: what to do,
-// the constraints the user attached, and the routing decision INIT made
-// (which subagent should own it).
+// the full instruction the planner wrote for it (the model's definition of
+// "done"), the constraints the user attached, the file map init discovered,
+// and the routing decision INIT made (which subagent should own it).
 func currentTaskBlock(spec shared.TaskSpec) string {
 	if strings.TrimSpace(spec.Description) == "" {
 		return ""
@@ -77,6 +79,28 @@ func currentTaskBlock(spec shared.TaskSpec) string {
 	var sb strings.Builder
 	sb.WriteString("## Current Task\n")
 	sb.WriteString(spec.Description + "\n")
+	// The planner's detailed instruction carries the actual requirements and
+	// referenced files; the one-line description alone is not enough for the
+	// model to know what "done" means.
+	if p := strings.TrimSpace(spec.Prompt); p != "" && p != strings.TrimSpace(spec.Description) {
+		sb.WriteString("\nFull instruction:\n" + p + "\n")
+	}
+	if files, ok := spec.Context["files_found"].([]string); ok && len(files) > 0 {
+		sb.WriteString("\nFiles init discovered for this task:\n")
+		for i, f := range files {
+			if i >= 30 {
+				sb.WriteString(fmt.Sprintf("- ... and %d more\n", len(files)-30))
+				break
+			}
+			sb.WriteString("- " + f + "\n")
+		}
+	}
+	if criteria, ok := spec.Context["success_criteria"].([]string); ok && len(criteria) > 0 {
+		sb.WriteString("\nSuccess criteria — the task is done only when all are met:\n")
+		for _, c := range criteria {
+			sb.WriteString("- " + c + "\n")
+		}
+	}
 	if constraints, ok := spec.Context["constraints"].([]string); ok && len(constraints) > 0 {
 		sb.WriteString("Constraints from the user (binding):\n")
 		for _, c := range constraints {

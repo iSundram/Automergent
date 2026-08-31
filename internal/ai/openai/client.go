@@ -13,30 +13,16 @@ import (
 
 	"github.com/iSundram/Automergent/internal/ai"
 	automergentErrors "github.com/iSundram/Automergent/internal/errors"
+	"github.com/iSundram/Automergent/internal/modelsdev"
 )
 
 const (
 	defaultBaseURL       = "https://api.openai.com/v1"
-	defaultModel         = "gpt-4o"
+	defaultModel         = "gpt-5.5"
 	modelsCacheTTL       = 5 * time.Minute
 	modelsEndpoint       = "/v1/models"
 	completionsEndpoint  = "/v1/chat/completions"
 )
-
-// codingModelAllowList defines substrings that indicate coding-specialized models.
-var codingModelAllowList = []string{
-	"gpt-4", "gpt-4o", "gpt-4-turbo", "o1", "o3", "o4",
-	"code", "coder", "codex",
-}
-
-// codingModelDenyList defines substrings that indicate non-coding models.
-var codingModelDenyList = []string{
-	"whisper", "tts", "dall-e", "sora", "video", "image",
-	"embedding", "moderation", "audio", "realtime",
-}
-
-// codingModels holds the filtered models from live fetch.
-var codingModels []ai.Model
 
 // Client implements ai.Provider for OpenAI-compatible APIs.
 type Client struct {
@@ -145,7 +131,11 @@ func (c *Client) notifyRetry(attempt, maxAttempts int, err error, delay time.Dur
 	fn(info)
 }
 
-// Models returns the list of available models, filtering for coding models.
+// Models returns the list of available models: live availability from the
+// API's model listing enriched with models.dev metadata (names, context
+// limits, pricing, capabilities). The listing filter (tool calling, >= 1M
+// context) is enforced by the catalog, so a live ID the catalog doesn't know
+// — or that fails the filter — is dropped.
 func (c *Client) Models(ctx context.Context) ([]ai.Model, error) {
 	c.modelsMu.Lock()
 	if time.Since(c.modelsCachedAt) < modelsCacheTTL && c.cachedModels != nil {
@@ -155,21 +145,37 @@ func (c *Client) Models(ctx context.Context) ([]ai.Model, error) {
 	}
 	c.modelsMu.Unlock()
 
-	live, err := c.liveModels(ctx)
+	catalog := modelsdev.Models(ctx, "openai")
+	live, err := c.liveModelIDs(ctx)
 	if err != nil {
-		return nil, err
+		// Offline: the catalog alone still answers (snapshot fallback).
+		return catalog, nil
 	}
-	filtered := filterCodingModels(live)
+	liveSet := make(map[string]bool, len(live))
+	for _, id := range live {
+		liveSet[id] = true
+	}
+	var models []ai.Model
+	for _, m := range catalog {
+		if liveSet[m.ID] || len(live) == 0 {
+			models = append(models, m)
+		}
+	}
+	if models == nil {
+		models = catalog
+	}
 
 	c.modelsMu.Lock()
-	c.cachedModels = filtered
+	c.cachedModels = models
 	c.modelsCachedAt = time.Now()
 	c.modelsMu.Unlock()
-	return filtered, nil
+	return models, nil
 }
 
-func (c *Client) liveModels(ctx context.Context) ([]ai.Model, error) {
-	url := c.baseURL + "/v1/models"
+// liveModelIDs fetches the provider's model IDs (availability only — no
+// metadata; that comes from the catalog).
+func (c *Client) liveModelIDs(ctx context.Context) ([]string, error) {
+	url := c.baseURL + modelsEndpoint
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -193,53 +199,20 @@ func (c *Client) liveModels(ctx context.Context) ([]ai.Model, error) {
 		Data []struct {
 			ID      string `json:"id"`
 			Object  string `json:"object"`
-			OwnedBy string `json:"owned_by"`
 		} `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&data); err != nil {
 		return nil, err
 	}
 
-	var models []ai.Model
+	var ids []string
 	for _, m := range data.Data {
-		if m.Object != "model" {
+		if m.Object != "model" || m.ID == "" {
 			continue
 		}
-		models = append(models, ai.Model{
-			ID:           m.ID,
-			Name:         m.ID,
-			ContextLimit: 0,
-			InputPrice:   0,
-			OutputPrice:  0,
-		})
+		ids = append(ids, m.ID)
 	}
-	return models, nil
-}
-
-// filterCodingModels filters the model list to only include coding-specialized models.
-func filterCodingModels(models []ai.Model) []ai.Model {
-	var filtered []ai.Model
-	for _, m := range models {
-		if isCodingModel(m.ID) {
-			filtered = append(filtered, m)
-		}
-	}
-	return filtered
-}
-
-func isCodingModel(id string) bool {
-	lower := strings.ToLower(id)
-	for _, deny := range codingModelDenyList {
-		if strings.Contains(lower, deny) {
-			return false
-		}
-	}
-	for _, allow := range codingModelAllowList {
-		if strings.Contains(lower, allow) {
-			return true
-		}
-	}
-	return false
+	return ids, nil
 }
 
 // Complete sends a completion request to the OpenAI-compatible API.

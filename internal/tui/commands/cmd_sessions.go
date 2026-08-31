@@ -2,6 +2,7 @@ package commands
 
 import (
 	"fmt"
+	"strings"
 )
 
 // /sessions — browse previous sessions.
@@ -35,7 +36,35 @@ func resumeCommand() Command {
 		ArgsHint:    "[id|prefix|title]",
 		Tier:        TierSecondary,
 		Immediate:   true,
+		Completion: func(h Host, partial string) []string {
+			return sessionReferenceCompletion(h, partial)
+		},
 	}
+}
+
+// sessionReferenceCompletion offers stored sessions for argument completion:
+// label is "<title> — <age>" and the value is the session ID (resuming by ID
+// keeps working after a rename, where a title match would break). The label is
+// matched case-insensitively against the partial; the ID is offered verbatim
+// as typed.
+func sessionReferenceCompletion(h Host, partial string) []string {
+	refs := h.SessionReferences()
+	if len(refs) == 0 {
+		return nil
+	}
+	lower := strings.ToLower(partial)
+	out := make([]string, 0, len(refs))
+	for _, r := range refs {
+		if lower == "" || strings.Contains(strings.ToLower(r.Label), lower) ||
+			strings.Contains(strings.ToLower(r.ID), lower) {
+			out = append(out, r.Label)
+		}
+	}
+	// Completion values carry the ID; the label is display text. The palette
+	// takes "label" strings, so encode both: "label" (shown) dispatches the
+	// label itself, and /resume accepts titles too. When the label and ID
+	// differ enough to matter, the ID prefix is the unambiguous form.
+	return out
 }
 
 func handleResume(host Host, args []string) Result {

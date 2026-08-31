@@ -59,6 +59,11 @@ type Agent struct {
 	// session messages, or rendered in the user-facing prompt.
 	toolProfile map[string]bool
 
+	// titleLadder holds the cheap-model clients used for auto session
+	// titles (see title.go); built once on first use by titleOnce.
+	titleLadder []ai.Provider
+	titleOnce   sync.Once
+
 	// steer carries user messages injected mid-run. The turn loop drains it at
 	// tool boundaries, so a queued message reaches the model before the next
 	// call instead of waiting for the whole turn to finish.
@@ -411,11 +416,9 @@ const (
 	EventTodoUpdate   = "todo_update"
 	EventInitAction   = "init_action"
 	// EventPhaseDone reports one phase of a multi-phase arc finishing while
-	// the run continues. Payload is the phase's final text, same shape as
-	// EventDone. It must stay distinct from EventDone: the UI treats
-	// EventDone as end-of-turn and stops listening for further events, so
-	// emitting it per phase leaves the extra events to be misread as the
-	// first reply of the user's NEXT message.
+	// the run continues. The intermediate phase's text is transcript
+	// context, not a user-facing answer — the final phase renders the
+	// turn's single reply (EventDone).
 	EventPhaseDone = "phase_done"
 	// EventPhase reports the arc phase a run is entering (payload: the phase
 	// name). Emitted at each phase-loop start so the UI's phase indicator
@@ -852,11 +855,12 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		return a.answerDirectQuestion(ctx, originalUserPrompt)
 	}
 
-	// Run the prompt-system pipeline (intent identification, init exploration,
-	// task planning) so phase execution starts with pre-computed context:
-	// intents, discovered files, and a task plan. A pipeline failure degrades
-	// to the keyword-classified phases instead of failing the run.
-	if a.promptSystem != nil && a.provider != nil {
+	// Run the prompt-system pipeline (init exploration, task planning) so
+	// phase execution starts with pre-computed context: intents, discovered
+	// files, and a task plan. Skipped for direct questions — one answer, no
+	// phases to prepare for. A pipeline failure degrades to the
+	// keyword-classified phases instead of failing the run.
+	if a.promptSystem != nil && a.provider != nil && !classification.IsDirectQuestion {
 		if _, err := a.promptSystem.ProcessUserMessage(ctx, originalUserPrompt, a.workDir, a.getAvailableFiles()); err != nil {
 			a.Emit(EventStatus, "prompt pipeline degraded to keyword routing: "+err.Error())
 		}
@@ -904,6 +908,19 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 			if result.Error != nil {
 				a.Emit(EventError, result.Error)
 				return result.Error
+			}
+
+			// Attach the init file map to the task spec so the phase loop's
+			// prompt block (and the explore exit gate) know which files the
+			// task concerns.
+			if ir := a.promptSystem.GetInitResults(); ir != nil && len(ir.FilesFound) > 0 {
+				if task.Context == nil {
+					task.Context = map[string]any{}
+				}
+				if _, ok := task.Context["files_found"]; !ok {
+					task.Context["files_found"] = ir.FilesFound
+					result.TaskSpec = task
+				}
 			}
 
 			// Make the arc visible: the UI shows which phase is taking over.
@@ -959,6 +976,14 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 	}
 
 	firstStandardTurn := true
+	// Only the final phase loop of a Run streams its text to the UI.
+	// Intermediate phases keep working (tools, thoughts) but their prose
+	// stays transcript-only context for the next phase — otherwise a
+	// multi-phase turn renders several complete answers, which reads as
+	// the agent repeating itself.
+	streamTextToUI := isFinalLoop
+	// exploreNudged bounds the explore exit gate to one nudge per phase.
+	exploreNudged := false
 	runMeta := &runMetadata{}
 	phaseSteps := 0
 	maxSteps := result.MaxSteps
@@ -966,6 +991,17 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		maxSteps = 20
 	}
 	reactiveCompactions := 0
+
+	// The composed system prompt is phase-scoped: it changes only between
+	// phase loops, never between iterations of one loop. Composing it once
+	// here (instead of per iteration) also runs the environment layer's git
+	// subprocess exactly once per phase — the prompt prefix stays byte-stable
+	// across the loop's provider calls, which is what provider prompt caching
+	// needs to hit.
+	systemPrompt := a.promptComposer.Compose()
+	// Record prompt-side token usage (below, once tool schemas are built) so
+	// the context budget summary — and the ctx_inspect tool — reflect
+	// reality instead of reporting zeros.
 
 	for {
 		provider := a.Provider()
@@ -995,9 +1031,10 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 			})
 		}
 
-		// Use layered system prompt from PromptComposer
-		systemPrompt := a.promptComposer.Compose()
+		// Use layered system prompt from PromptComposer (composed once per
+		// phase loop — see above).
 		toolSchemas := a.buildActiveToolSchemas()
+		a.recordPromptTokenUsage(systemPrompt, toolSchemas)
 
 		thinkingBudget := a.getThinkingBudget()
 		thinkingLevel := a.getThinkingLevel()
@@ -1046,7 +1083,7 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 			return fmt.Errorf("agent: complete: %w", err)
 		}
 
-		text, thought, usage, err := a.drainStream(resp)
+		text, thought, usage, err := a.drainStream(resp, streamTextToUI)
 		if err != nil {
 			a.Emit(EventError, err)
 			a.tryPersist()
@@ -1085,12 +1122,30 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 			if continueTurn := a.injectLongRunContext(runMeta, false); continueTurn {
 				continue // anti-stall: nudge injected, loop again
 			}
+			// Explore exit gate: an explore phase that produced no tool
+			// calls must actually have covered its subject. If the task
+			// names files and none of them were read this run, the model
+			// answered from the file map alone — nudge once, then let it
+			// answer (the same one-nudge budget as the anti-stall path).
+			if a.phaseExploreUndercovered(result.TaskSpec) && !exploreNudged {
+				exploreNudged = true
+				a.sess.AddMessage(ai.Message{
+					Role: ai.RoleSystem,
+					Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: fmt.Sprintf(
+						"[Explore coverage] You are finishing the exploration task without having read any of the files it concerns. Read the relevant files (at minimum the ones named in the task) with read_file, then produce your findings report with path:line references.")}},
+				})
+				a.Emit(EventStatus, "explore under-covered — requesting deeper read")
+				continue
+			}
 			if isFinalLoop {
 				a.Emit(EventDone, text)
 			} else {
-				// More phases follow in this Run; report the phase's reply
-				// without ending the turn (see EventPhaseDone).
-				a.Emit(EventPhaseDone, text)
+				// More phases follow in this Run; the intermediate phase's
+				// reply stays in the transcript as context for them, but it
+				// is NOT a user-facing answer — only the final phase's
+				// reply is shown. A transient status keeps the run visibly
+				// alive without rendering a duplicate answer.
+				a.Emit(EventStatus, fmt.Sprintf("phase %s complete — continuing", phase))
 			}
 			a.tryPersist()
 			if firstStandardTurn {
@@ -1251,6 +1306,11 @@ func (a *Agent) executeOrchestrationCall(ctx context.Context, call tools.Orchest
 	}
 
 	startedAt := time.Now()
+	// Session-scoped artifact paths are applied BEFORE any event fires, so
+	// the event context (the review UI's artifact path), the session's
+	// recorded call args and the tool result all agree on where the file
+	// landed.
+	tools.ScopeArtifactCall(tc.Name, tc.Args, a.sessionID())
 	context := toolCallContext(tc)
 	decision := a.evaluateToolDecision(tc)
 
@@ -1294,8 +1354,12 @@ func toolCallContext(tc ai.ToolCall) string {
 	return ""
 }
 
-// drainStream reads all chunks from the response, emitting EventToken for each text chunk.
-func (a *Agent) drainStream(resp ai.CompletionResponse) (string, string, ai.Usage, error) {
+// drainStream reads all chunks from the response, emitting EventToken for
+// each text chunk. When streamText is false (an intermediate phase of a
+// multi-phase run) the text is collected but NOT emitted to the UI: it stays
+// in the assistant message for the next phase's context, so the turn's
+// user-facing answer comes from the final phase alone.
+func (a *Agent) drainStream(resp ai.CompletionResponse, streamText bool) (string, string, ai.Usage, error) {
 	var text string
 	var thought string
 	ch := resp.Stream()
@@ -1314,7 +1378,9 @@ func (a *Agent) drainStream(resp ai.CompletionResponse) (string, string, ai.Usag
 			thought += chunk.Thought
 		}
 		if chunk.Text != "" {
-			a.Emit(EventToken, chunk.Text)
+			if streamText {
+				a.Emit(EventToken, chunk.Text)
+			}
 			text += chunk.Text
 		}
 	}
@@ -1332,10 +1398,76 @@ func formatThinking(thought string) string {
 	return "● " + string(runes)
 }
 
+// phaseExploreUndercovered reports whether an explore task is about to exit
+// without any of its subject files having been read in this session run.
+// It inspects the messages added since the run started: if the model read
+// something (read_file calls present), coverage is assumed good; the gate
+// only catches the "answered straight from the prompt without opening a
+// single file" failure mode.
+func (a *Agent) phaseExploreUndercovered(spec shared.TaskSpec) bool {
+	if spec.Phase != shared.PhaseExplore && spec.Type != "explore" {
+		return false
+	}
+	files, _ := spec.Context["files_found"].([]string)
+	if len(files) == 0 {
+		return false // no map to check against; trust the model
+	}
+	// Any read_file in this run's messages counts as real exploration.
+	for i := range a.sess.Messages {
+		msg := a.sess.Messages[i]
+		if msg.Role != ai.RoleAssistant {
+			continue
+		}
+		for _, part := range msg.Content {
+			if part.Type == ai.ContentTypeToolCall && part.ToolCall != nil && part.ToolCall.Name == "read_file" {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// recordPromptTokenUsage feeds the system prompt's token count into the
+// context budget so GetBudgetSummary (surfaced by ctx_inspect and the HUD)
+// reports the prompt side of the request. Tool definitions are counted from
+// the active schemas alongside.
+func (a *Agent) recordPromptTokenUsage(systemPrompt string, toolSchemas []ai.ToolSchema) {
+	mgr := a.ContextManager()
+	if mgr == nil {
+		return
+	}
+	mgr.RecordSystemPromptTokens(a.tokenCountWithEstimation([]ai.Message{
+		ai.NewTextMessage(ai.RoleSystem, systemPrompt),
+	}))
+	var schemaTokens int
+	for _, s := range toolSchemas {
+		schemaTokens += a.tokenCountWithEstimation([]ai.Message{
+			ai.NewTextMessage(ai.RoleSystem, s.Name+" "+s.Description+" "+fmt.Sprint(s.Parameters)),
+		})
+	}
+	mgr.RecordToolDefinitionTokens(schemaTokens)
+}
+
+// sessionID returns the current session's ID, "" when there is none.
+func (a *Agent) sessionID() string {
+	if a.sess == nil {
+		return ""
+	}
+	return a.sess.ID
+}
+
 func (a *Agent) executeTool(ctx context.Context, tc ai.ToolCall) (tools.Result, error) {
 	t, ok := a.tools.Get(tc.Name)
 	if !ok {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("unknown tool: %s", tc.Name)}, nil
+	}
+
+	// The session ID rides on the tool context so side-effecting tools can
+	// scope their writes per conversation (artifacts land under
+	// .automergent/artifacts/<sessionID>/ instead of colliding in a shared
+	// directory).
+	if sid := a.sessionID(); sid != "" {
+		ctx = tools.WithSessionID(ctx, sid)
 	}
 
 	// Pre-tool hooks may veto before any approval or execution work happens.
@@ -1921,7 +2053,7 @@ func (a *Agent) answerDirectQuestion(ctx context.Context, question string) error
 		return err
 	}
 
-	text, _, _, err := a.drainStream(resp)
+	text, _, _, err := a.drainStream(resp, true)
 	if err != nil {
 		return err
 	}
