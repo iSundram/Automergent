@@ -2,6 +2,7 @@
 package parsers
 
 import (
+	"regexp"
 	"strings"
 
 	sitter "github.com/smacker/go-tree-sitter"
@@ -137,46 +138,31 @@ func CheckGoSemanticRules(pr *ParseResult) []types.Diagnostic {
 		return true
 	})
 
-	// Check for error handling (functions returning error but not checked)
-	Walk(pr.Root, func(node *sitter.Node) bool {
-		if node.Type() == "call_expression" {
-			funcNode := node.ChildByFieldName("function")
-			if funcNode != nil {
-				funcName := content[funcNode.StartByte():funcNode.EndByte()]
-				if returnsError(funcName, pr) && !errorIsChecked(node, pr) {
-					d := types.Diagnostic{
-						Line:       int(node.StartPoint().Row) + 1,
-						Column:     int(node.StartPoint().Column),
-						EndLine:    int(node.EndPoint().Row) + 1,
-						EndColumn:  int(node.EndPoint().Column),
-						Severity:   "warning",
-						Code:       "unchecked-error",
-						Message:    "function '" + funcName + "' returns error but it's not checked",
-						Source:     "go-semantic",
-						Tags:       []string{"go", "error-handling", "best-practice"},
-						Suggestions: []string{"Check the returned error", "Use '_' to explicitly ignore if intentional", "Handle error appropriately"},
-					}
-					d.WithDefaults()
-					diags = append(diags, d)
-				}
-			}
-		}
-		return true
-	})
+	// Note: unchecked-error detection is deliberately absent — a text
+	// heuristic (call name contains "Get"/"Read"/…) misfires on idiomatic
+	// code like `defer f.Close()`. Real coverage belongs to errcheck via
+	// the linters package.
 
 	return diags
 }
 
 func isUnusedVar(pr *ParseResult, varName string, declNode *sitter.Node) bool {
-	// Simple heuristic: search for references after declaration
+	// Single- and double-letter names produce too many substring hits to be
+	// trustworthy with a text heuristic.
+	if len(varName) <= 2 {
+		return false
+	}
+	// Skip blank and explicitly-discarded identifiers.
+	if varName == "_" || strings.HasPrefix(varName, "_") {
+		return false
+	}
 	content := string(pr.Content)
 	declPos := declNode.EndByte()
 
-	// Look for usage after declaration
-	remaining := content[declPos:]
-	// Skip the declaration itself
-	usageCount := strings.Count(remaining, varName)
-	return usageCount == 0
+	// Count whole-word occurrences after the declaration; a bare substring
+	// count reports var "n" as used because "nil" contains "n".
+	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(varName) + `\b`)
+	return !re.MatchString(content[declPos:])
 }
 
 func isShadowed(pr *ParseResult, varName string, declNode *sitter.Node) bool {
@@ -190,7 +176,7 @@ func isShadowed(pr *ParseResult, varName string, declNode *sitter.Node) bool {
 				if ch == declNode {
 					break
 				}
-				if containsVarDecl(ch, varName) {
+				if containsVarDecl(pr, ch, varName) {
 					return true
 				}
 			}
@@ -200,17 +186,19 @@ func isShadowed(pr *ParseResult, varName string, declNode *sitter.Node) bool {
 	return false
 }
 
-func containsVarDecl(node *sitter.Node, varName string) bool {
+func containsVarDecl(pr *ParseResult, node *sitter.Node, varName string) bool {
+	if node == nil {
+		return false
+	}
 	found := false
 	Walk(node, func(n *sitter.Node) bool {
-		if (n.Type() == "short_var_declaration" || n.Type() == "var_declaration") {
+		if n.Type() == "short_var_declaration" || n.Type() == "var_declaration" {
 			for i := uint32(0); i < n.ChildCount(); i++ {
 				ch := n.Child(int(i))
-				if ch != nil && ch.Type() == "identifier" {
-					if string(ch.Content([]byte(ch.Content(nil)))) == varName {
-						found = true
-						return false
-					}
+				if ch != nil && ch.Type() == "identifier" &&
+					string(pr.Content[ch.StartByte():ch.EndByte()]) == varName {
+					found = true
+					return false
 				}
 			}
 		}
@@ -263,33 +251,4 @@ func hasFormatMismatch(pr *ParseResult, callNode *sitter.Node, content string) b
 				}
 			}
 			return false
-}
-
-func returnsError(funcName string, pr *ParseResult) bool {
-	// Known functions that return error
-	errorFuncs := []string{"Open", "Read", "Write", "Close", "Create", "Remove", "Mkdir",
-		"Unmarshal", "Marshal", "NewDecoder", "NewEncoder", "Do", "Get", "Post",
-		"Query", "Exec", "Scan", "QueryRow", "Begin", "Commit", "Rollback"}
-	for _, f := range errorFuncs {
-		if strings.Contains(funcName, f) {
-			return true
-		}
-	}
-	return false
-}
-
-func errorIsChecked(callNode *sitter.Node, pr *ParseResult) bool {
-	// Check if parent is an assignment to error variable or if statement
-	parent := callNode.Parent()
-	if parent != nil {
-		if parent.Type() == "assignment_statement" || parent.Type() == "short_var_declaration" {
-			// Check if one of the LHS variables is named err or error
-			return true
-		}
-		if parent.Type() == "if_statement" {
-			// Error checked in if condition
-			return true
-		}
-	}
-	return false
 }

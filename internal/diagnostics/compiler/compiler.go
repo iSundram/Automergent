@@ -50,18 +50,16 @@ const (
 )
 
 // CompilerDiagnostic extends Diagnostic with compiler-specific information.
+// Note: range/suggestion/tag fields come from the embedded types.Diagnostic —
+// redeclaring them here would shadow the embedded ones and silently drop the
+// values whenever a CompilerDiagnostic is converted to a plain Diagnostic.
 type CompilerDiagnostic struct {
 	types.Diagnostic
-	Category     ErrorCategory `json:"category"`
-	Compiler     string        `json:"compiler"`       // e.g., "go", "tsc", "rustc"
-	ErrorCode    string        `json:"error_code"`     // e.g., "E0382" for Rust
-	RelatedFiles []string      `json:"related_files"`  // Files related to this error
-	Context      []string      `json:"context"`        // Additional context lines
-	Suggestions  []string      `json:"suggestions"`    // Compiler-provided suggestions
-	URL          string        `json:"url,omitempty"`  // Documentation URL
-	EndLine      int           `json:"end_line,omitempty"`      // End line for range
-	EndColumn    int           `json:"end_column,omitempty"`    // End column for range
-	Tags         []string      `json:"tags,omitempty"`          // Additional tags
+	Category ErrorCategory `json:"category"`
+	Compiler string        `json:"compiler"` // e.g., "go", "tsc", "rustc"
+	ErrorCode string       `json:"error_code"` // e.g., "E0382" for Rust
+	Context  []string      `json:"context"`   // Additional context lines
+	URL      string        `json:"url,omitempty"` // Documentation URL
 }
 
 // Parser interface for language-specific parsers.
@@ -172,6 +170,7 @@ func (p *GoParser) Parse(output string) []CompilerDiagnostic {
 		diag.Compiler = "go"
 		diag.Source = "go-compiler"
 
+		matched := false
 		if matches := goPattern.FindStringSubmatch(line); matches != nil {
 			diag.FilePath = matches[1]
 			diag.Line, _ = strconv.Atoi(matches[2])
@@ -183,7 +182,7 @@ func (p *GoParser) Parse(output string) []CompilerDiagnostic {
 			diag.Suggestions = []string{"Fix the reported error and rebuild", "Run 'go vet' for additional checks"}
 			diag.EndLine = diag.Line
 			diag.EndColumn = diag.Column + 1
-			diags = append(diags, diag)
+			matched = true
 		} else if matches := vetPattern.FindStringSubmatch(line); matches != nil {
 			diag.FilePath = matches[1]
 			diag.Line, _ = strconv.Atoi(matches[2])
@@ -194,31 +193,31 @@ func (p *GoParser) Parse(output string) []CompilerDiagnostic {
 			diag.Suggestions = []string{"Address the vet warning", "Run 'go vet ./...' for full analysis"}
 			diag.EndLine = diag.Line
 			diag.EndColumn = diag.Column + 1
-			diags = append(diags, diag)
+			matched = true
+		}
+		if !matched {
+			continue
 		}
 
-		// Check for specific patterns
+		// Enrichment patterns only apply to the diagnostic produced by this
+		// line — attaching them to an earlier, unrelated diagnostic
+		// miscategorizes it.
 		if importPattern.MatchString(line) {
-			if len(diags) > 0 {
-				diags[len(diags)-1].Category = CategoryImport
-				diags[len(diags)-1].Tags = append(diags[len(diags)-1].Tags, "import")
-				diags[len(diags)-1].Suggestions = []string{"Run 'go mod tidy' to download missing dependencies", "Check import path spelling", "Verify module is available in registry"}
-			}
+			diag.Category = CategoryImport
+			diag.Tags = append(diag.Tags, "import")
+			diag.Suggestions = []string{"Run 'go mod tidy' to download missing dependencies", "Check import path spelling", "Verify module is available in registry"}
 		}
 		if undefinedPattern.MatchString(line) {
-			if len(diags) > 0 {
-				diags[len(diags)-1].Category = CategoryType
-				diags[len(diags)-1].Tags = append(diags[len(diags)-1].Tags, "undefined")
-				diags[len(diags)-1].Suggestions = []string{"Check variable/function name spelling", "Ensure identifier is declared in scope", "Check for missing imports"}
-			}
+			diag.Category = CategoryType
+			diag.Tags = append(diag.Tags, "undefined")
+			diag.Suggestions = []string{"Check variable/function name spelling", "Ensure identifier is declared in scope", "Check for missing imports"}
 		}
 		if typePattern.MatchString(line) {
-			if len(diags) > 0 {
-				diags[len(diags)-1].Category = CategoryType
-				diags[len(diags)-1].Tags = append(diags[len(diags)-1].Tags, "type-mismatch")
-				diags[len(diags)-1].Suggestions = []string{"Fix type conversion", "Check function signature matches", "Verify generic type parameters"}
-			}
+			diag.Category = CategoryType
+			diag.Tags = append(diag.Tags, "type-mismatch")
+			diag.Suggestions = []string{"Fix type conversion", "Check function signature matches", "Verify generic type parameters"}
 		}
+		diags = append(diags, diag)
 	}
 
 	return diags
@@ -641,6 +640,14 @@ type GenericParser struct{}
 // Language returns the language identifier.
 func (p *GenericParser) Language() Language { return LangGeneric }
 
+// Generic output patterns, tried in order per line.
+var (
+	fileLineCol     = regexp.MustCompile(`([^:\s]+):(\d+):(\d+):\s*(error|warning|info)?:?\s*(.+)`)
+	fileLine        = regexp.MustCompile(`([^:\s]+):(\d+):\s*(error|warning|info)?:?\s*(.+)`)
+	fileLineColParen = regexp.MustCompile(`([^(\s]+)\((\d+),(\d+)\):\s*(error|warning|info)?:?\s*(.+)`)
+	bracketed       = regexp.MustCompile(`\[(ERROR|WARNING|INFO)\]\s*([^:\s]+):(\d+)\s*[-:]\s*(.+)`)
+)
+
 // Parse parses generic compiler output.
 func (p *GenericParser) Parse(output string) []CompilerDiagnostic {
 	var diags []CompilerDiagnostic
@@ -651,16 +658,6 @@ func (p *GenericParser) Parse(output string) []CompilerDiagnostic {
 	// file(line,col): message
 	// [ERROR] file:line - message
 
-	patterns := []struct {
-		re       *regexp.Regexp
-		severity string
-	}{
-		{regexp.MustCompile(`([^:\s]+):(\d+):(\d+):\s*(error|warning|info)?:?\s*(.+)`), ""},
-		{regexp.MustCompile(`([^:\s]+):(\d+):\s*(error|warning|info)?:?\s*(.+)`), ""},
-		{regexp.MustCompile(`([^(\s]+)\((\d+),(\d+)\):\s*(error|warning|info)?:?\s*(.+)`), ""},
-		{regexp.MustCompile(`\[(ERROR|WARNING|INFO)\]\s*([^:\s]+):(\d+)\s*[-:]\s*(.+)`), ""},
-	}
-
 	lines := strings.Split(output, "\n")
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
@@ -668,53 +665,71 @@ func (p *GenericParser) Parse(output string) []CompilerDiagnostic {
 			continue
 		}
 
-		for _, p := range patterns {
-			matches := p.re.FindStringSubmatch(line)
-			if matches == nil {
-				continue
-			}
+		var diag CompilerDiagnostic
+		diag.Compiler = "generic"
+		diag.Source = "compiler"
+		diag.Category = CategoryUnknown
+		diag.Tags = []string{"generic"}
+		diag.Suggestions = []string{"Review the error message and fix the issue"}
 
-			var diag CompilerDiagnostic
-			diag.Compiler = "generic"
-			diag.Source = "compiler"
-			diag.Category = CategoryUnknown
-			diag.Tags = []string{"generic"}
-			diag.Suggestions = []string{"Review the error message and fix the issue"}
-
-			// Parse matches based on pattern
-			switch len(matches) {
-			case 6: // file:line:col: severity: message
-				diag.FilePath = matches[1]
-				diag.Line, _ = strconv.Atoi(matches[2])
-				diag.Column, _ = strconv.Atoi(matches[3])
-				if matches[4] != "" {
-					diag.Severity = strings.ToLower(matches[4])
-				} else {
-					diag.Severity = "error"
-				}
-				diag.Message = matches[5]
-				diag.EndLine = diag.Line
-				diag.EndColumn = diag.Column + 1
-			case 5: // file:line: severity: message
-				diag.FilePath = matches[1]
-				diag.Line, _ = strconv.Atoi(matches[2])
-				if matches[3] != "" {
-					diag.Severity = strings.ToLower(matches[3])
-				} else {
-					diag.Severity = "error"
-				}
-				diag.Message = matches[4]
-				diag.EndLine = diag.Line
-				diag.EndColumn = 1
-			}
-
-			diag.Category = categorizeGenericError(diag.Message)
-			diags = append(diags, diag)
-			break
+		matched := true
+		if matches := fileLineCol.FindStringSubmatch(line); matches != nil {
+			// file:line:col: [severity:] message
+			diag.FilePath = matches[1]
+			diag.Line, _ = strconv.Atoi(matches[2])
+			diag.Column, _ = strconv.Atoi(matches[3])
+			diag.Severity = normalizeSeverity(matches[4], "error")
+			diag.Message = matches[5]
+			diag.EndLine = diag.Line
+			diag.EndColumn = diag.Column + 1
+		} else if matches := fileLineColParen.FindStringSubmatch(line); matches != nil {
+			// file(line,col): [severity:] message
+			diag.FilePath = matches[1]
+			diag.Line, _ = strconv.Atoi(matches[2])
+			diag.Column, _ = strconv.Atoi(matches[3])
+			diag.Severity = normalizeSeverity(matches[4], "error")
+			diag.Message = matches[5]
+			diag.EndLine = diag.Line
+			diag.EndColumn = diag.Column + 1
+		} else if matches := fileLine.FindStringSubmatch(line); matches != nil {
+			// file:line: [severity:] message
+			diag.FilePath = matches[1]
+			diag.Line, _ = strconv.Atoi(matches[2])
+			diag.Severity = normalizeSeverity(matches[3], "error")
+			diag.Message = matches[4]
+			diag.EndLine = diag.Line
+			diag.EndColumn = 1
+		} else if matches := bracketed.FindStringSubmatch(line); matches != nil {
+			// [ERROR] file:line - message — the severity is the bracketed
+			// word, not a path component.
+			diag.FilePath = matches[2]
+			diag.Line, _ = strconv.Atoi(matches[3])
+			diag.Severity = strings.ToLower(matches[1])
+			diag.Message = matches[4]
+			diag.EndLine = diag.Line
+			diag.EndColumn = 1
+		} else {
+			matched = false
 		}
+
+		if !matched {
+			continue
+		}
+		diag.Category = categorizeGenericError(diag.Message)
+		diags = append(diags, diag)
 	}
 
 	return diags
+}
+
+// normalizeSeverity maps an optional severity word to a canonical lowercase
+// severity, falling back to def when absent or unrecognized.
+func normalizeSeverity(s, def string) string {
+	switch strings.ToLower(s) {
+	case "error", "warning", "info", "hint":
+		return strings.ToLower(s)
+	}
+	return def
 }
 
 func categorizeGenericError(msg string) ErrorCategory {

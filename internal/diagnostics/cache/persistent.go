@@ -21,6 +21,7 @@ type PersistentCache struct {
 	mu       sync.RWMutex
 	cacheDir string
 	enabled  bool
+	done     chan struct{}
 }
 
 // CacheEntry represents a cached diagnostic result.
@@ -62,6 +63,7 @@ func NewPersistentCache(cacheDir string, maxAge time.Duration) (*PersistentCache
 		db:       db,
 		cacheDir: cacheDir,
 		enabled:  true,
+		done:     make(chan struct{}),
 	}
 
 	if err := pc.initSchema(); err != nil {
@@ -146,15 +148,17 @@ func (pc *PersistentCache) Get(path, content string, maxAge time.Duration) ([]ty
 		return nil, false
 	}
 
-	// Update hit count asynchronously
-	go pc.incrementHitCount(key, hitCount+1)
+	// Update hit count asynchronously; the SQL-side increment avoids the
+	// read-modify-write race between concurrent Gets.
+	go pc.incrementHitCount(key)
 
 	return diags, true
 }
 
-// Put stores diagnostics in the cache.
+// Put stores diagnostics in the cache. Clean results (no diagnostics) are
+// cached too — they are just as expensive to compute and just as reusable.
 func (pc *PersistentCache) Put(path, content, language string, diags []types.Diagnostic, ttl time.Duration) error {
-	if !pc.enabled || len(diags) == 0 {
+	if !pc.enabled {
 		return nil
 	}
 
@@ -196,10 +200,10 @@ func (pc *PersistentCache) DeleteByPath(path string) error {
 }
 
 // incrementHitCount updates the hit count for a cache entry.
-func (pc *PersistentCache) incrementHitCount(key string, count int) {
+func (pc *PersistentCache) incrementHitCount(key string) {
 	pc.mu.Lock()
 	defer pc.mu.Unlock()
-	pc.db.Exec(`UPDATE cache_entries SET hit_count = ? WHERE key = ?`, count, key)
+	pc.db.Exec(`UPDATE cache_entries SET hit_count = hit_count + 1 WHERE key = ?`, key)
 }
 
 // cleanupLoop periodically removes expired entries.
@@ -207,16 +211,21 @@ func (pc *PersistentCache) cleanupLoop(maxAge time.Duration) {
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
-	for range ticker.C {
-		if !pc.enabled {
+	for {
+		select {
+		case <-pc.done:
 			return
-		}
-		pc.mu.Lock()
-		cutoff := time.Now().Add(-maxAge)
-		_, err := pc.db.Exec(`DELETE FROM cache_entries WHERE expires_at < ? OR created_at < ?`, time.Now(), cutoff)
-		pc.mu.Unlock()
-		if err != nil {
-			// Log error but continue
+		case <-ticker.C:
+			if !pc.enabled {
+				return
+			}
+			pc.mu.Lock()
+			cutoff := time.Now().Add(-maxAge)
+			_, err := pc.db.Exec(`DELETE FROM cache_entries WHERE expires_at < ? OR created_at < ?`, time.Now(), cutoff)
+			pc.mu.Unlock()
+			if err != nil {
+				// Log error but continue
+			}
 		}
 	}
 }
@@ -246,9 +255,15 @@ type CacheStats struct {
 	SizeBytes  int64 `json:"size_bytes"`
 }
 
-// Close closes the cache database.
+// Close closes the cache database and stops the cleanup goroutine.
 func (pc *PersistentCache) Close() error {
 	pc.enabled = false
+	select {
+	case <-pc.done:
+		// already closed
+	default:
+		close(pc.done)
+	}
 	return pc.db.Close()
 }
 

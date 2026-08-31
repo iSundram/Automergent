@@ -38,24 +38,30 @@ type RetryPolicy struct {
 }
 
 // Delay returns the delay for a retry attempt using exponential backoff and jitter.
+// The receiver is not modified; defaults are applied to local copies.
 func (p RetryPolicy) Delay(attempt int, rng *rand.Rand) time.Duration {
 	if attempt < 1 {
 		attempt = 1
 	}
-	if p.InitialDelay <= 0 {
-		p.InitialDelay = 250 * time.Millisecond
+	initialDelay := p.InitialDelay
+	if initialDelay <= 0 {
+		initialDelay = 250 * time.Millisecond
 	}
-	if p.MaxDelay <= 0 {
-		p.MaxDelay = 5 * time.Second
+	maxDelay := p.MaxDelay
+	if maxDelay <= 0 {
+		maxDelay = 5 * time.Second
 	}
-	if p.Multiplier <= 0 {
-		p.Multiplier = 2
+	multiplier := p.Multiplier
+	if multiplier <= 0 {
+		multiplier = 2
 	}
-	if p.MaxAttempts <= 0 {
-		p.MaxAttempts = 1
+	maxAttempts := p.MaxAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 1
 	}
+	_ = maxAttempts // attempts clamping is the caller's policy decision
 
-	delay := float64(p.InitialDelay) * math.Pow(p.Multiplier, float64(attempt-1))
+	delay := float64(initialDelay) * math.Pow(multiplier, float64(attempt-1))
 	if p.Jitter > 0 {
 		if rng == nil {
 			rng = rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -64,11 +70,11 @@ func (p RetryPolicy) Delay(attempt int, rng *rand.Rand) time.Duration {
 		delay += (rng.Float64()*2 - 1) * span
 	}
 
-	if delay < float64(p.InitialDelay) {
-		delay = float64(p.InitialDelay)
+	if delay < float64(initialDelay) {
+		delay = float64(initialDelay)
 	}
-	if delay > float64(p.MaxDelay) {
-		delay = float64(p.MaxDelay)
+	if delay > float64(maxDelay) {
+		delay = float64(maxDelay)
 	}
 	return time.Duration(delay)
 }
@@ -232,13 +238,17 @@ func ClassifyDiagnostic(diag types.Diagnostic) Classification {
 // ClassifyCompilerDiagnostic converts compiler diagnostics into recovery guidance.
 func ClassifyCompilerDiagnostic(diag compiler.CompilerDiagnostic) Classification {
 	return ClassifyDiagnostic(types.Diagnostic{
-		FilePath: diag.FilePath,
-		Line:     diag.Line,
-		Column:   diag.Column,
-		Severity: diag.Severity,
-		Code:     diag.ErrorCode,
-		Message:  diag.Message,
-		Source:   diag.Source,
+		FilePath:    diag.FilePath,
+		Line:        diag.Line,
+		Column:      diag.Column,
+		EndLine:     diag.EndLine,
+		EndColumn:   diag.EndColumn,
+		Severity:    diag.Severity,
+		Code:        diag.ErrorCode,
+		Message:     diag.Message,
+		Source:      diag.Source,
+		Tags:        diag.Tags,
+		Suggestions: diag.Suggestions,
 	})
 }
 
