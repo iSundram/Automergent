@@ -179,8 +179,32 @@ func TestToTaskSpecsCarriesRouting(t *testing.T) {
 	if specs[0].Agent != "explore" || specs[0].ID != "p1" {
 		t.Fatalf("first spec misrouted: %+v", specs[0])
 	}
+	// PHASE is the field executeDecomposition routes on. It used to be
+	// dropped entirely, sending every task to build — explore never ran.
+	if specs[0].Phase != shared.PhaseExplore {
+		t.Fatalf("explore task phase = %q, want explore", specs[0].Phase)
+	}
+	if specs[1].Phase != shared.PhasePlan {
+		t.Fatalf("plan task phase = %q, want plan", specs[1].Phase)
+	}
 	if len(specs[1].Dependencies) != 1 || specs[1].Dependencies[0] != "p1" {
 		t.Fatalf("dependency lost: %+v", specs[1])
+	}
+}
+
+func TestToTaskSpecsPhaseFallsBackToTaskType(t *testing.T) {
+	// The LLM may omit "phase" and set only "task_type"; the spec must
+	// still route to the right arc phase instead of defaulting to build.
+	got := runDecomposer(t, decomposerFixture{
+		message: "find the auth flow",
+		parts:   `[{"id":"p1","text":"find the auth flow","kind":"task","task_type":"explore","agent":"explore","priority":1}]`,
+	})
+	specs := got.ToTaskSpecs()
+	if len(specs) != 1 {
+		t.Fatalf("expected 1 spec, got %d", len(specs))
+	}
+	if specs[0].Phase != shared.PhaseExplore {
+		t.Fatalf("task without explicit phase routed to %q, want explore", specs[0].Phase)
 	}
 }
 

@@ -23,9 +23,11 @@ type fileWriteSnapshot struct {
 
 // fileWriteTools lists the tools whose effect on a file is worth a diff tab.
 var fileWriteTools = map[string]bool{
-	"write_file": true,
-	"edit_file":  true,
-	"multi_edit": true,
+	"write_file":    true,
+	"edit_file":     true,
+	"multi_edit":    true,
+	"artifact":      true,
+	"notebook_edit": true,
 }
 
 // snapshotFileWrite records the on-disk content of the file a write tool is
@@ -41,6 +43,14 @@ func (a *App) snapshotFileWrite(toolID, toolName string, args map[string]any) {
 	}
 	data, _ := os.ReadFile(path) // absent file = new file = empty "before"
 	a.fileWriteSnapshots[toolID] = fileWriteSnapshot{path: path, before: string(data)}
+	// Also record a durable checkpoint so /rewind can restore file content,
+	// not just the conversation. Identical content is deduplicated by the
+	// store, so repeated snapshots of an unchanged file cost nothing.
+	if a.storage != nil && a.sess != nil {
+		if fh := a.storage.FileHistory(); fh != nil {
+			_, _ = fh.Capture(a.sess.ID, path, string(data))
+		}
+	}
 }
 
 // openDiffTabForCompletedWrite diffs the post-write file against its snapshot

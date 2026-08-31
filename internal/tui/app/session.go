@@ -40,14 +40,15 @@ func (a *App) runAgentTurn(displayPrompt, agentPrompt, command string) tea.Cmd {
 	}
 	a.thinking = true
 	a.streamedReply = false
-	a.runTokens = 0
+	a.runChars = 0
 	a.runStart = time.Now()
-	a.tokRate = 0
+	a.spin.SetMeta("")
+	a.lastRunSummary = ""
 	a.activeTool = ""
 	a.runToolCount = 0
 	a.lastOutcome = outcomeNone
 	a.clearRetryState()
-	a.spin.SetLabel("thinking")
+	a.setSpinVerb("")
 	a.spin.Start()
 	if command != "" {
 		a.conversation.AddUserCommandMessage(command, displayPrompt)
@@ -210,6 +211,10 @@ func (a *App) restoreSession(s *session.Session) error {
 	if a.thinking {
 		return fmt.Errorf("agent is running — /cancel it before switching sessions")
 	}
+	// Session-scoped state from the previous conversation must not leak:
+	// error history belongs to the session that produced it.
+	a.apiErrors = nil
+	a.clearRetryState()
 	a.sess = s
 	if a.sess.WorkDir == "" {
 		a.sess.WorkDir = a.workDir
@@ -218,6 +223,14 @@ func (a *App) restoreSession(s *session.Session) error {
 	if a.persist != nil {
 		a.persist.SetSession(s)
 	}
+	// Checkpoints must be derived from THIS session's history: the in-memory
+	// list still holds the previously active conversation's rewind points,
+	// and rewinding to one would splice foreign messages into this session.
+	a.checkpoints = rebuildCheckpoints(s.Messages)
+	// Same discipline for artifacts: reload this session's registry so the
+	// previous session's artifacts never leak across.
+	a.cancelPlanReview()
+	a.loadArtifactsForSession()
 	a.conversation.Clear()
 	for _, sm := range s.Messages {
 		a.replayMessage(sm)
@@ -293,40 +306,6 @@ func (a *App) replayMessage(sm ai.Message) {
 	}
 }
 
-func (a *App) rewindConversation(args []string) {
-	if a.thinking {
-		a.conversation.AddMessage("system", "Cannot rewind while the agent is running.", true)
-		return
-	}
-	userTurnIdx := []int{}
-	for i, msg := range a.sess.Messages {
-		if msg.Role == ai.RoleUser {
-			userTurnIdx = append(userTurnIdx, i)
-		}
-	}
-	if len(userTurnIdx) < 2 {
-		a.conversation.AddMessage("system", "Nothing to rewind — fewer than two user turns.", false)
-		return
-	}
-	target := len(userTurnIdx) - 2 // default: drop the last exchange
-	if len(args) > 0 {
-		var n int
-		if _, err := fmt.Sscanf(args[0], "%d", &n); err == nil && n >= 1 && n <= len(userTurnIdx) {
-			target = n - 1
-		}
-	}
-	cut := userTurnIdx[target]
-	a.sess.SetMessages(append([]ai.Message{}, a.sess.Messages[:cut]...))
-	if a.storage != nil {
-		if err := a.storage.Save(a.sess); err != nil {
-			a.conversation.AddMessage("system", "rewind: persist failed: "+err.Error(), true)
-		}
-	}
-	a.replayAll()
-	a.statusBar.SetStatus(fmt.Sprintf("Rewound to turn %d", target+1))
-	a.layout()
-}
-
 // replayAll rebuilds the conversation pane from the session messages.
 func (a *App) replayAll() {
 	a.conversation.Clear()
@@ -340,7 +319,7 @@ func (a *App) cancelActiveRun(status string) {
 	a.ctx, a.cancel = context.WithCancel(context.Background())
 	a.thinking = false
 	a.spin.Stop()
-	a.spin.SetLabel("thinking")
+	a.setSpinVerb("")
 	a.streamTickPending = false
 	a.activeTool = ""
 	a.clearRetryState()

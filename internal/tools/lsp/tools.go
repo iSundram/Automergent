@@ -42,11 +42,29 @@ func (t *DiagnosticsTool) Execute(ctx context.Context, args map[string]any) (too
 	switch ext {
 	case ".go":
 		return goBuildDiagnostics(ctx, file), nil
+	case ".py":
+		return lintDiagnostics(ctx, file), nil
 	default:
 		return tools.Result{
-			Content: fmt.Sprintf("lsp_diagnostics: no language backend configured for %s", ext),
+			Content: fmt.Sprintf("lsp_diagnostics: no language backend configured for %s (supported: .go, .py)", ext),
 		}, nil
 	}
+}
+
+// lintDiagnostics runs external linters (ruff for Python) on the file and
+// renders their findings. The linters read the file from disk themselves;
+// content is only used for language detection via the path.
+func lintDiagnostics(ctx context.Context, file string) tools.Result {
+	diags := diagnostics.Lint(ctx, file, "")
+	if len(diags) == 0 {
+		return tools.Result{Content: "no lint findings"}
+	}
+	var b strings.Builder
+	for _, d := range diags {
+		b.WriteString(fmt.Sprintf("%s:%d:%d: %s: %s [%s]\n",
+			file, d.Line, d.Column, d.Severity, d.Message, d.Code))
+	}
+	return tools.Result{Content: strings.TrimRight(b.String(), "\n")}
 }
 
 func goBuildDiagnostics(ctx context.Context, file string) tools.Result {

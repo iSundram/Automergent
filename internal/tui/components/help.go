@@ -1,6 +1,7 @@
 package components
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/iSundram/Automergent/internal/tui/themes"
@@ -130,5 +131,25 @@ func (h HelpOverlay) View() string {
 	if w <= 0 {
 		w = 76
 	}
+
+	// Clamp to the available height. The HelpBox adds 2 border rows plus 2
+	// padding rows (Padding(1, 2)); an overlay taller than the terminal
+	// makes the whole altscreen scroll every frame, which ghosts content
+	// across frames (the panel appears stacked and progressively truncated).
+	if h.height > 0 {
+		const chrome = 4 // border (2) + vertical padding (2)
+		maxLines := h.height - chrome
+		if lines := strings.Split(content, "\n"); len(lines) > maxLines {
+			if maxLines < 1 {
+				maxLines = 1
+			}
+			hidden := len(lines) - maxLines
+			lines = lines[:maxLines]
+			note := fmt.Sprintf("  … %d more rows — widen the terminal to see everything", hidden)
+			lines = append(lines, h.styles.Dim.Render(note))
+			content = strings.Join(lines, "\n")
+		}
+	}
+
 	return h.styles.HelpBox.Width(w).Render(content)
 }

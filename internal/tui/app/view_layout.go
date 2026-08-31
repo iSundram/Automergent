@@ -38,6 +38,11 @@ func (a *App) layout() {
 	if a.thinking {
 		footerH++
 	}
+	// The settled run summary ("✓ Done (…)") occupies the spinner's row
+	// after the run ends, so it costs the same row.
+	if !a.thinking && a.lastRunSummary != "" {
+		footerH++
+	}
 	// The dock rail is the one always-on row of background-work state; it costs
 	// exactly one row whenever there is anything to report and never more.
 	if a.dockRailView() != "" {
@@ -56,8 +61,9 @@ func (a *App) layout() {
 	if a.sessionBrowser.Visible() && !a.confirm.Visible() && !a.browsing {
 		footerH += a.sessionBrowser.Height()
 	}
-	// Artifact review browser renders inline below the input.
-	if a.artifactBrowser.Visible() && !a.confirm.Visible() && !a.browsing {
+	// Artifact review browser renders inline below the input (not while an
+	// artifact preview owns the whole screen).
+	if a.artifactBrowser.Visible() && !a.artifactBrowser.Previewing() && !a.confirm.Visible() && !a.browsing {
 		footerH += a.artifactBrowser.Height()
 	}
 	// Bottom dock (background shells/agents) renders under the input.
@@ -105,7 +111,13 @@ func (a *App) layout() {
 	}
 	a.conversation.SetSize(mainW, mainH)
 	a.sessionBrowser.SetSize(a.width, a.height*3/4)
-	a.artifactBrowser.SetSize(a.width, a.height*3/4)
+	// Full height while previewing (it renders as a full-page overlay);
+	// three quarters inline otherwise.
+	if a.artifactBrowser.Previewing() {
+		a.artifactBrowser.SetSize(a.width, a.height)
+	} else {
+		a.artifactBrowser.SetSize(a.width, a.height*3/4)
+	}
 }
 
 // infoLineVisible reports whether the `└─` hint line should be rendered. It is
@@ -120,7 +132,6 @@ func (a *App) infoLineVisible() bool {
 	}
 	return a.infoLine.View() != ""
 }
-
 
 func (a *App) View() tea.View {
 	// Helper to ensure all views have consistent settings
@@ -181,6 +192,11 @@ func (a *App) View() tea.View {
 	var footer []string
 	if a.thinking {
 		footer = append(footer, "  "+a.spin.View())
+	} else if a.lastRunSummary != "" {
+		// The settled run line: the spinner slot keeps the completed run's
+		// readout ("✓ Done (2s • ↓ 20 tokens)") until the next run starts,
+		// where the live "(2s • ↓ 20 tokens)" clock was ticking.
+		footer = append(footer, "  "+a.styles.Dim.Render(a.lastRunSummary))
 	}
 	// The `└─` info line sits between the spinner it explains and the prompt it
 	// advises, so it reads as a continuation of the run status rather than as
@@ -216,8 +232,9 @@ func (a *App) View() tea.View {
 	if a.sessionBrowser.Visible() && !a.confirm.Visible() && !a.browsing {
 		footer = append(footer, a.sessionBrowser.View())
 	}
-	// Artifact review browser renders inline as well.
-	if a.artifactBrowser.Visible() && !a.confirm.Visible() && !a.browsing {
+	// Artifact review browser renders inline as well — except while it is
+	// previewing an artifact, which takes the whole screen.
+	if a.artifactBrowser.Visible() && !a.artifactBrowser.Previewing() && !a.confirm.Visible() && !a.browsing {
 		footer = append(footer, a.artifactBrowser.View())
 	}
 	sections = append(sections, lipgloss.JoinVertical(lipgloss.Left, footer...))
@@ -250,6 +267,11 @@ func (a *App) View() tea.View {
 	// Model Hub overlay.
 	if a.modelHub.Visible() {
 		fullView = a.modelHub.View()
+	}
+	// An artifact preview is a full-page surface: the file takes the whole
+	// screen with its review actions in the footer.
+	if a.artifactBrowser.Visible() && a.artifactBrowser.Previewing() {
+		fullView = a.artifactBrowser.View()
 	}
 	// Diff is now fullscreen overlay - render on top of everything
 	if a.diffPane.Visible() {

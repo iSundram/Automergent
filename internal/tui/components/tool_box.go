@@ -46,9 +46,17 @@ func tailLines(text string, n int) (shown []string, hidden int) {
 }
 
 // tailLimit derives how many tail lines to show from the viewport height.
+// The three expand modes map directly: Full/review shows everything,
+// Compact shows the single-line summary tail, Auto uses the classic
+// height-scaled default.
 func (c *Conversation) tailLimit() int {
 	if c.expandMode == ExpandFull || c.reviewMode {
 		return maxTailLines
+	}
+	if c.expandMode == ExpandCompact {
+		// Collapsed: command row plus a one-line outcome tail. The
+		// hintRow below reports how much is hidden and names /expand.
+		return 1
 	}
 	return clampInt(c.height/5, defaultTailLines-3, maxTailLines)
 }
@@ -173,7 +181,7 @@ func (c *Conversation) diffBox(diffText string, width int) string {
 	}
 
 	if hidden > 0 {
-		hint := fmt.Sprintf("%s first %d hidden · ctrl+e expands", glyphUp, hidden)
+		hint := fmt.Sprintf("%s first %d hidden · %s", glyphUp, hidden, c.expandHintVerb())
 		b.WriteString("\n" + rowIndent + c.styles.Dim.Render(hint))
 	}
 	return b.String()

@@ -2,7 +2,6 @@ package components
 
 import (
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -18,12 +17,11 @@ type Header struct {
 	provider       string
 	mode           string
 	phase          string // "init", "explore", "plan", "build"
-	activeTokens   int    // tokens in current prompt (active context)
-	totalTokens    int    // cumulative session tokens
+	activeTokens   int    // tokens in the current conversation (context usage)
 	maxTokens      int
 	adaptiveWeight float64 // learned token estimation weight (1.0 = perfect)
 	cost           float64 // session cost in USD
-	workDir        string  // current working directory
+	effort         string  // thinking effort: low|medium|high|max
 }
 
 // NewHeader creates a new Header component.
@@ -39,12 +37,12 @@ func (h *Header) SetModel(m string)           { h.model = m }
 func (h *Header) SetProvider(p string)        { h.provider = p }
 func (h *Header) SetMode(m string)            { h.mode = m }
 func (h *Header) SetPhase(p string)           { h.phase = p }
-func (h *Header) SetTokens(n int)             { h.totalTokens = n }
+func (h *Header) SetTokens(n int)             { h.activeTokens = n }
 func (h *Header) SetActiveTokens(n int)       { h.activeTokens = n }
 func (h *Header) SetMaxTokens(n int)          { h.maxTokens = n }
 func (h *Header) SetAdaptiveWeight(w float64) { h.adaptiveWeight = w }
 func (h *Header) SetCost(usd float64)         { h.cost = usd }
-func (h *Header) SetWorkDir(dir string)       { h.workDir = dir }
+func (h *Header) SetEffort(e string)          { h.effort = e }
 
 func (h *Header) getPhaseStyle() lipgloss.Style {
 	base := lipgloss.NewStyle().Bold(true).Padding(0, 1).Foreground(h.styles.T.Background)
@@ -76,12 +74,10 @@ func (h *Header) renderProgressBar(width int) string {
 	if h.maxTokens <= 0 || width <= 0 {
 		return ""
 	}
-	// Progress bar shows active context usage
-	tokens := h.activeTokens
-	if tokens == 0 {
-		tokens = h.totalTokens
-	}
-	ratio := float64(tokens) / float64(h.maxTokens)
+	// The bar shows CONTEXT usage: the current conversation's tokens
+	// against the model's window. Cumulative session totals are a different
+	// number and made the bar lie.
+	ratio := float64(h.activeTokens) / float64(h.maxTokens)
 	if ratio > 1.0 {
 		ratio = 1.0
 	}
@@ -148,25 +144,23 @@ func (h Header) View() string {
 		lipgloss.NewStyle().Foreground(h.styles.T.Text).Render(modelStr),
 	)
 
-	// 3. Right Section: Cost, Tokens, Adaptive Weight & Bar
-	tokenStr := fmt.Sprintf("%s/%s", formatTokens(h.activeTokens), formatTokens(h.totalTokens))
-	usageInfo := lipgloss.NewStyle().Foreground(h.styles.T.Subtext).Render(tokenStr)
-	// Always show cost — even $0.00 — so the user has immediate context.
+	// 3. Right Section: Cost, Effort & Bar
+	// Context usage is the bar alone — the live token count moved to the
+	// conversation spinner's parenthetical ("(12s • ↓ 1.2k)"), so the header
+	// no longer prints the raw numbers. Cost is always shown — even $0.00 —
+	// so the user has immediate context.
 	costStyle := lipgloss.NewStyle().Foreground(h.styles.T.Green)
-	usageInfo = costStyle.Render(fmt.Sprintf("$%.2f", h.cost)) + " │ " + usageInfo
+	usageInfo := costStyle.Render(fmt.Sprintf("$%.2f", h.cost))
+	// Effort chip: the thinking level the model is running at.
+	if e := strings.ToLower(strings.TrimSpace(h.effort)); e != "" && e != "medium" && h.width > 90 {
+		usageInfo += " " + lipgloss.NewStyle().Foreground(h.styles.T.Muted).Render("effort:"+e)
+	}
 	if h.adaptiveWeight > 0 {
 		weightStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)
 		if h.adaptiveWeight < 0.8 || h.adaptiveWeight > 1.2 {
 			weightStyle = lipgloss.NewStyle().Foreground(h.styles.T.Yellow)
 		}
 		usageInfo += " " + weightStyle.Render(fmt.Sprintf("w:%.2f", h.adaptiveWeight))
-	}
-
-	// Working directory — shown when there's enough horizontal space.
-	if h.width >= 100 && h.workDir != "" {
-		dirName := filepath.Base(h.workDir)
-		dirStyle := lipgloss.NewStyle().Foreground(h.styles.T.Muted)
-		usageInfo += "  " + dirStyle.Render("⌂ "+dirName)
 	}
 
 	barWidth := 0

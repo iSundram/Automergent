@@ -694,6 +694,20 @@ func containsAny(s string, substrings []string) bool {
 	return false
 }
 
+// SetLLMClient swaps the LLM client used by every internal call (intent
+// identification, task planning). Called when the user switches model or
+// provider: the staged pipelines cache adapters, and without this swap they
+// keep calling the retired provider after /model or /provider.
+func (pm *PromptManager) SetLLMClient(llmClient LLMClient) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	if llmClient == nil {
+		return
+	}
+	pm.intentIdentifier = NewLLMIntentIdentifier(pm.config, llmClient)
+	pm.taskPlanner = NewLLMTaskPlanner(pm.config, llmClient)
+}
+
 // GetPromptHistory returns the history of prompt parts.
 func (pm *PromptManager) GetPromptHistory() []PromptPart {
 	pm.mu.RLock()

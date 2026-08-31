@@ -86,7 +86,9 @@ func TestFinalizeStreamingPreservesProviderFinalText(t *testing.T) {
 func TestConversationEmptyStateDisappearsAfterMessage(t *testing.T) {
 	conversation := NewConversation(testStyles())
 	conversation.SetSize(80, 12)
-	conversation.SetEmptyState("Welcome to Automergent")
+	conversation.SetEmptyState(func(_ *themes.Styles, _, _ int) string {
+		return "Welcome to Automergent"
+	})
 	if !strings.Contains(conversation.View(), "Welcome to Automergent") {
 		t.Fatal("expected empty-state welcome")
 	}

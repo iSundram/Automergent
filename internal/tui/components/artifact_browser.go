@@ -31,12 +31,21 @@ type ArtifactRow struct {
 	UpdatedAt time.Time
 	SizeBytes int64
 	Lines     int
+	// Comments is the number of user comments collected on this artifact.
+	Comments int
 }
 
+// NeedsDecision reports whether the row is a reviewable deliverable. Only
+// plans carry approve/reject semantics; other artifacts are informational.
+func (r ArtifactRow) NeedsDecision() bool { return r.Kind == "plan" }
+
 // ArtifactDecisionMsg reports an approve/reject choice for one artifact.
+// Reason carries the mandatory rejection feedback.
 type ArtifactDecisionMsg struct {
 	Path     string
 	Approved bool
+	// Reason is the user's rejection feedback (required for rejects).
+	Reason string
 }
 
 // ArtifactApproveAllMsg approves every pending artifact at once.
@@ -45,6 +54,12 @@ type ArtifactApproveAllMsg struct{}
 // ArtifactOpenMsg asks the app to open the artifact in the user's editor.
 type ArtifactOpenMsg struct {
 	Path string
+}
+
+// ArtifactCommentMsg delivers a user comment on one artifact.
+type ArtifactCommentMsg struct {
+	Path string
+	Text string
 }
 
 // ArtifactBrowser is the /artifact review surface, in the same line-based
@@ -73,10 +88,25 @@ type ArtifactBrowser struct {
 	searching bool
 	query     string
 
+	// entering is the active text-entry mode (reject reason / comment);
+	// enteringPath is the artifact it targets and draft the text so far.
+	entering     enterMode
+	enteringPath string
+	draft        string
+
 	// previewSource holds file contents keyed by path; the app reads the
 	// files and pushes content in, keeping the component free of I/O.
 	previewSource map[string][]string
 }
+
+// enterMode selects the browser's inline text-entry mode.
+type enterMode int
+
+const (
+	enterNone enterMode = iota
+	enterReason
+	enterComment
+)
 
 // NewArtifactBrowser creates a new ArtifactBrowser.
 func NewArtifactBrowser(styles *themes.Styles) ArtifactBrowser {
@@ -121,6 +151,9 @@ func (ab *ArtifactBrowser) Hide() {
 	ab.previewing = false
 	ab.searching = false
 	ab.query = ""
+	ab.entering = enterNone
+	ab.enteringPath = ""
+	ab.draft = ""
 }
 
 // Visible reports visibility.
@@ -129,11 +162,11 @@ func (ab ArtifactBrowser) Visible() bool { return ab.visible }
 // ItemCount reports the number of artifact rows.
 func (ab ArtifactBrowser) ItemCount() int { return len(ab.rows) }
 
-// PendingCount reports how many artifacts still need a decision.
+// PendingCount reports how many plan artifacts still need a decision.
 func (ab ArtifactBrowser) PendingCount() int {
 	n := 0
 	for _, r := range ab.rows {
-		if r.Status == ArtifactPending {
+		if r.NeedsDecision() && r.Status == ArtifactPending {
 			n++
 		}
 	}
@@ -185,7 +218,9 @@ func (ab ArtifactBrowser) Update(msg tea.Msg) (ArtifactBrowser, tea.Cmd) {
 	if m, ok := msg.(tea.KeyMsg); ok {
 		key := m.String()
 
-		// Search-typing inside preview mode.
+		// Text-entry modes (search, reject reason, comment) share one
+		// editing grammar: printable text appends, backspace deletes,
+		// enter commits, esc cancels.
 		if ab.searching {
 			switch key {
 			case "esc":
@@ -205,6 +240,64 @@ func (ab ArtifactBrowser) Update(msg tea.Msg) (ArtifactBrowser, tea.Cmd) {
 			}
 			if text := keyText(m); text != "" {
 				ab.query += text
+				return ab, nil
+			}
+			return ab, nil
+		}
+		if ab.entering == enterReason {
+			switch key {
+			case "esc":
+				ab.entering = enterNone
+				ab.draft = ""
+				return ab, nil
+			case "enter":
+				reason := strings.TrimSpace(ab.draft)
+				path := ab.enteringPath
+				ab.entering = enterNone
+				ab.draft = ""
+				if reason == "" {
+					return ab, nil // a reject without a reason is a no-op
+				}
+				return ab, func() tea.Msg {
+					return ArtifactDecisionMsg{Path: path, Approved: false, Reason: reason}
+				}
+			case "backspace":
+				if ab.draft != "" {
+					r := []rune(ab.draft)
+					ab.draft = string(r[:len(r)-1])
+				}
+				return ab, nil
+			}
+			if text := keyText(m); text != "" {
+				ab.draft += text
+				return ab, nil
+			}
+			return ab, nil
+		}
+		if ab.entering == enterComment {
+			switch key {
+			case "esc":
+				ab.entering = enterNone
+				ab.draft = ""
+				return ab, nil
+			case "enter":
+				comment := strings.TrimSpace(ab.draft)
+				path := ab.enteringPath
+				ab.entering = enterNone
+				ab.draft = ""
+				if comment == "" {
+					return ab, nil
+				}
+				return ab, func() tea.Msg { return ArtifactCommentMsg{Path: path, Text: comment} }
+			case "backspace":
+				if ab.draft != "" {
+					r := []rune(ab.draft)
+					ab.draft = string(r[:len(r)-1])
+				}
+				return ab, nil
+			}
+			if text := keyText(m); text != "" {
+				ab.draft += text
 				return ab, nil
 			}
 			return ab, nil
@@ -235,11 +328,23 @@ func (ab ArtifactBrowser) Update(msg tea.Msg) (ArtifactBrowser, tea.Cmd) {
 				ab.query = ""
 				return ab, nil
 			case "y":
-				return ab.decideOn(ab.previewPath, true)
+				if row, ok := ab.rowByPath(ab.previewPath); ok && row.NeedsDecision() {
+					return ab.decideOn(ab.previewPath, true)
+				}
 			case "n":
-				return ab.decideOn(ab.previewPath, false)
+				if row, ok := ab.rowByPath(ab.previewPath); ok && row.NeedsDecision() {
+					ab.entering = enterReason
+					ab.enteringPath = ab.previewPath
+					ab.draft = ""
+					return ab, nil
+				}
 			case "A", "shift+a":
 				return ab, func() tea.Msg { return ArtifactApproveAllMsg{} }
+			case "c":
+				ab.entering = enterComment
+				ab.enteringPath = ab.previewPath
+				ab.draft = ""
+				return ab, nil
 			case "ctrl+g":
 				path := ab.previewPath
 				return ab, func() tea.Msg { return ArtifactOpenMsg{Path: path} }
@@ -264,9 +369,16 @@ func (ab ArtifactBrowser) Update(msg tea.Msg) (ArtifactBrowser, tea.Cmd) {
 		case "pgdown":
 			ab.cursor = min(len(ab.rows)-1, ab.cursor+ab.MaxVisibleItems())
 		case "y":
-			return ab.decide(true)
+			if row, ok := ab.selected(); ok && row.NeedsDecision() {
+				return ab.decide(true)
+			}
 		case "n":
-			return ab.decide(false)
+			if row, ok := ab.selected(); ok && row.NeedsDecision() {
+				ab.entering = enterReason
+				ab.enteringPath = row.Path
+				ab.draft = ""
+				return ab, nil
+			}
 		case "A", "shift+a":
 			return ab, func() tea.Msg { return ArtifactApproveAllMsg{} }
 		case "p", "enter":
@@ -281,6 +393,13 @@ func (ab ArtifactBrowser) Update(msg tea.Msg) (ArtifactBrowser, tea.Cmd) {
 				}
 				ab.clampPreviewScroll()
 			}
+		case "c":
+			if row, ok := ab.selected(); ok {
+				ab.entering = enterComment
+				ab.enteringPath = row.Path
+				ab.draft = ""
+				return ab, nil
+			}
 		case "ctrl+g":
 			if row, ok := ab.selected(); ok {
 				path := row.Path
@@ -290,6 +409,16 @@ func (ab ArtifactBrowser) Update(msg tea.Msg) (ArtifactBrowser, tea.Cmd) {
 		ab.updateScroll()
 	}
 	return ab, nil
+}
+
+// rowByPath finds the row for a path (preview-mode decisions).
+func (ab ArtifactBrowser) rowByPath(path string) (ArtifactRow, bool) {
+	for _, r := range ab.rows {
+		if r.Path == path {
+			return r, true
+		}
+	}
+	return ArtifactRow{}, false
 }
 
 // decide emits an approve/reject decision for the selected row and advances
@@ -362,12 +491,15 @@ func (ab ArtifactBrowser) View() string {
 
 	pending := ab.PendingCount()
 	var statusLine string
-	if len(ab.rows) == 0 {
+	switch {
+	case len(ab.rows) == 0:
 		statusLine = " No artifacts yet — ask the agent for a plan or document"
-	} else if pending > 0 {
+	case pending > 0:
 		statusLine = fmt.Sprintf(" Action required (%d left)", pending)
-	} else {
-		statusLine = " All artifacts reviewed"
+	case ab.hasPlans():
+		statusLine = " All plans reviewed"
+	default:
+		statusLine = " This session's artifacts"
 	}
 	count := fmt.Sprintf("%d/%d  ", min(ab.cursor+1, len(ab.rows)), len(ab.rows))
 	top := joinEnds(
@@ -375,6 +507,15 @@ func (ab ArtifactBrowser) View() string {
 		lipgloss.NewStyle().Foreground(ab.styles.T.Muted).Render(count), w)
 
 	lines := []string{header, top, ""}
+	// Inline text entry (reject reason / comment) renders as an input line.
+	if ab.entering != enterNone {
+		label := " comment:"
+		if ab.entering == enterReason {
+			label = " reason:"
+		}
+		lines = append(lines, lipgloss.NewStyle().Foreground(ab.styles.T.Accent).Render(label)+" "+
+			lipgloss.NewStyle().Foreground(ab.styles.T.Text).Render(ab.draft+"▏"), "")
+	}
 	maxItems := ab.MaxVisibleItems()
 	end := min(ab.scrollOffset+maxItems, len(ab.rows))
 	for i := ab.scrollOffset; i < end; i++ {
@@ -394,12 +535,17 @@ func (ab ArtifactBrowser) View() string {
 
 func (ab ArtifactBrowser) renderRow(i int, selected bool, width int) string {
 	row := ab.rows[i]
-	glyph, color := "□", ab.styles.T.Muted
-	switch row.Status {
-	case ArtifactApproved:
-		glyph, color = "✓", ab.styles.T.Green
-	case ArtifactRejected:
-		glyph, color = "✗", ab.styles.T.Red
+	// Only plans carry approve/reject semantics; other artifacts are
+	// informational and render without a decision glyph.
+	glyph, color := " ", ab.styles.T.Muted
+	if row.NeedsDecision() {
+		glyph = "□"
+		switch row.Status {
+		case ArtifactApproved:
+			glyph, color = "✓", ab.styles.T.Green
+		case ArtifactRejected:
+			glyph, color = "✗", ab.styles.T.Red
+		}
 	}
 	status := lipgloss.NewStyle().Foreground(color).Render(glyph)
 
@@ -413,6 +559,9 @@ func (ab ArtifactBrowser) renderRow(i int, selected bool, width int) string {
 	}
 	left := "  " + indicator + status + " " + nameStyle.Render(row.Name)
 	meta := []string{row.Kind}
+	if row.Comments > 0 {
+		meta = append(meta, fmt.Sprintf("%d comment%s", row.Comments, pluralS(row.Comments)))
+	}
 	if !row.UpdatedAt.IsZero() {
 		meta = append(meta, formatRelativeTime(row.UpdatedAt))
 	}
@@ -480,16 +629,26 @@ func (ab ArtifactBrowser) previewName() string {
 
 func (ab ArtifactBrowser) footerLines(w int) []string {
 	var l1, l2 string
-	if ab.previewing {
+	switch {
+	case ab.entering == enterReason:
+		l1 = "type the reason for rejection · enter confirm · esc cancel"
+		l2 = "the reason is shown to the agent as feedback"
+	case ab.entering == enterComment:
+		l1 = "type your comment · enter save · esc cancel"
+		l2 = "comments are stored on the artifact for the agent to read"
+	case ab.previewing:
 		if ab.searching {
 			l1 = "type to search · enter jump to match · esc cancel"
 		} else {
 			l1 = "↑↓ scroll · pgup/pgdn page · g top · shift+g bottom · / search"
 		}
-		l2 = "y approve · n reject · ctrl+g editor · esc back to list"
-	} else {
-		l1 = "↑↓ navigate · y approve · n reject · shift+a approve all"
-		l2 = "p preview · ctrl+g editor · esc done"
+		l2 = "c comment · ctrl+g editor · esc back to list"
+		if row, ok := ab.rowByPath(ab.previewPath); ok && row.NeedsDecision() {
+			l2 = "y approve · n reject · c comment · ctrl+g editor · esc back"
+		}
+	default:
+		l1 = "↑↓ navigate · p preview · c comment · ctrl+g editor · esc done"
+		l2 = "y approve · n reject · shift+a approve all (plans only)"
 	}
 	style := lipgloss.NewStyle().Foreground(ab.styles.T.Muted).PaddingLeft(2).MaxWidth(max(1, w-2))
 	return []string{style.Render(l1), style.Render(l2)}
@@ -517,4 +676,22 @@ func (ab ArtifactBrowser) Height() int {
 		visible = 1
 	}
 	return visible*2 + 8
+}
+
+// hasPlans reports whether any row is a plan (reviewable deliverable).
+func (ab ArtifactBrowser) hasPlans() bool {
+	for _, r := range ab.rows {
+		if r.NeedsDecision() {
+			return true
+		}
+	}
+	return false
+}
+
+// pluralS returns "s" for n != 1, "" otherwise.
+func pluralS(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }

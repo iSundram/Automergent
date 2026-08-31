@@ -62,6 +62,8 @@ func Default() *Registry {
 	r.MustRegister(apiKeyCommand(), handleAPIKey)
 	r.MustRegister(baseURLCommand(), handleBaseURL)
 	r.MustRegister(effortCommand(), handleEffort)
+	r.MustRegister(expandCommand(), handleExpand)
+	r.MustRegister(collapseCommand(), handleCollapse)
 	r.MustRegister(providerAPIKeyCommand(), handleProviderAPIKey)
 	r.MustRegister(providerBaseURLCommand(), handleProviderBaseURL)
 	r.MustRegister(themeCommand(), handleTheme)

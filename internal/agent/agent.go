@@ -109,6 +109,11 @@ type Agent struct {
 	promptComposer  *promptpkg.PromptComposer
 	currentAgentDef *agentdef.AgentDefinition
 
+	// decomposeDisabled skips the INIT decomposer: subagent children are
+	// routed by their parent already, and their definition (explore is
+	// read-only, general-purpose builds) decides their phase.
+	decomposeDisabled bool
+
 	// childCancels tracks cancellation functions for spawned child agents.
 	childCancels map[string]context.CancelFunc
 }
@@ -187,6 +192,10 @@ func (a *Agent) Execute(ctx context.Context, agentType subagent.AgentType, promp
 	// Parity behaviors: read-only context slimming, sidechain transcript,
 	// agent memory, resume handle.
 	a.prepareChild(childAgent, def, trackedID)
+
+	// Children do not re-run the INIT decomposer: the parent already
+	// decomposed and routed; the definition picks the phase.
+	childAgent.decomposeDisabled = true
 
 	return a.runChild(ctx, childAgent, prompt, trackedID, string(agentType))
 }
@@ -580,6 +589,15 @@ func (a *Agent) Provider() ai.Provider {
 	return a.provider
 }
 
+// Tools returns the agent's tool registry. Callers building side agents
+// (memory consolidation, one-shot workers) share the registry so their tool
+// calls obey the same policies.
+func (a *Agent) Tools() *tools.Registry {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return a.tools
+}
+
 // GetModel returns the current model name.
 func (a *Agent) GetModel() string {
 	a.mu.RLock()
@@ -588,13 +606,48 @@ func (a *Agent) GetModel() string {
 }
 
 // SetProvider swaps the runtime provider used for subsequent completions.
+// Every component that captured the OLD provider's adapter is rebuilt or
+// re-pointed: the INIT decomposer, the phase classifier, the prompt
+// system's staged pipelines (intent identification, task planning), the
+// context manager's model limits, and the usage anchor. Without this, a
+// /model or /provider switch left all the routing machinery calling the
+// retired provider.
 func (a *Agent) SetProvider(p ai.Provider) {
 	a.mu.Lock()
 	a.provider = p
+	// The decomposer and classifier are rebuilt lazily from a.provider on
+	// next use (see decomposeFirstMessage / ensurePhaseComponents), so
+	// dropping them here picks up the new provider without rebuild cost on
+	// every switch.
+	a.decomposer = nil
+	a.phaseClassifier = nil
+	newModel := ""
+	if a.cfg != nil {
+		newModel = a.cfg.Model
+	}
+	ps := a.promptSystem
+	cm := a.contextManager
 	a.mu.Unlock()
+
 	// The new provider has no observer installed yet: without this, retries go
 	// silent after any /provider or /model switch.
 	a.installRetryObserver(p)
+
+	// Staged pipelines (intent identification, task planning) cache their
+	// own adapters — repoint them at the new provider.
+	if ps != nil {
+		ps.SetLLMClient(promptpkg.NewAIProviderAdapter(p, ""))
+	}
+
+	// Context ladder limits are a function of the model: a switch from a
+	// 1M-token model to a 128k one must shrink the budgets immediately,
+	// not on the next cwd change.
+	if cm != nil && newModel != "" {
+		cm.SetModel(contextmgr.GetModelLimits(newModel))
+	}
+
+	// The anchor describes the previous provider's token accounting.
+	a.invalidateUsageAnchor()
 }
 
 // installRetryObserver wires provider-internal retry reporting into the event
@@ -729,9 +782,14 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 	// 2. INIT: decompose the message into parts and route each one. The
 	// decomposer is the primary path (LLM-driven, understands multi-part
 	// messages, rules, noise, violations); the keyword classifier stays as
-	// the fallback when it is unavailable.
-	if decomposition := a.decomposeFirstMessage(ctx, originalUserPrompt, isFirstMessage); decomposition != nil {
-		return a.executeDecomposition(ctx, decomposition, originalUserPrompt)
+	// the fallback when it is unavailable. It runs on EVERY top-level
+	// message: each user turn is a new instruction for the arc to route,
+	// not just the first. Subagent children skip it (their parent already
+	// routed them; their definition decides their phase).
+	if !a.decomposeDisabled {
+		if decomposition := a.decomposeFirstMessage(ctx, originalUserPrompt); decomposition != nil {
+			return a.executeDecomposition(ctx, decomposition, originalUserPrompt)
+		}
 	}
 
 	classification, err := a.phaseClassifier.Classify(ctx, originalUserPrompt, a.getAvailableFiles())
@@ -739,6 +797,26 @@ func (a *Agent) Run(ctx context.Context, prompt string) error {
 		a.Emit(EventError, fmt.Errorf("classification failed: %w", err))
 		// Fall back to standard loop
 		return a.runStandardLoop(ctx, originalUserPrompt, isFirstMessage)
+	}
+
+	// Keyword-fallback arc completion: the keyword router sends nearly every
+	// coding request to a lone EXPLORE task, which strands the arc before
+	// any implementation happens. When the message also carries build
+	// intent, chain BUILD after EXPLORE so the fallback still walks the arc.
+	if classification.PrimaryPhase == shared.PhaseExplore && looksLikeBuildWork(originalUserPrompt) {
+		classification.SecondaryPhases = append(classification.SecondaryPhases, shared.PhaseBuild)
+		for i := range classification.Tasks {
+			if classification.Tasks[i].Type == "explore" && classification.Tasks[i].Description != "" {
+				build := classification.Tasks[i]
+				build.ID = build.ID + "-build"
+				build.Type = "build"
+				build.Phase = shared.PhaseBuild
+				build.Description = "Implement: " + originalUserPrompt
+				build.Dependencies = append(build.Dependencies, classification.Tasks[i].ID)
+				classification.Tasks = append(classification.Tasks, build)
+				break
+			}
+		}
 	}
 
 	// Handle violations detected during classification
@@ -907,9 +985,13 @@ func (a *Agent) runPhaseLoop(ctx context.Context, phase shared.AgentPhase, resul
 		thinkingBudget := a.getThinkingBudget()
 		thinkingLevel := a.getThinkingLevel()
 
-		// Project instructions + git snapshot ride as leading meta user
-		// messages (never persisted; see usercontext.go).
+		// Project instructions + git snapshot ride as a leading meta user
+		// message (never persisted; see usercontext.go).
 		messagesForQuery := prependUserContext(a.sess.Messages, a.userContext())
+		// Strict providers require role alternation: merged history,
+		// steered notifications, or compacted blocks can produce adjacent
+		// same-role messages, so coalesce them before the request.
+		messagesForQuery = mergeConsecutiveRoles(messagesForQuery)
 
 		req := ai.CompletionRequest{
 			Messages:    messagesForQuery,
@@ -1849,10 +1931,14 @@ func (a *Agent) toolSetToProfile(ts shared.ToolSet) map[string]bool {
 			}
 		}
 	case shared.ToolSetBasic:
+		// INIT's toolset: bash, read, edits, task — enough to fulfill
+		// direct requests itself, deliberately no todo tools.
 		for _, schema := range all {
 			if schema.Name == "read_file" || schema.Name == "list_directory" ||
 				schema.Name == "grep" || schema.Name == "glob" ||
-				schema.Name == "bash" || schema.Name == "task" {
+				schema.Name == "bash" || schema.Name == "task" ||
+				schema.Name == "edit_file" || schema.Name == "write_file" ||
+				schema.Name == "web_search" || schema.Name == "web_fetch" {
 				profile[schema.Name] = true
 			}
 		}

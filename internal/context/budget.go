@@ -16,10 +16,12 @@ type ModelTokenLimits struct {
 	MaxOutput     int
 }
 
-// Common model token limits.
+// Common model token limits. The platform ceiling on any window is 1M
+// tokens — the pro-tier 2M figure is clamped, because past 1M the drift
+// between estimated and real token counts makes the context ladder misfire.
 var (
 	ModelLimitsGeminiFlash = ModelTokenLimits{Name: "gemini-3.6-flash", ContextWindow: 1_048_576, MaxOutput: 64_000}
-	ModelLimitsGeminiPro   = ModelTokenLimits{Name: "gemini-3.6-pro", ContextWindow: 2_097_152, MaxOutput: 128_000}
+	ModelLimitsGeminiPro   = ModelTokenLimits{Name: "gemini-3.6-pro", ContextWindow: 1_048_576, MaxOutput: 128_000}
 	ModelLimitsDefault     = ModelTokenLimits{Name: "default", ContextWindow: 128_000, MaxOutput: 8_192}
 )
 

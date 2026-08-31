@@ -93,10 +93,10 @@ func TestStorageSaveLoad(t *testing.T) {
 		t.Errorf("message count: got %d, want %d", len(loaded.Messages), len(sess.Messages))
 	}
 
-	// Check file permissions.
-	info, err := os.Stat(dir + "/" + sess.ID + ".json")
+	// Check file permissions (transcript format: projects/<dir>/<id>.jsonl).
+	info, err := os.Stat(dir + "/projects/default/" + sess.ID + ".jsonl")
 	if err != nil {
-		t.Fatalf("stat session file: %v", err)
+		t.Fatalf("stat session transcript: %v", err)
 	}
 	if info.Mode().Perm() != 0o600 {
 		t.Errorf("session file perm = %o, want 0600", info.Mode().Perm())
@@ -243,14 +243,8 @@ func TestStorageSaveCompactsOversizedSession(t *testing.T) {
 	if err := storage.Save(sess); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
-	info, err := os.Stat(dir + "/" + sess.ID + ".json")
-	if err != nil {
-		t.Fatalf("stat: %v", err)
-	}
-	if info.Size() > 14<<10 {
-		t.Fatalf("persisted session too large: %d bytes", info.Size())
-	}
-
+	// The transcript file itself is append-only and may exceed the budget
+	// until retention prunes it; the budget bounds the EFFECTIVE history.
 	// The live session must be untouched by compaction.
 	if len(sess.Messages) != 31 {
 		t.Fatalf("live session mutated by compaction: %d messages", len(sess.Messages))

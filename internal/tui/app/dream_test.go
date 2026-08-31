@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -104,4 +105,17 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestDreamPromptForbidsDeletingMemoryFile(t *testing.T) {
+	prompt := dreamPrompt("/repo", 42)
+	for _, want := range []string{
+		"NEVER delete AUTOMERGENT.md",
+		"not a delete-and-recreate",
+		"NEVER touch any file other than AUTOMERGENT.md",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Fatalf("consolidation prompt missing safety rule %q", want)
+		}
+	}
 }

@@ -13,15 +13,13 @@ import (
 
 func providerCommand() Command {
 	return Command{
-		Name:          "provider",
-		Description:   "Manage AI providers (switch, setup, test, fallback)",
-		Category:      "AI & Model",
-		Icon:          "󰒋",
-		ArgsHint:      "[use|list|setup|test|set|unset|backend|fallback] ...",
-		Tier:          TierSecondary,
-		Type:          CmdFullPage,
-		FullPageTitle: "Provider Studio",
-		SubPalette:    "provider",
+		Name:        "provider",
+		Description: "Manage AI providers (switch, setup, test, fallback)",
+		Category:    "AI & Model",
+		Icon:        "󰒋",
+		ArgsHint:    "[use|list|setup|test|set|unset|backend|fallback] ...",
+		Tier:        TierSecondary,
+		SubPalette:  "provider",
 		SubCommands: []SubCommand{
 			{Name: "use", Description: "Switch active provider", ArgsHint: "<name>", Handler: handleProvider},
 			{Name: "list", Description: "List configured providers", Handler: handleProvider},

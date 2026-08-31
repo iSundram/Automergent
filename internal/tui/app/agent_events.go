@@ -7,6 +7,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
+	"time"
+
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/ai"
 	"github.com/iSundram/Automergent/internal/shared"
@@ -39,7 +43,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.conversation.AppendToken(tok)
 			if strings.TrimSpace(tok) != "" {
 				a.streamedReply = true
-				a.runTokens++
+				a.runChars += len(tok)
 			}
 		}
 		// Tokens arriving means the request went through: any retry sequence
@@ -71,6 +75,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.conversation.AddToolLifecycleStart(te.ID, te.Name, argText, ctx)
 			a.stats.ToolCallCount++
 			a.activeTool = te.Name
+			a.setSpinVerb(verbForTool(te.Name))
 			a.statusBar.SetStatus(fmt.Sprintf("▸ %s…", te.Name))
 			a.snapshotFileWrite(te.ID, te.Name, te.Args)
 		} else if tc, ok := ev.Payload.(ai.ToolCall); ok {
@@ -84,6 +89,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.conversation.AddToolLifecycleStart(tc.ID, tc.Name, argText, ctx)
 			a.stats.ToolCallCount++
 			a.activeTool = tc.Name
+			a.setSpinVerb(verbForTool(tc.Name))
 			a.statusBar.SetStatus(fmt.Sprintf("▸ %s…", tc.Name))
 			a.snapshotFileWrite(tc.ID, tc.Name, tc.Args)
 		}
@@ -96,6 +102,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.conversation.AddToolLifecycleDone(td.ID, td.Name, td.Context, td.Result.Summary, td.Duration, td.Result, a.conversation.ReviewMode())
 			a.openDiffTabForCompletedWrite(td.ID, td.Name, td.Result.IsError)
 			a.maybeRegisterArtifact(td)
+			a.trackIntroducedProblems(td)
 		} else if r, ok := ev.Payload.(tools.Result); ok {
 			if r.IsError {
 				a.conversation.AddMessage("assistant", "Tool error: "+r.Content, true)
@@ -104,6 +111,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			}
 		}
 		a.header.SetPhase(string(agent.DetectPhase(a.sess.Messages)))
+		a.setSpinVerb(verbForPhase(string(agent.DetectPhase(a.sess.Messages))))
 		a.statusBar.SetStatus("Thinking…")
 		return a.waitForAgentEvent()
 	case agent.EventStatus:
@@ -113,6 +121,11 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 				return nil
 			}
 			a.statusBar.SetStatus(s)
+			if a.thinking {
+				if verb, ok := verbForStatus(s); ok {
+					a.setSpinVerb(verb)
+				}
+			}
 		}
 		return a.waitForAgentEvent()
 	case agent.EventNotify:
@@ -182,7 +195,7 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventDone:
 		a.thinking = false
 		a.spin.Stop()
-		a.spin.SetLabel("thinking")
+		a.setSpinVerb("")
 		a.streamTickPending = false
 		a.activeTool = ""
 		a.clearRetryState()
@@ -196,7 +209,24 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 			a.conversation.FinalizeStreaming()
 		}
 		a.layout() // Reclaim space from spinner
-		a.statusBar.SetStatus("Ready")
+		// Post-run summary lives where the spinner was: the conversation's
+		// run line settles to "✓ Done (2s • ↓ 20 tokens)" below the reply,
+		// the way Claude Code leaves its spinner row's readout behind. The
+		// status bar carries only the settled duration in its HUD.
+		if !a.runStart.IsZero() {
+			d := time.Since(a.runStart)
+			a.runStart = time.Time{}
+			summary := fmt.Sprintf("✓ Done (%s", formatDuration(d))
+			if toks := estimateTokens(a.runChars); toks > 0 {
+				summary += fmt.Sprintf(" • ↓ %s tokens", compactTokenCount(toks))
+			}
+			a.lastRunSummary = summary + ")"
+			// The run's report lives in the spinner slot now; the bar just
+			// returns to idle.
+			a.statusBar.SetStatus("Ready")
+		} else {
+			a.statusBar.SetStatus("Ready")
+		}
 		a.stats.InputTokens = a.sess.TotalInputTokens
 		a.stats.OutputTokens = a.sess.TotalOutputTokens
 		if tel := a.ag.Telemetry(); tel != nil {
@@ -249,7 +279,12 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 	case agent.EventError:
 		a.thinking = false
 		a.spin.Stop()
-		a.spin.SetLabel("thinking")
+		a.setSpinVerb("")
+		a.spin.SetMeta("")
+		// A failed run has no ✓ to settle on; the status bar's outcome badge
+		// is its report, so the last successful run's summary must not linger
+		// in the spinner slot.
+		a.lastRunSummary = ""
 		a.streamTickPending = false
 		a.activeTool = ""
 		a.conversation.RenderIfDirty()
@@ -377,4 +412,30 @@ func (a *App) handleAgentEvent(ev agent.Event) tea.Cmd {
 		return a.waitForAgentEvent()
 	}
 	return a.waitForAgentEvent()
+}
+
+// introducedErrorsRe extracts the introduced-error count from a blocked
+// edit_file/write_file validation result ("Introduced: N error(s), M warning(s)").
+var introducedErrorsRe = regexp.MustCompile(`Introduced:\s*(\d+) error\(s\)`)
+
+// trackIntroducedProblems feeds the statusbar problems counter: when an edit
+// or write is blocked for introducing new errors, those errors count as
+// problems this session.
+func (a *App) trackIntroducedProblems(td agent.ToolDoneEvent) {
+	if td.Name != "edit_file" && td.Name != "write_file" {
+		return
+	}
+	if !td.Result.IsError {
+		return
+	}
+	m := introducedErrorsRe.FindStringSubmatch(td.Result.Content)
+	if m == nil {
+		return
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil || n <= 0 {
+		return
+	}
+	a.sessionProblems += n
+	a.statusBar.SetProblems(a.sessionProblems)
 }

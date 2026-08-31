@@ -105,6 +105,34 @@ func (t *WriteFileTool) Execute(_ context.Context, args map[string]any) (tools.R
 		}
 	}
 
+	// Pre-flight validation, mirroring edit_file: overwriting a file with
+	// content that introduces new errors is rejected; brand-new files are
+	// only reported, since creating a draft with errors is legitimate.
+	existing, readErr := os.ReadFile(path)
+	original := ""
+	if readErr == nil {
+		original = string(existing)
+	}
+	blocking, advisory, _, afterDiags := validateProposedContent(t.cfg, path, original, content)
+
+	if len(blocking) > 0 {
+		var msg strings.Builder
+		msg.WriteString("═══════════════════════════════════\n")
+		msg.WriteString("[VALIDATION FAILED ✗]\n\n")
+		msg.WriteString("The new content would introduce:\n")
+		for _, d := range blocking {
+			msg.WriteString(fmt.Sprintf("    Line %d: %s - %s\n", d.Line, d.Code, d.Message))
+		}
+		if recovery := diagnostics.RecoverDiagnostics(afterDiags); recovery.UserMessage != "" {
+			msg.WriteString("\nRecovery guidance:\n")
+			msg.WriteString(recovery.UserMessage)
+			msg.WriteString("\n")
+		}
+		msg.WriteString("\nWrite was NOT applied. File unchanged.\n")
+		msg.WriteString("═══════════════════════════════════\n")
+		return tools.Result{IsError: true, Content: msg.String()}, nil
+	}
+
 	if err := atomicWriteFile(path, []byte(content), 0o644); err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("write: %v", err)}, nil
 	}
@@ -123,6 +151,19 @@ func (t *WriteFileTool) Execute(_ context.Context, args map[string]any) (tools.R
 			break
 		}
 		diff.WriteString("+ " + line + "\n")
+	}
+
+	// Advisory findings (new files with errors, or non-blocking severities)
+	// are appended so the model can react without a separate read.
+	if len(advisory) > 0 {
+		diff.WriteString(fmt.Sprintf("[DIAGNOSTICS: %d error(s) present in written file]\n", len(advisory)))
+		for i, d := range advisory {
+			if i >= 20 {
+				diff.WriteString(fmt.Sprintf("... (%d more)\n", len(advisory)-20))
+				break
+			}
+			diff.WriteString(fmt.Sprintf("ERROR Line %d: %s - %s\n", d.Line, d.Code, d.Message))
+		}
 	}
 
 	return tools.Result{
@@ -229,6 +270,9 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 	}
 	originalPerm := info.Mode().Perm()
 
+	// Pre-flight validation with diagnostics: an edit that introduces new
+	// blocking diagnostics (errors by default; warnings only when
+	// configured) is rejected before anything is written.
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return tools.Result{IsError: true, Content: fmt.Sprintf("read: %v", err)}, nil
@@ -247,26 +291,22 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 		result = strings.Replace(original, oldStr, newStr, 1)
 	}
 
-	// NEW: Pre-flight validation with diagnostics
-	beforeDiags := diagnostics.Analyze(path, original)
-	afterDiags := diagnostics.Analyze(path, result)
-	delta := diagnostics.Compare(beforeDiags, afterDiags)
-	recoveryReport := diagnostics.RecoverDiagnostics(afterDiags)
+	blocking, _, delta, afterDiags := validateProposedContent(t.cfg, path, original, result)
 
-	if delta.IntroducedCount > 0 {
+	if len(blocking) > 0 {
 		// Block the edit - it would introduce new errors
 		var msg strings.Builder
 		msg.WriteString("═══════════════════════════════════\n")
 		msg.WriteString("[VALIDATION FAILED ✗]\n\n")
 		msg.WriteString("Impact:\n")
 		msg.WriteString(fmt.Sprintf("  Fixed:      %d error(s)\n", delta.FixedCount))
-		msg.WriteString(fmt.Sprintf("  Introduced: %d NEW error(s)\n", delta.IntroducedCount))
-		for _, d := range delta.Introduced {
+		msg.WriteString(fmt.Sprintf("  Introduced: %d error(s), %d warning(s)\n", delta.IntroducedErrors, delta.IntroducedWarnings))
+		for _, d := range blocking {
 			msg.WriteString(fmt.Sprintf("    Line %d: %s - %s\n", d.Line, d.Code, d.Message))
 		}
-		if recoveryReport.UserMessage != "" {
+		if recovery := diagnostics.RecoverDiagnostics(afterDiags); recovery.UserMessage != "" {
 			msg.WriteString("\nRecovery guidance:\n")
-			msg.WriteString(recoveryReport.UserMessage)
+			msg.WriteString(recovery.UserMessage)
 			msg.WriteString("\n")
 		}
 		msg.WriteString("\nChange was NOT applied. File unchanged.\n")
@@ -292,8 +332,8 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 	diff.WriteString("[VALIDATION PASSED ✓]\n\n")
 	diff.WriteString("Impact:\n")
 	diff.WriteString(fmt.Sprintf("  Fixed:      %d error(s)\n", delta.FixedCount))
-	diff.WriteString(fmt.Sprintf("  Introduced: %d error(s)\n", delta.IntroducedCount))
-	diff.WriteString(fmt.Sprintf("  Remaining:  %d error(s) in file\n", len(afterDiags)))
+	diff.WriteString(fmt.Sprintf("  Introduced: %d error(s), %d warning(s)\n", delta.IntroducedErrors, delta.IntroducedWarnings))
+	diff.WriteString(fmt.Sprintf("  Remaining:  %d error(s) in file\n", countBySeverity(afterDiags, "error")))
 	diff.WriteString("\nChange has been applied to disk.\n")
 	diff.WriteString("═══════════════════════════════════\n")
 
@@ -301,6 +341,60 @@ func (t *EditFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 		Content: diff.String(),
 		Summary: fmt.Sprintf("applied +%d -%d lines", totalAdded, totalRemoved),
 	}, nil
+}
+
+// diagnosticsGate returns the configured severity gates for write validation.
+// Defaults match config.Default(): block on errors, allow warnings.
+func diagnosticsGate(cfg *config.Config) (blockErrors, blockWarnings bool) {
+	if cfg != nil {
+		return cfg.Diagnostics.BlockOnError, cfg.Diagnostics.BlockOnWarning
+	}
+	return true, false
+}
+
+func countBySeverity(diags []diagnostics.Diagnostic, severity string) int {
+	n := 0
+	for _, d := range diags {
+		if d.Severity == severity {
+			n++
+		}
+	}
+	return n
+}
+
+// validateProposedContent compares diagnostics before and after a proposed
+// change. blocking lists newly-introduced diagnostics that the configuration
+// says to reject; advisory lists all errors present in the proposed content.
+// When no original content exists (creating a file), nothing can be
+// "introduced", so nothing blocks — the findings are advisory only.
+func validateProposedContent(cfg *config.Config, path, original, proposed string) (blocking, advisory []diagnostics.Diagnostic, delta diagnostics.DiagnosticDelta, afterDiags []diagnostics.Diagnostic) {
+	before := diagnostics.Analyze(path, original)
+	afterDiags = diagnostics.Analyze(path, proposed)
+	delta = diagnostics.Compare(before, afterDiags)
+
+	if original == "" {
+		for _, d := range afterDiags {
+			if d.Severity == "error" {
+				advisory = append(advisory, d)
+			}
+		}
+		return blocking, advisory, delta, afterDiags
+	}
+
+	blockErrors, blockWarnings := diagnosticsGate(cfg)
+	for _, d := range delta.Introduced {
+		switch d.Severity {
+		case "error":
+			if blockErrors {
+				blocking = append(blocking, d)
+			}
+		case "warning":
+			if blockWarnings {
+				blocking = append(blocking, d)
+			}
+		}
+	}
+	return blocking, advisory, delta, afterDiags
 }
 
 func pluralS(n int) string {

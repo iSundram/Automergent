@@ -19,6 +19,7 @@ import (
 	"github.com/iSundram/Automergent/internal/tui/render"
 	"github.com/iSundram/Automergent/internal/tui/themes"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -62,30 +63,36 @@ type App struct {
 	inspected components.DockEntry
 	// queueStrip shows what is waiting to be sent. The queue itself lives in
 	// msgQueue; this is the only thing that ever made it visible.
-	queueStrip        *components.QueueStrip
-	zenMode           bool
-	sendToProgram     func(tea.Msg)
-	pendingAsk        *pendingAsk
-	ag                *agent.Agent
-	sess              *session.Session
-	storage           *session.Storage
-	persist           *session.PersistenceManager
-	keys              *keys.Bindings
-	styles            *themes.Styles
-	theme             *themes.Theme
-	conversation      components.Conversation
-	diffPane          components.Diff
-	input             components.Input
-	header            components.Header
-	statusBar         components.StatusBar
-	spin              components.Spinner
-	confirm           components.Confirm
-	sessionBrowser    components.SessionBrowser
-	artifactBrowser   components.ArtifactBrowser
+	queueStrip      *components.QueueStrip
+	zenMode         bool
+	sendToProgram   func(tea.Msg)
+	pendingAsk      *pendingAsk
+	ag              *agent.Agent
+	sess            *session.Session
+	storage         *session.Storage
+	persist         *session.PersistenceManager
+	keys            *keys.Bindings
+	styles          *themes.Styles
+	theme           *themes.Theme
+	conversation    components.Conversation
+	diffPane        components.Diff
+	input           components.Input
+	header          components.Header
+	statusBar       components.StatusBar
+	spin            components.Spinner
+	confirm         components.Confirm
+	sessionBrowser  components.SessionBrowser
+	artifactBrowser components.ArtifactBrowser
 
 	// artifacts are agent-produced deliverables (plans, reviews, docs)
 	// awaiting or carrying user review decisions; /artifact browses them.
 	artifacts []artifactRecord
+
+	// pendingPlanReview is the exit_plan_mode call waiting for the user's
+	// decision in the artifact browser; planModePrev is the mode to restore
+	// when a plan is approved.
+	pendingPlanReview *pendingPlanReview
+	planModePrev      string
 	selector          components.SelectorOverlay
 	selectorAction    func(index int)
 	stats             components.Stats
@@ -187,6 +194,9 @@ type App struct {
 	// runToolCount counts tools completed in the current (or last) run, so an
 	// interruption can report how far it got.
 	runToolCount int
+	// sessionProblems counts diagnostics that blocked edits this session,
+	// surfaced as the "N problems" chip in the status bar.
+	sessionProblems int
 	// permissionTool names the tool a visible permission prompt is asking about.
 	permissionTool string
 	// lastOutcome is the sticky result of the last run: one of the outcome*
@@ -212,9 +222,11 @@ type App struct {
 
 	// Streaming render coalescing + live telemetry.
 	streamTickPending bool
-	runTokens         int       // token events observed in the current run
+	runChars          int       // streamed characters in the current run (~4 chars ≈ 1 token)
 	runStart          time.Time // when the current run started
-	tokRate           int       // smoothed tokens/sec shown while thinking
+	spinLabel         string    // current activity verb (reading/editing/…); the stream tick decorates it with the "(12s • ↓ N tokens)" readout
+	lastRunSummary    string    // settled readout of the last completed run, rendered in the spinner slot
+	clockMinute       string    // last-painted minute of the footer clock, so it repaints only on rollover
 }
 
 func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *session.Storage, persist *session.PersistenceManager, initialPrompt string, showSessionPicker bool, mcpOrch *mcp.Orchestrator) *App {
@@ -236,7 +248,9 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 		mcpOrch:            mcpOrch,
 		conversation:       components.NewConversation(styles),
 		diffPane:           components.NewDiff(styles),
-		input:              components.NewInput(styles),
+		// Prompt history persists beside the sessions dir (typically
+		// ~/.automergent/history.txt) so up-arrow recall survives restarts.
+		input:              components.NewInput(styles).WithHistoryFile(filepath.Join(filepath.Dir(cfg.SessionDir), "history.txt")),
 		header:             components.NewHeader(styles),
 		statusBar:          components.NewStatusBar(styles),
 		infoLine:           components.NewInfoLine(styles),
@@ -277,9 +291,9 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	if wd, err := os.Getwd(); err == nil {
 		app.workDir = wd
 	}
-	// Pick up artifacts left in .automergent/artifacts/ by earlier sessions so
-	// /artifact works before the agent writes anything new.
-	app.seedArtifactsFromDisk()
+	// Artifacts are session-scoped: restore this session's registry from its
+	// metadata (nothing from other sessions shows up).
+	app.loadArtifactsForSession()
 	// Load markdown custom commands (project + user roots) before help rows
 	// are derived, so they appear in the palette and help overlay.
 	if n, warnings := commands.LoadProjectAndUserCommands(app.commands, app.workDir); n > 0 || len(warnings) > 0 {
@@ -322,6 +336,10 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	app.syncCommandHints()
 	app.header.SetModel(cfg.Model)
 	app.header.SetProvider(cfg.Provider)
+	app.header.SetEffort(cfg.Effort)
+	if wd, err := os.Getwd(); err == nil {
+		app.statusBar.SetWorkDir(wd)
+	}
 	// Normalise a legacy "edit" mode from a persisted config to its current
 	// name so the chip and the approval gate agree on what mode this is.
 	cfg.Mode = agent.CanonicalMode(cfg.Mode)
@@ -346,7 +364,7 @@ func NewApp(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage 
 	app.refreshChrome()
 	// Set the welcome empty state. Width/height are 0 at construction time;
 	// the state will be refreshed on the first WindowSizeMsg (resize event).
-	app.conversation.SetEmptyState(components.WelcomeView(app.styles, 0, 0))
+	app.conversation.SetEmptyState(components.WelcomeView)
 	return app
 }
 
@@ -359,6 +377,8 @@ func (a *App) Init() tea.Cmd {
 		a.fileTree.Load("."),
 		// Detect the terminal's background color so the theme can adapt.
 		func() tea.Msg { return tea.RequestBackgroundColor() },
+		// Locate the user from their IP so the footer can show local time.
+		func() tea.Msg { return resolveUserClock() },
 		// Live tick for elapsed time displays (dock, taskboard, etc.)
 		scheduleLiveTick(),
 	}
@@ -463,7 +483,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.queueStrip.SetWidth(m.Width)
 		}
 		// Refresh the welcome screen so it is correctly centered for the new size.
-		a.conversation.SetEmptyState(components.WelcomeView(a.styles, m.Width, m.Height))
+		a.conversation.SetEmptyState(components.WelcomeView)
 		return a, nil
 	case tea.KeyMsg:
 		// The inspector is a fullscreen modal: it outranks every other key
@@ -536,6 +556,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ab, cmd := a.artifactBrowser.Update(m)
 			a.artifactBrowser = ab
 			if !a.artifactBrowser.Visible() {
+				// Closing the browser without deciding ends a pending plan
+				// review rather than leaving the tool blocked.
+				a.cancelPlanReview()
 				a.layout()
 			}
 			return a, cmd
@@ -665,11 +688,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.streamTickPending = false
 		a.conversation.RenderIfDirty()
 		if a.thinking && !a.runStart.IsZero() {
-			if elapsed := time.Since(a.runStart).Seconds(); elapsed > 0.5 && a.runTokens > 0 {
-				rate := int(float64(a.runTokens) / elapsed)
-				// Smooth so the number doesn't flicker.
-				a.tokRate = (a.tokRate + rate) / 2
-				a.spin.SetLabel(fmt.Sprintf("thinking · %d tok/s", a.tokRate))
+			elapsed := time.Since(a.runStart)
+			// The label carries the live verb (reading/editing/…) set by
+			// tool events; the meta parenthetical carries the Claude
+			// Code-style "(12s • ↓ 1.2k tokens)" clock-and-counter readout.
+			label := a.spinLabel
+			if label == "" {
+				label = "generating"
+			}
+			a.spin.SetLabel(label)
+			if toks := estimateTokens(a.runChars); toks > 0 {
+				a.spin.SetMeta(fmt.Sprintf("%s • ↓ %s tokens", formatDuration(elapsed), compactTokenCount(toks)))
+			} else {
+				a.spin.SetMeta(formatDuration(elapsed))
 			}
 		}
 		if a.conversation.NeedsRender() {
@@ -695,7 +726,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.retrying || a.thinking {
 			a.refreshChrome()
 		}
+		// The footer clock ticks on minute boundaries only: repaint when the
+		// displayed time actually changed.
+		if stamp := a.statusBar.ClockMinute(); stamp != "" && stamp != a.clockMinute {
+			a.clockMinute = stamp
+			a.refreshChrome()
+		}
 		cmds = append(cmds, scheduleLiveTick())
+	case userClockMsg:
+		a.statusBar.SetUserClock(m.tz, m.country)
+		a.clockMinute = a.statusBar.ClockMinute()
+		a.refreshChrome()
 	case components.FileTreeLoadedMsg:
 		a.fileTree.SetItems(m.Items)
 	case components.SessionSelectedMsg:
@@ -711,7 +752,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case components.ArtifactDecisionMsg:
-		a.applyArtifactDecision(m.Path, m.Approved)
+		// applyArtifactDecision resolves any waiting plan review itself.
+		a.applyArtifactDecision(m.Path, m.Approved, m.Reason)
+	case components.ArtifactCommentMsg:
+		a.applyArtifactComment(m.Path, m.Text)
+	case planReviewRequestedMsg:
+		a.beginPlanReview(m.pr)
+		a.refreshChrome()
 	case components.ArtifactApproveAllMsg:
 		a.applyArtifactApproveAll()
 	case components.ArtifactOpenMsg:

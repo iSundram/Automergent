@@ -132,31 +132,34 @@ func (m *PhaseManager) GetPhaseConfig(phase shared.AgentPhase) shared.PhaseConfi
 		}
 	}
 	
-	// Default phase configs
+	// Default phase configs. Tool names MUST match the registry names
+	// (read_file/edit_file/write_file) — these lists drive the per-phase
+	// tool masks, and a stale name silently fails the filter.
 	defaultConfigs := map[shared.AgentPhase]shared.PhaseConfig{
 		shared.PhaseInit: {
-			Tools:       []string{"bash", "read", "glob", "grep"},
+			// INIT: bash, read, edits, task — deliberately NO todo tools.
+			Tools:       []string{"bash", "read_file", "glob", "grep", "edit_file", "task"},
 			ToolSet:     shared.ToolSetBasic,
 			PromptStyle: "serious, concise, classifier",
 			Agent:       "main",
 			MaxSteps:    3,
 		},
 		shared.PhaseExplore: {
-			Tools:       []string{"glob", "grep", "read", "bash"},
+			Tools:       []string{"glob", "grep", "read_file", "bash", "list_directory"},
 			ToolSet:     shared.ToolSetReadOnly,
 			PromptStyle: "thorough, investigative",
 			Agent:       "explore",
 			MaxSteps:    10,
 		},
 		shared.PhasePlan: {
-			Tools:       []string{"read", "write", "bash", "task"},
+			Tools:       []string{"read_file", "write_file", "bash", "task", "grep", "glob"},
 			ToolSet:     shared.ToolSetModerate,
 			PromptStyle: "structured, analytical",
 			Agent:       "general",
 			MaxSteps:    5,
 		},
 		shared.PhaseBuild: {
-			Tools:       []string{"edit", "bash", "write", "read", "task", "glob", "grep"},
+			Tools:       []string{"edit_file", "bash", "write_file", "read_file", "task", "glob", "grep", "multi_edit"},
 			ToolSet:     shared.ToolSetFull,
 			PromptStyle: "focused, pragmatic + testing + todo",
 			Agent:       "general",
@@ -388,31 +391,12 @@ func (m *PhaseManager) ClassifyAndRoute(userMessage string) (shared.AgentPhase, 
 	return phase, tasks, nil, nil
 }
 
+// checkViolation is deliberately RETIRED — substring matching flagged
+// ordinary engineering work ("rotate the api key", "fix the exploit in our
+// sanitizer") far more often than real violations. Detection belongs to the
+// INIT decomposer's LLM judgment with its confirmation step; the escalation
+// ladder here only fires on verdicts that reach it.
 func (m *PhaseManager) checkViolation(message string) *shared.ViolationCheck {
-	lower := strings.ToLower(message)
-	
-	violationPatterns := map[shared.ViolationType][]string{
-		shared.ViolationHacking:     {"hack", "exploit", "vulnerability", "penetration", "bypass", "backdoor"},
-		shared.ViolationIllegal:     {"illegal", "unauthorized", "pirate", "crack", "keygen"},
-		shared.ViolationHarmful:     {"malware", "virus", "ransomware", "keylogger", "steal", "destroy"},
-		shared.ViolationCredentials: {"password", "credential", "secret", "api key", "token", "ssh key"},
-		shared.ViolationSecurity:    {"disable security", "bypass auth", "no auth", "skip verification"},
-	}
-	
-	for vType, patterns := range violationPatterns {
-		for _, pattern := range patterns {
-			if strings.Contains(lower, pattern) {
-				return &shared.ViolationCheck{
-					Type:        vType,
-					Severity:    shared.ViolationSeverityHigh,
-					UserMessage: message,
-					Count:       1,
-					Action:      "warn",
-				}
-			}
-		}
-	}
-	
 	return nil
 }
 

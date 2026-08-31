@@ -97,6 +97,10 @@ type Host interface {
 	SetStatus(status string)
 	CommandUsage(usage string)
 	CommandError(message string)
+	// SetBlocksExpanded collapses (false) or expands (true) every
+	// collapsible conversation block — tool cards, thinking blocks, shell
+	// output — and returns the status label naming the inverse command.
+	SetBlocksExpanded(expanded bool) string
 	// AddUserCommandMessage records a prompt-command expansion in the
 	// conversation with its command provenance (the "/commit" chip above the
 	// expanded prompt body).

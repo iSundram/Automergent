@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"charm.land/bubbles/v2/viewport"
-	"charm.land/lipgloss/v2"
 
 	"github.com/iSundram/Automergent/internal/tools"
 	"github.com/iSundram/Automergent/internal/tui/render"
@@ -20,6 +19,10 @@ type ConversationMsg struct {
 	Thought   string
 	IsError   bool
 	Timestamp time.Time
+	// ThoughtDuration is how long the model thought before this message's
+	// content began; the completed thought box header renders it as
+	// "✻ Thought for 4s", the way Claude Code settles a thinking block.
+	ThoughtDuration time.Duration
 	// Command carries the provenance of a prompt-command expansion ("/commit"):
 	// when set on a user message, the bubble's label renders as an accent
 	// "❯ /command" chip instead of "You".
@@ -64,7 +67,10 @@ type Conversation struct {
 	height     int
 	streaming  bool
 	reviewMode bool
-	emptyState string
+	// emptyState renders the no-messages view at the live content width and
+	// height, with the live styles — a closure rather than a pre-rendered
+	// string so resizes and theme switches are reflected immediately.
+	emptyState func(styles *themes.Styles, width, height int) string
 	browsing   bool
 	expandMode ExpandMode
 	// dirty marks that streamed content changed but has not been rendered
@@ -88,6 +94,9 @@ type Conversation struct {
 	// Builders used during streaming to avoid quadratic concatenation
 	currentBuilder        *strings.Builder
 	currentThoughtBuilder *strings.Builder
+	// thoughtStart is when the in-flight thinking block began; settled onto
+	// the message as ThoughtDuration once the thought ends.
+	thoughtStart time.Time
 	// streamer renders the in-flight assistant message incrementally: finalized
 	// blocks are glamour-parsed once, and the partial line is styled inline.
 	streamer *render.Streamer
@@ -228,6 +237,24 @@ func (c *Conversation) CycleExpand() string {
 	}
 }
 
+// SetExpand collapses (false) or expands (true) every collapsible block —
+// tool cards, thinking blocks, shell output — in one move. The status
+// labels name the inverse command so the hint always tells the user what
+// to type next: collapsed blocks advertise /expand, expanded ones
+// /collapse.
+func (c *Conversation) SetExpand(expanded bool) string {
+	if expanded {
+		c.expandMode = ExpandFull
+	} else {
+		c.expandMode = ExpandCompact
+	}
+	c.invalidateAll()
+	if expanded {
+		return "Expanded — /collapse to collapse blocks"
+	}
+	return "Collapsed — /expand to expand blocks"
+}
+
 // ExpandMode reports the current tool-detail mode.
 func (c Conversation) ExpandMode() ExpandMode { return c.expandMode }
 
@@ -257,9 +284,11 @@ func (c *Conversation) SetSize(w, h int) {
 	c.refreshAndFollow(false)
 }
 
-// SetEmptyState sets content shown only while the conversation has no messages.
-func (c *Conversation) SetEmptyState(content string) {
-	c.emptyState = content
+// SetEmptyState sets the renderer for the no-messages view. The renderer is
+// invoked with the live content width/height on every refresh, so the empty
+// state never goes stale after a resize or a theme switch.
+func (c *Conversation) SetEmptyState(renderer func(styles *themes.Styles, width, height int) string) {
+	c.emptyState = renderer
 	c.refreshAndFollow(false)
 }
 
@@ -405,6 +434,9 @@ func (c *Conversation) AddToolLifecycleDone(id, name, context, summary string, d
 // so a burst of tokens costs one paint, not one paint per token.
 func (c *Conversation) AppendToken(token string) {
 	c.ensureViewport()
+	// Content arriving means the thinking that preceded it is over: settle
+	// its duration so the box header can read "✻ Thought for 4s".
+	c.settleThoughtDuration()
 	if len(c.messages) == 0 || !c.streaming {
 		c.messages = append(c.messages, ConversationMsg{
 			Role:      "assistant",
@@ -444,6 +476,9 @@ func (c *Conversation) AppendToken(token string) {
 // AppendThought buffers streamed thinking text; see AppendToken.
 func (c *Conversation) AppendThought(thought string) {
 	c.ensureViewport()
+	if c.thoughtStart.IsZero() {
+		c.thoughtStart = time.Now()
+	}
 	if len(c.messages) == 0 || !c.streaming {
 		c.messages = append(c.messages, ConversationMsg{
 			Role:      "assistant",
@@ -471,12 +506,33 @@ func (c *Conversation) AppendThought(thought string) {
 	c.dirty = true
 }
 
+// settleThoughtDuration closes out the in-flight thinking clock, stamping
+// the elapsed time on the last message that carries a thought. Called when
+// content tokens arrive or the stream finalizes — whichever ends the
+// thinking first.
+func (c *Conversation) settleThoughtDuration() {
+	if c.thoughtStart.IsZero() {
+		return
+	}
+	d := time.Since(c.thoughtStart)
+	c.thoughtStart = time.Time{}
+	for i := len(c.messages) - 1; i >= 0; i-- {
+		if c.messages[i].Thought != "" {
+			if c.messages[i].ThoughtDuration == 0 {
+				c.messages[i].ThoughtDuration = d
+			}
+			return
+		}
+	}
+}
+
 func (c *Conversation) Clear() {
 	c.messages = nil
 	c.cache = nil
 	c.streaming = false
 	c.currentBuilder = nil
 	c.currentThoughtBuilder = nil
+	c.thoughtStart = time.Time{}
 	c.stream().Reset()
 	c.unseen = 0
 	// A cleared conversation is at its own bottom by definition.
@@ -493,7 +549,18 @@ func (c *Conversation) FinalizeStreaming() {
 // response, when supplied, as the authoritative complete text.
 func (c *Conversation) FinalizeStreamingWithContent(final string) {
 	if c.streaming {
-		// Flush builders to last message
+		// Flush builders to the message FIRST: a thought that lived only in
+		// the builder (no content tokens ever arrived) must be on the
+		// message before the duration is stamped, or settleThoughtDuration
+		// finds nothing to stamp and the header reads as unknown-duration.
+		if c.currentThoughtBuilder != nil && len(c.messages) > 0 {
+			last := &c.messages[len(c.messages)-1]
+			last.Thought = c.currentThoughtBuilder.String()
+			c.currentThoughtBuilder = nil
+		}
+		// A finalized stream ends any thinking still in flight.
+		c.settleThoughtDuration()
+		// Flush text builders to last message
 		if len(c.messages) > 0 && strings.TrimSpace(final) != "" {
 			last := &c.messages[len(c.messages)-1]
 			last.Content = final
@@ -502,11 +569,6 @@ func (c *Conversation) FinalizeStreamingWithContent(final string) {
 			last := &c.messages[len(c.messages)-1]
 			last.Content = c.currentBuilder.String()
 			c.currentBuilder = nil
-		}
-		if c.currentThoughtBuilder != nil && len(c.messages) > 0 {
-			last := &c.messages[len(c.messages)-1]
-			last.Thought = c.currentThoughtBuilder.String()
-			c.currentThoughtBuilder = nil
 		}
 		c.streaming = false
 		c.dirty = false
@@ -548,10 +610,10 @@ func (c *Conversation) UpdateToolContent(id, content string) {
 func hashMessage(epoch uint64, expand ExpandMode, review bool, m ConversationMsg, spanExtra string) uint64 {
 	h := fnv.New64a()
 	fmt.Fprintf(h, "%d|%d|%t|", epoch, expand, review)
-	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%s\x00%d\x00%d",
+	fmt.Fprintf(h, "%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%s\x00%t\x00%s\x00%s\x00%d\x00%d\x00%d",
 		m.Role, m.Content, m.Thought, m.ToolName, m.ToolArgs,
 		m.ToolContext, m.ToolSummary, m.IsError, m.Status, m.Command,
-		m.Duration.Nanoseconds(), m.Timestamp.UnixNano())
+		m.Duration.Nanoseconds(), m.ThoughtDuration.Nanoseconds(), m.Timestamp.UnixNano())
 	// Metadata drives family renderers, so it must participate — over sorted
 	// keys, since map iteration order would otherwise churn the cache.
 	for _, k := range metaKeys(m.Metadata) {
@@ -594,14 +656,11 @@ func (c *Conversation) refresh() {
 		msgW = 20
 	}
 	if len(c.messages) == 0 {
-		if c.emptyState != "" {
-			empty := lipgloss.NewStyle().
-				Width(w).
-				Align(lipgloss.Center).
-				Foreground(c.styles.T.Subtext).
-				PaddingTop(2).
-				Render(c.emptyState)
-			c.viewport.SetContent(empty)
+		if c.emptyState != nil {
+			// The renderer owns layout (centering, colors, vertical fill);
+			// wrapping its output again would double-center and force the
+			// whole view into one foreground color.
+			c.viewport.SetContent(c.emptyState(c.styles, w, c.height))
 		} else {
 			c.viewport.SetContent("")
 		}

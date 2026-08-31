@@ -39,7 +39,9 @@ func SetDirs(d ...string) {
 }
 
 // DiscoverSkillsTool lists available skills, optionally filtered by query.
-type DiscoverSkillsTool struct{}
+type DiscoverSkillsTool struct {
+	tools.BaseTool
+}
 
 func (t *DiscoverSkillsTool) Name() string { return "discover_skills" }
 func (t *DiscoverSkillsTool) Description() string {
@@ -106,7 +108,9 @@ func (t *DiscoverSkillsTool) Execute(_ context.Context, args map[string]any) (to
 }
 
 // SkillTool loads one skill's instructions by name.
-type SkillTool struct{}
+type SkillTool struct {
+	tools.BaseTool
+}
 
 func (t *SkillTool) Name() string { return "skill" }
 func (t *SkillTool) Description() string {

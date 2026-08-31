@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"github.com/iSundram/Automergent/internal/agent"
 	"github.com/iSundram/Automergent/internal/ai"
-	anthropicProvider "github.com/iSundram/Automergent/internal/ai/anthropic"
 	googleProvider "github.com/iSundram/Automergent/internal/ai/google"
 	openaiProvider "github.com/iSundram/Automergent/internal/ai/openai"
 	"github.com/iSundram/Automergent/internal/cache"
@@ -54,12 +53,9 @@ func (a *App) updateActiveTokens() {
 		active += calc.Estimate(pending)
 	}
 
+	// The header's meter is the single source of truth for context usage
+	// (tokens + bar). The status bar no longer duplicates it.
 	a.header.SetActiveTokens(active)
-
-	// HUD: context-window usage meter.
-	if limit := a.ag.Provider().ContextLimit(); limit > 0 {
-		a.statusBar.SetContextUsage(float64(active) / float64(limit) * 100)
-	}
 
 	// HUD: pending-edit review counter.
 	if store := a.ag.EditReviewStore(); store != nil {
@@ -251,27 +247,37 @@ func buildProviderForConfig(cfg *config.Config, name, model string) (ai.Provider
 		MaxRetries:         pc.MaxRetries,
 	}
 
+	// Vertex-expressing providers: force the vertex backend regardless of
+	// any stale config value.
 	switch name {
-	case "google":
+	case "google", "google-aistudio":
+		if name == "google-aistudio" {
+			aiCfg.Backend = "aistudio"
+		}
 		return googleProvider.New(aiCfg), nil
-	case "openai":
-		return openaiProvider.New(aiCfg), nil
-	case "anthropic":
-		return anthropicProvider.New(aiCfg), nil
-	case "deepseek":
-		aiCfg.BaseURL = "https://api.deepseek.com/v1"
-		return openaiProvider.New(aiCfg), nil
-	case "ollama":
-		if aiCfg.BaseURL == "" {
-			aiCfg.BaseURL = "http://localhost:11434/v1"
-		}
-		return openaiProvider.New(aiCfg), nil
+	case "google-vertex":
+		aiCfg.Backend = "vertex"
+		return googleProvider.New(aiCfg), nil
 	default:
-		if p, ok := ai.Get(name); ok {
-			return p, nil
-		}
-		return nil, fmt.Errorf("unknown provider %q", name)
+		// Custom providers and legacy catalog names: route by ApiType.
+		return buildCustomProvider(name, aiCfg, pc.ApiType)
 	}
+}
+
+// buildCustomProvider constructs a provider for a custom or legacy name.
+// apiType ("gemini" | "openai" | "anthropic" | "") picks the protocol: gemini
+// → the Google client pointed at the custom base URL; anything else → the
+// OpenAI-compatible client (the lingua franca of custom endpoints). This is
+// what makes the "custom" provider real: register a name with a baseUrl, API
+// key, and apiType, and it builds.
+func buildCustomProvider(name string, aiCfg ai.ProviderConfig, apiType string) (ai.Provider, error) {
+	if strings.EqualFold(apiType, "gemini") {
+		return googleProvider.New(aiCfg), nil
+	}
+	if aiCfg.BaseURL == "" {
+		return nil, fmt.Errorf("custom provider %q needs a baseUrl (/provider set %s baseUrl <url>)", name, name)
+	}
+	return openaiProvider.New(aiCfg), nil
 }
 
 func shouldEnablePromptCache(cfg *config.Config, provider string) bool {

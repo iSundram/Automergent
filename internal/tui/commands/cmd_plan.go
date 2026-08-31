@@ -4,35 +4,41 @@ import (
 	"strings"
 )
 
-// /plan — enter plan mode (read-only analysis).
+// /plan — plan a task before any changes are made.
+//
+// A thin launcher for the real plan machinery: the model enters plan mode
+// with enter_plan_mode (read-only enforcement, previous mode remembered),
+// writes the plan as a plan artifact, and presents it with exit_plan_mode
+// for approval in the /artifact browser. Approval restores the previous
+// mode and unlocks implementation.
 
 func planCommand() Command {
 	return Command{
 		Name:        "plan",
-		Description: "Enter plan mode (read-only analysis)",
+		Description: "Plan a task before changing anything",
 		Category:    "Workflow",
 		Icon:        "󰈙",
-		ArgsHint:    "[focus|copy]",
-		SubPalette:  "plan",
+		ArgsHint:    "<task>",
 		Tier:        TierPrimary,
 		Type:        CmdPrompt,
-		SubCommands: []SubCommand{
-			{Name: "copy", Description: "Copy current plan to clipboard", Handler: handlePlan},
-		},
-		PromptTemplate: "Enter plan mode. Read-only analysis before making changes. Outline approach, files to touch, and confirm before editing. Focus: $ARGUMENTS",
-		WhenToUse:      "Before making non-trivial changes",
+		PromptTemplate: "Plan this task before making any changes. " +
+			"Call enter_plan_mode first, explore read-only, then write the plan as a plan artifact " +
+			"(.automergent/artifacts/plan.md) and call exit_plan_mode to present it for my approval. " +
+			"Task: $ARGUMENTS",
+		WhenToUse: "Before making non-trivial changes",
 	}
 }
 
 func handlePlan(host Host, args []string) Result {
-	if len(args) > 0 && args[0] == "copy" {
-		host.AddSystemMessage("Plan copy: not yet implemented — plan content would be copied to clipboard.")
-		return Done(nil)
-	}
-	prompt := "Enter plan mode. Read-only analysis before making changes. Outline the approach, list files to touch, and ask for confirmation before editing."
-	if len(args) > 0 {
-		prompt += "\nFocus: " + strings.Join(args, " ")
+	// Fallback for dispatch paths that bypass template expansion; the same
+	// flow as the PromptTemplate.
+	var b strings.Builder
+	b.WriteString("Plan this task before making any changes. ")
+	b.WriteString("Call enter_plan_mode first, explore read-only, then write the plan as a plan artifact ")
+	b.WriteString("(.automergent/artifacts/plan.md) and call exit_plan_mode to present it for my approval.")
+	if focus := strings.TrimSpace(strings.Join(args, " ")); focus != "" {
+		b.WriteString("\nTask: " + focus)
 	}
 	host.SetStatus("Planning...")
-	return Done(host.StartAgent(prompt))
+	return Done(host.StartAgent(b.String()))
 }

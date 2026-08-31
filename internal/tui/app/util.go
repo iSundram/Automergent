@@ -173,7 +173,7 @@ func extractToolContext(name string, args map[string]any) string {
 			return "web: " + q
 		}
 	case "lsp_diagnostics":
-		if path, ok := args["path"].(string); ok {
+		if path, ok := args["file"].(string); ok {
 			return "diagnostics: " + filepath.Base(path)
 		}
 	}

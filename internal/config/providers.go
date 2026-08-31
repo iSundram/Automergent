@@ -47,113 +47,126 @@ type ProviderSpec struct {
 	SupportsEffort bool
 }
 
-// providerSpecs is the built-in provider catalog.
+// providerSpecs is the built-in provider catalog. Deliberately small: the
+// two Google backends as first-class providers (the way leading terminal
+// agents expose them — AI Studio for API-key auth, Vertex AI for Cloud
+// project auth) plus one open "custom" provider for any OpenAI- or
+// Gemini-compatible endpoint. Everything else is a custom provider away.
 var providerSpecs = map[string]ProviderSpec{
-	"google": {
-		Name:           "google",
-		DisplayName:    "Google Gemini",
-		Description:    "Gemini models — AI Studio (API key) or Vertex AI (project + location)",
+	"google-aistudio": {
+		Name:           "google-aistudio",
+		DisplayName:    "Google AI Studio",
+		Description:    "Gemini models via the Gemini API (API key)",
 		Icon:           "●",
 		DefaultModel:   "gemini-3.6-flash",
 		EnvKeys:        []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"},
-		Backends:       []string{"aistudio", "vertex"},
+		Backends:       []string{"aistudio"},
 		DefaultBackend: "aistudio",
 		CustomBaseURL:  true,
 		CustomModels:   true,
 		LiveModelList:  true,
-		SetupKeys:      []string{"backend", "project", "location", "orgId"},
+		SetupKeys:      []string{"orgId"},
 		ApiType:        "gemini",
-		ModelApiUrl:    "",
 		SupportedEfforts: []string{"minimal", "low", "medium", "high"},
 		SupportsEffort: true,
 	},
-	"openai": {
-		Name:           "openai",
-		DisplayName:    "OpenAI",
-		Description:    "GPT models — OpenAI API or compatible endpoints",
-		Icon:           "󰍉",
-		DefaultModel:   "gpt-4o",
-		EnvKeys:        []string{"OPENAI_API_KEY"},
-		Backends:       []string{},
-		DefaultBackend: "",
+	"google-vertex": {
+		Name:           "google-vertex",
+		DisplayName:    "Google Vertex AI",
+		Description:    "Gemini models via Vertex AI (Cloud project + location, Application Default Credentials)",
+		Icon:           "●",
+		DefaultModel:   "gemini-3.6-flash",
+		EnvKeys:        []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"},
+		Backends:       []string{"vertex"},
+		DefaultBackend: "vertex",
 		CustomBaseURL:  true,
 		CustomModels:   true,
 		LiveModelList:  true,
-		SetupKeys:      []string{"organization", "project"},
-		ApiType:        "openai",
-		ModelApiUrl:    "/v1/models",
+		SetupKeys:      []string{"project", "location"},
+		ApiType:        "gemini",
 		SupportedEfforts: []string{"minimal", "low", "medium", "high"},
 		SupportsEffort: true,
 	},
-	"anthropic": {
-		Name:           "anthropic",
-		DisplayName:    "Anthropic",
-		Description:    "Claude models — Anthropic API",
-		Icon:           "󰚥",
-		DefaultModel:   "claude-3-5-sonnet-20241022",
-		EnvKeys:        []string{"ANTHROPIC_API_KEY"},
-		Backends:       []string{},
-		DefaultBackend: "",
-		CustomBaseURL:  true,
-		CustomModels:   true,
-		LiveModelList:  true,
-		SetupKeys:      []string{},
-		ApiType:        "anthropic",
-		ModelApiUrl:    "/v1/models",
-		SupportedEfforts: []string{},
-		SupportsEffort: false,
-	},
-	"deepseek": {
-		Name:           "deepseek",
-		DisplayName:    "DeepSeek",
-		Description:    "DeepSeek models — DeepSeek API or compatible endpoints",
-		Icon:           "󱎑",
-		DefaultModel:   "deepseek-chat",
-		EnvKeys:        []string{"DEEPSEEK_API_KEY"},
-		Backends:       []string{},
-		DefaultBackend: "",
-		CustomBaseURL:  true,
-		CustomModels:   true,
-		LiveModelList:  true,
-		SetupKeys:      []string{},
-		ApiType:        "openai",
-		ModelApiUrl:    "/v1/models",
-		SupportedEfforts: []string{},
-		SupportsEffort: false,
-	},
-	"ollama": {
-		Name:           "ollama",
-		DisplayName:    "Ollama (Local)",
-		Description:    "Local models via Ollama server",
-		Icon:           "󱃖",
-		DefaultModel:   "llama3.2",
-		EnvKeys:        []string{},
-		Backends:       []string{},
-		DefaultBackend: "",
-		CustomBaseURL:  true,
-		CustomModels:   true,
-		LiveModelList:  true,
-		SetupKeys:      []string{"host"},
-		ApiType:        "openai",
-		ModelApiUrl:    "/api/tags",
-		SupportedEfforts: []string{},
-		SupportsEffort: false,
+	"custom": {
+		Name:          "custom",
+		DisplayName:   "Custom provider",
+		Description:   "Any OpenAI- or Gemini-compatible endpoint: set baseUrl, api key, and models",
+		Icon:          "🔌",
+		DefaultModel:  "",
+		EnvKeys:       []string{},
+		CustomBaseURL: true,
+		CustomModels:  true,
+		LiveModelList: false,
+		SetupKeys:     []string{"apiType"},
+		ApiType:       "custom",
 	},
 }
 
-// ProviderSpecFor returns the spec for a built-in provider.
+// hiddenProviderSpecs are legacy names kept working for configs and sessions
+// created before the catalog was narrowed. "google" resolves to whichever
+// backend its config implies (AI Studio by default, Vertex when project +
+// location are set); the removed third-party providers resolve to "custom"
+// so existing configs keep building a provider instead of erroring out.
+var hiddenProviderSpecs = map[string]ProviderSpec{
+	"google": {
+		Name:            "google",
+		DisplayName:     "Google Gemini",
+		Description:     "Legacy alias — use google-aistudio or google-vertex",
+		Icon:            "●",
+		DefaultModel:    "gemini-3.6-flash",
+		EnvKeys:         []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"},
+		Backends:        []string{"aistudio", "vertex"},
+		DefaultBackend:  "aistudio",
+		CustomBaseURL:   true,
+		CustomModels:    true,
+		LiveModelList:   true,
+		SetupKeys:       []string{"backend", "project", "location", "orgId"},
+		ApiType:         "gemini",
+		SupportsEffort:  true,
+		SupportedEfforts: []string{"minimal", "low", "medium", "high"},
+	},
+	"openai":    legacySpec("openai", "OpenAI", "gpt-4o", "openai"),
+	"anthropic": legacySpec("anthropic", "Anthropic", "claude-3-5-sonnet-20241022", "anthropic"),
+	"deepseek":  legacySpec("deepseek", "DeepSeek", "deepseek-chat", "openai"),
+	"ollama":    legacySpec("ollama", "Ollama (Local)", "llama3.2", "openai"),
+}
+
+func legacySpec(name, display, defaultModel, apiType string) ProviderSpec {
+	return ProviderSpec{
+		Name:          name,
+		DisplayName:   display,
+		Description:   "Legacy provider — kept for existing configs; configure as custom for new setups",
+		Icon:          "🔌",
+		DefaultModel:  defaultModel,
+		EnvKeys:       []string{},
+		CustomBaseURL: true,
+		CustomModels:  true,
+		ApiType:       apiType,
+	}
+}
+
+// ProviderSpecFor returns the spec for a provider: the active catalog first,
+// then legacy aliases.
 func ProviderSpecFor(name string) (ProviderSpec, bool) {
-	spec, ok := providerSpecs[name]
+	if spec, ok := providerSpecs[name]; ok {
+		return spec, true
+	}
+	spec, ok := hiddenProviderSpecs[name]
 	return spec, ok
 }
 
-// IsKnownProvider reports whether name is a built-in provider.
+// IsKnownProvider reports whether name is a provider (catalog or legacy).
 func IsKnownProvider(name string) bool {
 	_, ok := providerSpecs[name]
+	if ok {
+		return true
+	}
+	_, ok = hiddenProviderSpecs[name]
 	return ok
 }
 
-// ProviderNames returns all built-in provider names, sorted.
+// ProviderNames returns the user-facing provider names, sorted — the active
+// catalog only; legacy aliases exist for compatibility, not for menus.
 func ProviderNames() []string {
 	names := make([]string, 0, len(providerSpecs))
 	for name := range providerSpecs {
@@ -161,6 +174,23 @@ func ProviderNames() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// MaxContextTokens is the hard ceiling on any model's context window: 1M
+// tokens. Larger advertised limits (or user-registered --context values) are
+// clamped — beyond this, provider drift between estimation and real counting
+// makes the context ladder unreliable.
+const MaxContextTokens = 1_048_576
+
+// ClampContextLimit bounds a context limit to the platform ceiling.
+func ClampContextLimit(n int) int {
+	if n <= 0 {
+		return n
+	}
+	if n > MaxContextTokens {
+		return MaxContextTokens
+	}
+	return n
 }
 
 // DefaultModelFor returns the catalog default model for a provider, or ""
@@ -186,7 +216,7 @@ func ProviderIcon(provider string) string {
 	if spec, ok := providerSpecs[provider]; ok && spec.Icon != "" {
 		return spec.Icon
 	}
-	return "●"
+	return "🔌"
 }
 
 // IsValidBackend reports whether backend is valid for the provider. An empty

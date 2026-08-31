@@ -11,6 +11,8 @@ package app
 // whatever ESC would act on is what the hints describe.
 
 import (
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/iSundram/Automergent/internal/agent"
@@ -118,7 +120,64 @@ func (a *App) tipContext() tips.Context {
 	if a.confirm.Visible() && a.permissionTool != "" {
 		ctx.Tool = a.permissionTool
 	}
+	// While the palette highlights a command or the prompt holds a typed
+	// "/command", the info line describes THAT command instead of the
+	// resting state.
+	if tip := a.activeCommandTip(); tip != "" {
+		ctx.CommandTip = tip
+	}
 	return ctx
+}
+
+// activeCommandTip resolves the per-command tip to show in the info line:
+// the palette's highlighted command while the palette is open, otherwise the
+// command name at the head of a typed "/command ..." prompt. Personalized
+// variants get their {placeholders} filled from live state.
+func (a *App) activeCommandTip() string {
+	name := ""
+	if a.palette.Visible() {
+		if item := a.palette.Selected(); item != nil && item.Value != "" &&
+			!strings.ContainsAny(item.Value, " /\\") {
+			name = item.Value
+		}
+	} else if a.focus == "input" {
+		if value := strings.TrimSpace(a.input.Value()); strings.HasPrefix(value, "/") {
+			fields := strings.Fields(value)
+			name = strings.TrimPrefix(fields[0], "/")
+			// A bare "/name" with no space is still being typed — show the
+			// tip only once an argument position exists or the name is
+			// complete and known.
+			if len(fields) == 1 && a.commands != nil {
+				if _, ok := a.commands.Lookup(name); !ok {
+					return ""
+				}
+			}
+		}
+	}
+	if name == "" || a.commands == nil {
+		return ""
+	}
+	ct, ok := a.commands.Tip(name)
+	if !ok {
+		return ""
+	}
+	return a.personalizeCommandTip(ct.InfolineTip())
+}
+
+// personalizeCommandTip fills the {placeholders} a tip file may carry with
+// live values. Only cheap, in-memory values are used — nothing here hits
+// disk on the keystroke path.
+func (a *App) personalizeCommandTip(tip string) string {
+	if !strings.Contains(tip, "{") {
+		return tip
+	}
+	replacements := []string{
+		"{model}", a.cfg.Model,
+		"{mode}", a.displayMode(),
+		"{artifacts}", fmt.Sprintf("%d", len(a.artifacts)),
+		"{workdir}", a.workDir,
+	}
+	return strings.NewReplacer(replacements...).Replace(tip)
 }
 
 // displayMode returns the approval mode to show in the footer chip, resolving

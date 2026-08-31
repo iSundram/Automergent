@@ -18,6 +18,7 @@ type Spinner struct {
 	styles        *themes.Styles
 	active        bool
 	label         string
+	meta          string // live parenthetical: "12s • ↓ 1.2k tokens"
 	reducedMotion bool
 }
 
@@ -43,6 +44,11 @@ func (s *Spinner) Start() { s.active = true }
 // SetLabel updates the spinner label.
 func (s *Spinner) SetLabel(label string) { s.label = label }
 
+// SetMeta sets the live parenthetical shown after the label — the Claude
+// Code-style "(12s • ↓ 1.2k tokens)" readout of elapsed time and streamed
+// tokens. An empty string drops it.
+func (s *Spinner) SetMeta(meta string) { s.meta = meta }
+
 // Stop deactivates the spinner.
 func (s *Spinner) Stop() { s.active = false }
 
@@ -62,7 +68,9 @@ func (s Spinner) Update(msg tea.Msg) (Spinner, tea.Cmd) {
 	return s, cmd
 }
 
-// View renders the spinner.
+// View renders the spinner: "✣ thinking… (12s • ↓ 1.2k tokens)" — the verb
+// carries the activity, the dim parenthetical carries the live clock and
+// token counter, matching Claude Code's spinner row.
 func (s Spinner) View() string {
 	if !s.active {
 		return ""
@@ -71,8 +79,13 @@ func (s Spinner) View() string {
 	if label == "" {
 		label = "thinking"
 	}
+	if s.meta != "" {
+		label += "… (" + s.meta + ")"
+	} else {
+		label += "…"
+	}
 	if s.reducedMotion {
 		return "… " + s.styles.Dim.Render(label)
 	}
-	return s.sp.View() + " " + s.styles.Dim.Render(label+"…")
+	return s.sp.View() + " " + s.styles.Dim.Render(label)
 }

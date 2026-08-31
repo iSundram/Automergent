@@ -14,15 +14,13 @@ import (
 
 func modelCommand() Command {
 	return Command{
-		Name:          "model",
-		Description:   "Switch, list, or manage models for the active provider",
-		Category:      "AI & Model",
-		Icon:          "󰊕",
-		ArgsHint:      "[name|list|add|remove|refresh|reset]",
-		Tier:          TierSecondary,
-		Type:          CmdFullPage,
-		FullPageTitle: "Model Hub",
-		SubPalette:    "model",
+		Name:        "model",
+		Description: "Switch, list, or manage models for the active provider",
+		Category:    "AI & Model",
+		Icon:        "󰊕",
+		ArgsHint:    "[name|list|add|remove|refresh|reset]",
+		Tier:        TierSecondary,
+		SubPalette:  "model",
 		SubCommands: []SubCommand{
 			{Name: "list", Description: "List available models", Handler: handleModel},
 			{Name: "add", Description: "Add a custom model", ArgsHint: "<name>", Handler: handleModel},
@@ -183,7 +181,10 @@ func modelAdd(host Host, provider string, args []string) Result {
 				host.CommandError("--context must be a positive integer")
 				return Done(nil)
 			}
-			mc.ContextLimit = n
+			// The platform ceiling is 1M tokens: larger values make the
+			// context ladder unreliable (estimation drift compounds), so
+			// they are clamped, not stored.
+			mc.ContextLimit = config.ClampContextLimit(n)
 		case "name":
 			mc.DisplayName = val
 		case "price-in":

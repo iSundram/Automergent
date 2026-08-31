@@ -5,6 +5,7 @@ package components
 
 import (
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -60,7 +61,7 @@ func (c *Conversation) renderAssistant(m ConversationMsg, isLast bool, prevTool 
 		if liveStreaming {
 			sb.WriteString(c.renderLiveThought(m.Thought, responseW) + "\n")
 		} else {
-			sb.WriteString(c.renderThoughtBox(m.Thought, msgW) + "\n")
+			sb.WriteString(c.renderThoughtBlock(m.Thought, m.ThoughtDuration, msgW) + "\n")
 		}
 	}
 
@@ -144,6 +145,19 @@ func (c *Conversation) renderLiveThought(thought string, width int) string {
 	return header + "\n" + box
 }
 
+// thoughtHeader phrases a SETTLED thought-box label. The duration may be
+// unknown (0) — sessions restored from disk, or a turn that ended before the
+// thinking clock was stamped — and those must not read as still-thinking:
+// "● Thinking" is reserved for the live block (renderLiveThought, which
+// hardcodes its own header). A settled block with no duration says
+// "✓ Thought" plainly.
+func thoughtHeader(d time.Duration) string {
+	if d > 0 {
+		return "✓ Thought for " + formatBarDuration(d)
+	}
+	return "✓ Thought"
+}
+
 // truncateTail keeps the last maxLines lines of growing text so the live
 // thought box stays a fixed height.
 func truncateTail(s string, width int, maxLines int) string {
@@ -171,7 +185,30 @@ func indentLines(content string, spaces int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (c *Conversation) renderThoughtBox(thought string, width int) string {
+// renderThoughtBlock renders a SETTLED thinking block by the current expand
+// mode: collapsed shows only the header line ("✓ Thought for 4s · /expand"),
+// expanded shows the header plus the full rounded box. Live (still
+// streaming) thinking is unaffected — it renders via renderLiveThought.
+func (c *Conversation) renderThoughtBlock(thought string, thoughtDuration time.Duration, width int) string {
+	header := c.styles.Dim.Copy().Bold(true).Render(thoughtHeader(thoughtDuration))
+
+	// Collapsed: the header alone, with the command that opens it. The
+	// rounded box appears only when expanded.
+	if c.expandMode != ExpandFull {
+		hint := c.styles.Dim.Render(" · /expand")
+		return header + hint
+	}
+
+	box := c.renderThoughtBoxWithDuration(thought, thoughtDuration, width)
+	if box == "" {
+		return header
+	}
+	return box
+}
+
+// renderThoughtBoxWithDuration renders the settled thinking box; the
+// thoughtDuration only changes the header line ("✻ Thought for 4s").
+func (c *Conversation) renderThoughtBoxWithDuration(thought string, thoughtDuration time.Duration, width int) string {
 	if thought == "" {
 		return ""
 	}
@@ -180,8 +217,10 @@ func (c *Conversation) renderThoughtBox(thought string, width int) string {
 		return ""
 	}
 
-	// Render thinking header OUTSIDE the box (like the brand label)
-	header := c.styles.Dim.Copy().Bold(true).Render("● Thinking")
+	// Render thinking header OUTSIDE the box (like the brand label). A
+	// settled duration reads the way Claude Code collapses a finished
+	// thinking block: "✻ Thought for 4s"; still-open blocks say "Thinking".
+	header := c.styles.Dim.Copy().Bold(true).Render(thoughtHeader(thoughtDuration))
 
 	// Markdown-render to the box's *inner* width. Rendering unwrapped and
 	// letting lipgloss re-wrap split glamour's ANSI spans mid-sequence, which

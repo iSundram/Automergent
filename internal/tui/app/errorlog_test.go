@@ -296,3 +296,28 @@ func TestOutcomeBadgeMapping(t *testing.T) {
 		}
 	}
 }
+
+func TestRecordAPIErrorDeduplicatesSameFailure(t *testing.T) {
+	app := newTestApp(t)
+	base := apiErrorRecord{Code: "RATE_LIMITED", Status: "429", Message: "quota exceeded"}
+
+	// The same failure arrives via the retry observer (attempt 1), again at
+	// attempt 2, and finally as the terminal error — it must read as one
+	// entry with the latest attempt count.
+	app.recordAPIError(apiErrorRecord{Code: base.Code, Status: base.Status, Message: base.Message, Attempt: 1, MaxAttempts: 10, Retrying: true})
+	app.recordAPIError(apiErrorRecord{Code: base.Code, Status: base.Status, Message: base.Message, Attempt: 2, MaxAttempts: 10, Retrying: true})
+	app.recordAPIError(apiErrorRecord{Code: base.Code, Status: base.Status, Message: base.Message, Attempt: 2, MaxAttempts: 10, Retrying: false})
+
+	if len(app.apiErrors) != 1 {
+		t.Fatalf("one failure must read as one entry, got %d", len(app.apiErrors))
+	}
+	if app.apiErrors[0].Attempt != 2 {
+		t.Fatalf("attempt count must advance in place, got %d", app.apiErrors[0].Attempt)
+	}
+
+	// A different failure is a new entry.
+	app.recordAPIError(apiErrorRecord{Code: "UNAVAILABLE", Message: "connection reset"})
+	if len(app.apiErrors) != 2 {
+		t.Fatalf("a distinct failure must append, got %d", len(app.apiErrors))
+	}
+}

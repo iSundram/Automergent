@@ -30,6 +30,7 @@ func Run(cfg *config.Config, ag *agent.Agent, sess *session.Session, storage *se
 	// dead: there was no program to send to at package-init time.
 	app.installNotifications()
 	app.installQuestionnaire()
+	app.installToolHooks()
 	_, err := p.Run()
 
 	// Exit alternate screen after TUI ends

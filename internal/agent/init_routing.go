@@ -22,12 +22,11 @@ import (
 //                                escalation when unambiguous
 //   task                     -> the phase loop, phase chosen per task
 
-// decomposeFirstMessage runs the INIT decomposer on the session's first
-// message (and only then — later messages are follow-ups handled by the
-// keyword path and the prompt pipeline). Returns nil when decomposition is
-// unavailable, so the caller falls back.
-func (a *Agent) decomposeFirstMessage(ctx context.Context, message string, isFirstMessage bool) *promptpkg.Decomposition {
-	if !isFirstMessage || a.provider == nil {
+// decomposeFirstMessage runs the INIT decomposer on a user message. Returns
+// nil when decomposition is unavailable, so the caller falls back to the
+// keyword router.
+func (a *Agent) decomposeFirstMessage(ctx context.Context, message string) *promptpkg.Decomposition {
+	if a.provider == nil {
 		return nil
 	}
 	if a.decomposer == nil {
@@ -132,8 +131,13 @@ func (a *Agent) executeDecomposition(ctx context.Context, d *promptpkg.Decomposi
 
 	if len(tasks) == 0 {
 		// Nothing routed and nothing direct: the message was pure rules,
-		// noise, or clarification — all already handled. Record a short
-		// acknowledgement so the turn isn't silent.
+		// noise, or clarification. Rules and clarification are handled
+		// above; for noise-only messages let the MODEL respond naturally
+		// rather than a canned acknowledgement — a greeting misrouted as
+		// noise then still gets a real reply.
+		if len(d.RuleParts()) == 0 && len(d.ClarifyParts()) == 0 {
+			return a.answerDirectQuestion(ctx, originalPrompt)
+		}
 		ack := "Recorded. " + strings.Join(noiseSummary(d), " ")
 		msg := ai.NewTextMessage(ai.RoleAssistant, strings.TrimSpace(ack))
 		a.sess.AddMessage(msg)
@@ -234,4 +238,24 @@ func noiseSummary(d *promptpkg.Decomposition) []string {
 		lines = append(lines, "(noted, set aside: \""+p.Text+"\")")
 	}
 	return lines
+}
+
+// buildIntentKeywords mark messages that expect implementation work, not
+// just investigation. Used by the keyword fallback to chain BUILD after
+// EXPLORE so the arc still completes when the decomposer is unavailable.
+var buildIntentKeywords = []string{
+	"implement", "create", "build", "make", "add", "write", "fix", "repair",
+	"refactor", "optimize", "upgrade", "migrate", "delete", "remove",
+	"rename", "install", "set up", "setup", "generate",
+}
+
+// looksLikeBuildWork reports whether a message carries implementation intent.
+func looksLikeBuildWork(message string) bool {
+	lower := strings.ToLower(message)
+	for _, kw := range buildIntentKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
 }

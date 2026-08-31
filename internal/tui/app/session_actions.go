@@ -327,6 +327,10 @@ func (a *App) newSession() {
 	if a.persist != nil {
 		a.persist.SetSession(a.sess)
 	}
+	// Artifacts are session-scoped: a fresh session starts with none.
+	a.artifacts = nil
+	a.cancelPlanReview()
+	a.refreshArtifactChrome()
 	a.updateActiveTokens()
 	a.stats.TotalCost = 0
 	a.stats.InputTokens = 0
@@ -417,9 +421,47 @@ func (a *App) checkpointSummaries() []commands.CheckpointInfo {
 	return out
 }
 
+// rebuildCheckpoints derives rewind points from a message history: for
+// every user turn after the first, the conversation state that preceded it
+// is a checkpoint — exactly what captureCheckpoint records turn-by-turn.
+// Deriving them makes rewind survive restarts and session switches, where
+// the in-memory checkpoint list is gone (or worse, stale).
+func rebuildCheckpoints(messages []ai.Message) []conversationCheckpoint {
+	var out []conversationCheckpoint
+	for i, m := range messages {
+		if m.Role != ai.RoleUser || i == 0 {
+			continue
+		}
+		label := strings.TrimSpace(m.TextContent())
+		if idx := strings.IndexAny(label, "\n"); idx > 0 {
+			label = label[:idx]
+		}
+		if len(label) > 80 {
+			label = label[:77] + "..."
+		}
+		snap := make([]ai.Message, i)
+		copy(snap, messages[:i])
+		out = append(out, conversationCheckpoint{
+			label:    label,
+			at:       time.Now(), // derived, not captured — display-only
+			messages: snap,
+		})
+	}
+	if len(out) > maxCheckpoints {
+		out = out[len(out)-maxCheckpoints:]
+	}
+	return out
+}
+
 // rewindTo restores the conversation to the state captured before turn n
 // (1-based). Future checkpoints are discarded; the session is persisted.
 func (a *App) rewindTo(n int) error {
+	if a.thinking {
+		return fmt.Errorf("agent is running — /cancel it before rewinding")
+	}
+	if a.sess == nil {
+		return fmt.Errorf("no active session")
+	}
 	if n < 1 || n > len(a.checkpoints) {
 		return fmt.Errorf("checkpoint %d out of range (1-%d)", n, len(a.checkpoints))
 	}

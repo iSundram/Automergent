@@ -3,12 +3,85 @@ package google
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/iSundram/Automergent/internal/ai"
 	automergentErrors "github.com/iSundram/Automergent/internal/errors"
 	"google.golang.org/genai"
 )
+
+func TestBuildContentsSystemBetweenAssistantsKeepsAlternation(t *testing.T) {
+	// Compaction summaries, stall nudges and goal reminders are system
+	// messages sitting BETWEEN assistant turns. Dropping them (the old
+	// behavior) made two model turns adjacent — the API rejects that with
+	// INVALID_INPUT. They must be preserved as user-role text.
+	messages := []ai.Message{
+		{Role: ai.RoleUser, Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: "hi"}}},
+		{Role: ai.RoleAssistant, Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: "part one"}}},
+		{Role: ai.RoleSystem, Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: "# Compacted Context Summary\nearlier work..."}}},
+		{Role: ai.RoleAssistant, Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: "part two"}}},
+		{Role: ai.RoleUser, Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: "thanks"}}},
+	}
+
+	contents := buildContents(messages)
+	for i := 1; i < len(contents); i++ {
+		if contents[i].Role == string(genai.RoleModel) && contents[i-1].Role == string(genai.RoleModel) {
+			t.Fatalf("adjacent model turns at %d after system-message mapping: %v", i, contentRoles(contents))
+		}
+	}
+	// The summary text must survive somewhere.
+	found := false
+	for _, c := range contents {
+		for _, p := range c.Parts {
+			if p.Text != "" && strings.Contains(p.Text, "Compacted Context Summary") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("system summary text was dropped entirely")
+	}
+}
+
+func TestBuildContentsCoalescesAdjacentModelTurns(t *testing.T) {
+	// Belt-and-braces: metadata-rebuilt or resumed sessions can still
+	// contain consecutive assistants; the provider-side coalescing must
+	// merge them rather than send an invalid sequence.
+	messages := []ai.Message{
+		{Role: ai.RoleUser, Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: "q"}}},
+		{Role: ai.RoleAssistant, Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: "a1"}}},
+		{Role: ai.RoleAssistant, Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: "a2"}}},
+		{Role: ai.RoleUser, Content: []ai.ContentPart{{Type: ai.ContentTypeText, Text: "next"}}},
+	}
+
+	contents := buildContents(messages)
+	for i := 1; i < len(contents); i++ {
+		if contents[i].Role == string(genai.RoleModel) && contents[i-1].Role == string(genai.RoleModel) {
+			t.Fatalf("adjacent model turns survived: %v", contentRoles(contents))
+		}
+	}
+	// Both texts must survive the merge.
+	joined := ""
+	for _, c := range contents {
+		if c.Role == string(genai.RoleModel) {
+			for _, p := range c.Parts {
+				joined += p.Text
+			}
+		}
+	}
+	if !strings.Contains(joined, "a1") || !strings.Contains(joined, "a2") {
+		t.Fatalf("merge lost text: %q", joined)
+	}
+}
+
+func contentRoles(contents []*genai.Content) []string {
+	out := make([]string, len(contents))
+	for i, c := range contents {
+		out[i] = c.Role
+	}
+	return out
+}
 
 func TestBuildContents(t *testing.T) {
 	messages := []ai.Message{

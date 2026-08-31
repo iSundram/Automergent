@@ -1,8 +1,10 @@
 package components
 
 import (
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 
@@ -24,7 +26,6 @@ func fullyLoadedStatusBar(width int) StatusBar {
 	sb.SetStatus("⚙ read_file…")
 	sb.SetOutcome(OutcomeCancelled)
 	sb.SetQueued(3)
-	sb.SetContextUsage(87)
 	sb.SetPendingEdits(4)
 	sb.SetProblems(9)
 	sb.SetGitBranch("feature/some-long-branch-name+2")
@@ -50,7 +51,7 @@ func TestViewNeverExceedsWidthWhenIdle(t *testing.T) {
 	for _, width := range []int{20, 40, 70, 100, 200} {
 		sb := testStatusBar(width)
 		sb.SetGitBranch("main")
-		sb.SetContextUsage(12)
+		sb.SetWorkDir("/home/user/automergent")
 		for _, line := range strings.Split(sb.View(), "\n") {
 			if got := ansi.StringWidth(line); got > width {
 				t.Errorf("idle width %d: line is %d cells wide: %q", width, got, ansi.Strip(line))
@@ -106,13 +107,33 @@ func TestSegmentsDropInPriorityOrder(t *testing.T) {
 }
 
 // TestNoClockOrTimerInBar: the bar only repaints on events, so a wall-clock or
-// elapsed readout here sits stale between them and reads as a frozen UI.
+// elapsed readout here sits stale between them and reads as a frozen UI. The
+// user clock is the one exception: the app's live tick repaints it on minute
+// rollovers, so it is never stale.
 func TestNoClockOrTimerInBar(t *testing.T) {
 	plain := ansi.Strip(fullyLoadedStatusBar(200).View())
-	for _, pattern := range []string{":", "m0s", "elapsed"} {
+	for _, pattern := range []string{":", "m0s", "elapsed", "last run"} {
 		if strings.Contains(plain, pattern) {
 			t.Errorf("bar should carry no time readout, found %q in %q", pattern, plain)
 		}
+	}
+}
+
+// TestUserClockSegmentShowsLocatedTime verifies the IP-located local-time
+// readout renders as "HH:MM · CC" in the HUD.
+func TestUserClockSegmentShowsLocatedTime(t *testing.T) {
+	sb := testStatusBar(200)
+	tz, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		t.Skip("tzdata unavailable")
+	}
+	sb.SetUserClock(tz, "IN")
+	plain := ansi.Strip(sb.View())
+	if !strings.Contains(plain, "· IN") {
+		t.Errorf("clock segment missing country label: %q", plain)
+	}
+	if !regexp.MustCompile(`\d{2}:\d{2}`).MatchString(plain) {
+		t.Errorf("clock segment missing HH:MM readout: %q", plain)
 	}
 }
 

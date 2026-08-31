@@ -13,8 +13,20 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/iSundram/Automergent/internal/diagnostics"
 	"github.com/iSundram/Automergent/internal/tools"
 )
+
+// compilerRecoverySuffix inspects failed-command output for compiler errors
+// and, when found, appends actionable recovery guidance. Empty when the
+// output contains no recognized diagnostics.
+func compilerRecoverySuffix(output string) string {
+	report := diagnostics.RecoverCompilerOutput(output, "")
+	if report.UserMessage == "" {
+		return ""
+	}
+	return "\n\n" + report.Render()
+}
 
 // AsyncSession represents a running async shell session.
 type AsyncSession struct {
@@ -754,7 +766,7 @@ func (t *AsyncRunnerTool) executeSync(ctx context.Context, command, cwd string, 
 			if ctx.Err() == context.DeadlineExceeded {
 				return tools.Result{IsError: true, Content: fmt.Sprintf("command timed out after %s\n%s", timeout, out)}, nil
 			}
-			return tools.Result{IsError: true, Content: fmt.Sprintf("command failed: %v\n%s", exitErr, out)}, nil
+			return tools.Result{IsError: true, Content: fmt.Sprintf("command failed: %v\n%s%s", exitErr, out, compilerRecoverySuffix(out))}, nil
 		}
 		return tools.Result{Content: out}, nil
 	case <-time.After(time.Duration(initialWait) * time.Second):

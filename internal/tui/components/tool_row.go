@@ -147,13 +147,26 @@ func (c *Conversation) moreRow(n int, noun string) string {
 		fmt.Sprintf("%s %s", glyphMore, plural(n, "more "+noun)))
 }
 
-// hintRow renders the expand affordance below a truncated detail block.
+// hintRow renders the expand affordance below a truncated detail block. The
+// hint names the command that changes the state: a COLLAPSED block
+// advertises /expand, an EXPANDED one (clipped only to fit) advertises
+// /collapse — so the affordance is always actionable.
 func (c *Conversation) hintRow(hidden int, noun string) string {
 	if hidden <= 0 {
 		return ""
 	}
 	return rowIndent + c.styles.Dim.Render(
-		fmt.Sprintf("%s %d more %s — ctrl+e expands", glyphUp, hidden, noun))
+		fmt.Sprintf("%s %d more %s — %s", glyphUp, hidden, noun, c.expandHintVerb()))
+}
+
+// expandHintVerb is the command a block's current state invites: collapsed
+// content says /expand, expanded content that is merely clipped says
+// /collapse (to collapse it back to one line).
+func (c *Conversation) expandHintVerb() string {
+	if c.expandMode == ExpandFull {
+		return "/collapse"
+	}
+	return "/expand"
 }
 
 // severityMark styles a severity glyph for diagnostics and security rows.

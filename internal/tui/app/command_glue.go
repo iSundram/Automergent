@@ -316,20 +316,15 @@ func (a *App) handlePromptCommand(cmd commands.Command, args []string) tea.Cmd {
 
 // handleFullPageCommand opens a full-page overlay with command output.
 func (a *App) handleFullPageCommand(cmd commands.Command, args []string) tea.Cmd {
-	// Special-case: open interactive overlays instead of text.
-	switch cmd.Name {
-	case "provider":
-		a.providerStudio.Show()
-		a.layout()
-		return nil
-	case "model":
-		a.modelHub.Show()
-		a.layout()
-		return nil
-	}
-	// Structured page: the command's view builder renders sections and
-	// action shortcuts into the PageViewer. Args fall through to the handler
-	// so argument paths (/context detail, /error clear) keep working.
+	// /model and /provider are no longer full-page overlays: their picker
+	// subpalettes (opened by the trailing space — "/model ", "/provider ")
+	// and their handler status output are the single surfaces. The old
+	// Model Hub / Provider Studio pages duplicated both, so a bare
+	// "/model" opened a full page while "/model " opened a picker — two
+	// surfaces for one job. Structured page: the command's view builder
+	// renders sections and action shortcuts into the PageViewer. Args fall
+	// through to the handler so argument paths (/context detail, /error
+	// clear) keep working.
 	if cmd.Page != nil && len(args) == 0 {
 		a.pageViewer.Show(cmd.Page(a))
 		a.fullPage.Hide()

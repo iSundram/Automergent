@@ -10,9 +10,19 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/iSundram/Automergent/internal/config"
 	"github.com/iSundram/Automergent/internal/diagnostics"
 	"github.com/iSundram/Automergent/internal/tools"
 )
+
+// showDiagHeader reports whether the diagnostics header should be included
+// in read results. It defaults to on when no configuration is available.
+func (t *ReadFileTool) showDiagHeader() bool {
+	if t.cfg != nil {
+		return t.cfg.Diagnostics.ShowInRead
+	}
+	return true
+}
 
 // isBinaryFile reports whether the file at path appears to be binary.
 // It reads up to 8 KB and checks for null bytes or non-text MIME type.
@@ -51,6 +61,13 @@ func isBinaryFile(path string) (bool, error) {
 // ReadFileTool reads the contents of a file.
 type ReadFileTool struct {
 	tools.BaseTool
+	cfg *config.Config
+}
+
+// NewReadFileTool builds a ReadFileTool honoring the given configuration
+// (diagnostics display settings).
+func NewReadFileTool(cfg *config.Config) *ReadFileTool {
+	return &ReadFileTool{cfg: cfg}
 }
 
 func (t *ReadFileTool) Name() string                               { return "read_file" }
@@ -152,14 +169,42 @@ func (t *ReadFileTool) Execute(_ context.Context, args map[string]any) (tools.Re
 	}
 
 	var header strings.Builder
-	if diags := diagnostics.Analyze(path, strings.Join(all, "\n")); len(diags) > 0 {
-		recoveryMsg := diagnostics.RecoveryMessage(path, strings.Join(all, "\n"))
-		header.WriteString("═══════════════════════════════════\n")
-		header.WriteString(fmt.Sprintf("[DIAGNOSTICS: %d error(s) found]\n", len(diags)))
+	if diags := diagnostics.Analyze(path, strings.Join(all, "\n")); len(diags) > 0 && t.showDiagHeader() {
+		errCount, warnCount := 0, 0
 		for _, d := range diags {
-			header.WriteString(fmt.Sprintf("ERROR Line %d: %s - %s\n", d.Line, d.Code, d.Message))
+			switch d.Severity {
+			case "error":
+				errCount++
+			case "warning":
+				warnCount++
+			}
 		}
-		if recoveryMsg != "" {
+		header.WriteString("═══════════════════════════════════\n")
+		header.WriteString(fmt.Sprintf("[DIAGNOSTICS: %d error(s), %d warning(s)]\n", errCount, warnCount))
+		// Errors first, then warnings, then info/hints — capped so a badly
+		// broken generated file cannot flood the context window.
+		const maxDiagLines = 20
+		shown := 0
+		for _, sev := range []string{"error", "warning"} {
+			for _, d := range diags {
+				if shown >= maxDiagLines {
+					break
+				}
+				if d.Severity != sev {
+					continue
+				}
+				label := "ERROR"
+				if sev == "warning" {
+					label = "WARN "
+				}
+				header.WriteString(fmt.Sprintf("%s Line %d: %s - %s\n", label, d.Line, d.Code, d.Message))
+				shown++
+			}
+		}
+		if shown < len(diags) {
+			header.WriteString(fmt.Sprintf("... (%d more diagnostics not shown)\n", len(diags)-shown))
+		}
+		if recoveryMsg := diagnostics.RecoveryMessage(path, strings.Join(all, "\n")); recoveryMsg != "" {
 			header.WriteString("\n")
 			header.WriteString(recoveryMsg)
 		}

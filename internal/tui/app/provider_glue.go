@@ -195,6 +195,14 @@ func (a *App) switchProvider(provider, model string) error {
 	a.ag.SetProvider(p)
 	a.header.SetProvider(a.cfg.Provider)
 	a.header.SetModel(a.cfg.Model)
+	// Effort display: /effort writes the PER-PROVIDER value, the config
+	// file may hold a global one — show whichever is active.
+	effort := a.cfg.Effort
+	if pc := a.cfg.Providers[a.cfg.Provider]; pc.Effort != "" {
+		effort = pc.Effort
+	}
+	a.header.SetEffort(effort)
+	a.header.SetMaxTokens(p.ContextLimit())
 	a.availableModels = nil
 	return nil
 }

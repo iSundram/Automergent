@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -39,6 +40,45 @@ func AuditStorage(storageDir string) (*SessionDiagnostics, error) {
 	aliveSessions := make(map[string]bool)
 	var storeSize int64
 
+	// Transcript-format sessions under projects/<dir>/<id>.jsonl, read lite
+	// (identity + totals only).
+	if projects, err := os.ReadDir(filepath.Join(storageDir, "projects")); err == nil {
+		for _, p := range projects {
+			if !p.IsDir() {
+				continue
+			}
+			files, err := os.ReadDir(filepath.Join(storageDir, "projects", p.Name()))
+			if err != nil {
+				continue
+			}
+			for _, f := range files {
+				if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+					continue
+				}
+				info, err := f.Info()
+				if err != nil {
+					continue
+				}
+				storeSize += info.Size()
+				s := readLiteSession(filepath.Join(storageDir, "projects", p.Name(), f.Name()))
+				if s == nil {
+					diag.CorruptSessions = append(diag.CorruptSessions, f.Name())
+					continue
+				}
+				aliveSessions[s.ID] = true
+				diag.TotalSessions++
+				diag.TotalInputTokens += s.TotalInputTokens
+				diag.TotalOutputTokens += s.TotalOutputTokens
+				if diag.OldestSession.IsZero() || s.CreatedAt.Before(diag.OldestSession) {
+					diag.OldestSession = s.CreatedAt
+				}
+				if diag.NewestSession.IsZero() || s.UpdatedAt.After(diag.NewestSession) {
+					diag.NewestSession = s.UpdatedAt
+				}
+			}
+		}
+	}
+
 	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil {
@@ -62,7 +102,7 @@ func AuditStorage(storageDir string) (*SessionDiagnostics, error) {
 				}
 				continue
 			}
-			if name == "search_index.json" || name == "state.json" || name == "state.backup.json" || name == "recovery.json" {
+			if name == "search_index.json" || name == statsFileName || name == "state.json" || name == "state.backup.json" || name == "recovery.json" {
 				continue
 			}
 

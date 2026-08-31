@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/iSundram/Automergent/internal/agent"
+	"github.com/iSundram/Automergent/internal/session"
 	toolsagent "github.com/iSundram/Automergent/internal/tools/agent"
 )
 
@@ -112,13 +114,31 @@ func (a *App) startDream(auto bool) {
 		}()
 
 		prompt := dreamPrompt(a.workDir, len(a.sess.Messages))
-		out, err := a.ag.Execute(a.ctx, toolsagent.AgentTypeGeneralPurpose, prompt, "")
+		// The consolidator runs through a DETACHED agent. Routing it through
+		// the main agent's Execute would re-emit the child's tokens and tool
+		// events on the parent's stream — the still-armed waitForAgentEvent
+		// loop then rendered the consolidator's output into the user's
+		// conversation and corrupted the next turn's streaming state.
+		// A private agent with its own session and a drained event channel
+		// keeps consolidation invisible to the conversation.
+		dreamSess := session.New()
+		dreamSess.Metadata["agent_type"] = "memory-consolidator"
+		dreamSess.WorkDir = a.workDir
+		dreamAgent := agent.New(a.cfg, a.ag.Provider(), dreamSess, a.ag.Tools())
+		var out string
+		out, err := dreamAgent.Execute(a.ctx, toolsagent.AgentTypeGeneralPurpose, prompt, "")
 		var msg string
 		if err != nil {
 			msg = "✗ Memory consolidation failed: " + err.Error()
 		} else {
 			msg = "✓ Memory consolidated (" + kind + "):\n" + out
 		}
+		// Drain the consolidator's event channel so its Emits never block,
+		// then release the agent.
+		go func() {
+			for range dreamAgent.Events() {
+			}
+		}()
 		if a.sendToProgram != nil {
 			a.sendToProgram(dreamDoneMsg{text: msg})
 		}
@@ -141,6 +161,12 @@ func dreamPrompt(workDir string, sessionMessages int) string {
 4. HARD LIMIT: the file must stay under %d lines. If it would exceed the
    limit, compress: prefer tables and terse bullets over prose, and drop the
    least valuable sections first. The final line count must be reported.
+
+CRITICAL SAFETY RULES:
+- NEVER delete AUTOMERGENT.md. The rewrite is an edit of the existing file,
+  not a delete-and-recreate. If you cannot read it, create it with /init
+  conventions — an empty repo must never end up without the file.
+- NEVER touch any file other than AUTOMERGENT.md.
 
 Report back: the final line count, what was added, and what was dropped.`,
 		workDir, sessionMessages, dreamMaxEntryLines)

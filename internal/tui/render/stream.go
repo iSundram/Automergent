@@ -318,9 +318,9 @@ func (s *Streamer) renderOpenFence() string {
 // goes through the inline styler, which handles unterminated markers.
 func (s *Streamer) tailRender(showCursor bool) string {
 	if s.tail == "" {
-		if showCursor {
-			return Cursor()
-		}
+		// No partial text: a cursor here would render as a lone ▌ on its
+		// own line — noise between finished blocks. The spinner and status
+		// line already say "still working", so emit nothing.
 		return ""
 	}
 	var out string

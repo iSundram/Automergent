@@ -112,6 +112,16 @@ func (a *App) CompactContext() tea.Cmd {
 	return a.compactContext()
 }
 
+// SetBlocksExpanded collapses or expands every collapsible conversation
+// block (tool cards, thinking blocks, shell output) in one move. The
+// returned label names the inverse command so the status line always tells
+// the user what to type next.
+func (a *App) SetBlocksExpanded(expanded bool) string {
+	label := a.conversation.SetExpand(expanded)
+	a.conversation.RenderIfDirty()
+	return label
+}
+
 func (a *App) Provider() string {
 	return a.cfg.Provider
 }

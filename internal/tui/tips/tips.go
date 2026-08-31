@@ -130,6 +130,10 @@ type Context struct {
 	Elapsed time.Duration
 	// NextRetryIn is the delay before the next retry attempt.
 	NextRetryIn time.Duration
+	// CommandTip carries a per-command tip for the info line: set while the
+	// palette highlights a command or the prompt holds a typed "/command".
+	// It wins over the generic idle and palette lines.
+	CommandTip string
 }
 
 // hintTable maps each state to its footer hints. Ordering within a state is
@@ -255,6 +259,12 @@ func Hints(s State) []Hint {
 // Info returns the `└─` info-line text for a state: what the user should do
 // next, and why the UI is in this state. Context fills in live specifics.
 func Info(s State, ctx Context) string {
+	// A per-command tip outranks the generic idle/palette lines: while the
+	// user is browsing commands or typing one, the line describes THAT
+	// command instead of the resting state.
+	if ctx.CommandTip != "" && (s == StateIdle || s == StatePaletteOpen) {
+		return ctx.CommandTip
+	}
 	switch s {
 	case StateIdle:
 		return "enter sends · / for commands · @ for files · shift+tab switches mode"

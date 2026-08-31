@@ -113,13 +113,15 @@ func prependUserContext(messages []ai.Message, context map[string]string) []ai.M
 	}
 
 	if git != "" {
-		prefix = append(prefix, ai.Message{
-			Role: ai.RoleUser,
-			Content: []ai.ContentPart{{
-				Type: ai.ContentTypeText,
-				Text: fmt.Sprintf("<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# gitStatus\n%s\nIMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>\n", git),
-			}},
-			Metadata: map[string]any{"meta": true},
+		// The git snapshot joins the same meta message rather than starting
+		// a second user turn: strict providers (Google) reject consecutive
+		// same-role messages, and the snapshot is context, not a turn.
+		if len(prefix) == 0 {
+			prefix = append(prefix, ai.Message{Role: ai.RoleUser, Metadata: map[string]any{"meta": true}})
+		}
+		prefix[0].Content = append(prefix[0].Content, ai.ContentPart{
+			Type: ai.ContentTypeText,
+			Text: fmt.Sprintf("<system-reminder>\nAs you answer the user's questions, you can use the following context:\n# gitStatus\n%s\nIMPORTANT: this context may or may not be relevant to your tasks. You should not respond to this context unless it is highly relevant to your task.\n</system-reminder>\n", git),
 		})
 	}
 
@@ -129,5 +131,23 @@ func prependUserContext(messages []ai.Message, context map[string]string) []ai.M
 	out := make([]ai.Message, 0, len(prefix)+len(messages))
 	out = append(out, prefix...)
 	out = append(out, messages...)
+	return out
+}
+
+// mergeConsecutiveRoles coalesces adjacent non-tool messages of the same
+// role into single messages by concatenating their content parts. Strict
+// providers require user/model alternation; merged histories, steered
+// notifications, and compacted blocks can all produce runs of same-role
+// messages. Tool messages never merge — their pairing with the preceding
+// assistant's tool calls is an API invariant.
+func mergeConsecutiveRoles(messages []ai.Message) []ai.Message {
+	out := make([]ai.Message, 0, len(messages))
+	for _, msg := range messages {
+		if n := len(out); n > 0 && out[n-1].Role == msg.Role && msg.Role != ai.RoleTool {
+			out[n-1].Content = append(out[n-1].Content, msg.Content...)
+			continue
+		}
+		out = append(out, msg)
+	}
 	return out
 }

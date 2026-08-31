@@ -24,52 +24,6 @@
 
 ---
 
-## Live TUI Experience
-
-Automergent's terminal interface features real-time streaming, structured tool execution slabs, automated diagnostic recovery, and live telemetry:
-
-```text
-╭─ ✦ AUTOMERGENT ────────── [EXECUTE] ────────── 󰊭 gemini-2.5-pro ────────── $0.0042 │ 12.3k/200k │ 󰊢 main ─╮
-│                                                                                                          │
-│                                                                          ╭── You ──────────────────────╮ │
-│                                                                          │ run go test, fix the failing│ │
-│                                                                          │ auth test, and verify build │ │
-│                                                                          ╰─────────────────────────────╯ │
-│                                                                                                          │
-│  ✦  Running the test suite to inspect the failure.                                                       │
-│                                                                                                          │
-│  ● Bash ─────────────────────────────────────────────────────────────────── ✗ exit 1    0.84s            │
-│    $ go test ./internal/middleware/...                                                                   │
-│    --- FAIL: TestValidateToken_Expired (0.01s)                                                           │
-│        auth_test.go:52: expected error "token expired", got nil                                          │
-│    FAIL                                                                                                  │
-│    ⎿  ✗ exit 1: test assertion failed in auth_test.go                                                    │
-│                                                                                                          │
-│  ┌──────────────────────────────────────────────────────────────────────────────────────────────────────┐ │
-│  │ ✦ ERROR: test failure detected in internal/middleware/auth_test.go:52                                │ │
-│  └──────────────────────────────────────────────────────────────────────────────────────────────────────┘ │
-│                                                                                                          │
-│  ● ReadFile  "internal/middleware/auth.go"  ·  86 lines                                    0.08s         │
-│    ⎿  file read successfully                                                                             │
-│                                                                                                          │
-│  ● EditFile  "internal/middleware/auth.go"  ·  1 hunk applied                              0.12s         │
-│    ⎿  ✓ hunk 1: added claims.ExpiresAt timestamp validation check                                        │
-│                                                                                                          │
-│  ● Bash ─────────────────────────────────────────────────────────────────── ✓ exit 0    0.42s            │
-│    $ go test -v ./internal/middleware/...                                                                │
-│    === RUN   TestValidateToken_Expired                                                                   │
-│    --- PASS: TestValidateToken_Expired (0.00s)                                                           │
-│    PASS  ok  github.com/iSundram/Automergent/internal/middleware  0.024s                                     │
-│    ⎿  ✓ PASS: all 14 tests passing  ·  build verified                                                    │
-│                                                                                                          │
-│  ✦  Fixed the token expiration check in auth.go. Re-ran test suite — all 14 tests now pass cleanly.      │
-│                                                                                                          │
-│  └─ shift+tab browse · ctrl+p palette · ctrl+e expand                                                    │
-╰─ [ ACCEPT EDITS ]  ⚙ Ready  ────────────────────────────────────────────  ctx 18% ##──────  ·  󰊢 main+1 ─╯
-```
-
----
-
 ## Quickstart & Installation
 
 ### Option 1: One-Line Install

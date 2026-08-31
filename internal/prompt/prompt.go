@@ -63,6 +63,14 @@ func (ps *PromptSystem) CreateFreshContext(initialPrompt string) *PromptPart {
 	return ps.Manager.CreateNewContext(initialPrompt, true)
 }
 
+// SetLLMClient swaps the LLM client used by the internal pipelines (intent
+// identification, task planning). Called on model/provider switches so the
+// staged calls follow the new provider instead of the one captured at
+// startup.
+func (ps *PromptSystem) SetLLMClient(llmClient LLMClient) {
+	ps.Manager.SetLLMClient(llmClient)
+}
+
 // GetTurnContext returns the unified turn context for direct access.
 func (ps *PromptSystem) GetTurnContext() *TurnContext {
 	return ps.Manager.GetTurnContext()

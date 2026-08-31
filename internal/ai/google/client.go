@@ -189,7 +189,7 @@ func New(cfg ai.ProviderConfig) *Client {
 
 	c := &Client{
 		model:       model,
-		limit:       1000000,
+		limit:       maxContextTokens,
 		baseURL:     base,
 		effort:      cfg.Effort,
 		backend:     backend,
@@ -286,9 +286,9 @@ var curatedModels = []ai.Model{
 	{ID: "gemini-3.5-flash", Name: "Gemini 3.5 Flash", ContextLimit: 1048576},
 	{ID: "gemini-3.5-flash-lite", Name: "Gemini 3.5 Flash-Lite", ContextLimit: 1048576},
 	{ID: "gemini-3.1-flash-lite", Name: "Gemini 3.1 Flash-Lite", ContextLimit: 1048576},
-	{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview", ContextLimit: 2097152},
+	{ID: "gemini-3.1-pro-preview", Name: "Gemini 3.1 Pro Preview", ContextLimit: 1048576},
 	{ID: "gemini-3-flash-preview", Name: "Gemini 3 Flash Preview", ContextLimit: 1048576},
-	{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", ContextLimit: 2097152},
+	{ID: "gemini-2.5-pro", Name: "Gemini 2.5 Pro", ContextLimit: 1048576},
 	{ID: "gemini-2.5-flash", Name: "Gemini 2.5 Flash", ContextLimit: 1048576},
 	{ID: "gemini-2.5-flash-lite", Name: "Gemini 2.5 Flash-Lite", ContextLimit: 1048576},
 	{ID: "gemini-2.5-flash-preview", Name: "Gemini 2.5 Flash Preview", ContextLimit: 1048576},
@@ -393,7 +393,24 @@ func convertListedModel(m *genai.Model) (ai.Model, bool) {
 	if name == "" {
 		name = id
 	}
-	return ai.Model{ID: id, Name: name, ContextLimit: int(m.InputTokenLimit)}, true
+	return ai.Model{ID: id, Name: name, ContextLimit: clampContextLimit(int(m.InputTokenLimit))}, true
+}
+
+// maxContextTokens is the platform ceiling on any model's advertised window.
+// Providers list multi-million-token limits for some models; beyond 1M the
+// estimation drift between our counting and the provider's real counting
+// compounds to the point the context ladder misfires, so everything is
+// clamped here.
+const maxContextTokens = 1_048_576
+
+func clampContextLimit(n int) int {
+	if n <= 0 {
+		return n
+	}
+	if n > maxContextTokens {
+		return maxContextTokens
+	}
+	return n
 }
 
 // mergeCuratedModels enriches live entries with curated names, context limits
@@ -450,6 +467,28 @@ func buildContents(messages []ai.Message) []*genai.Content {
 		case ai.RoleUser:
 			t := m.TextContent()
 			if t == "" {
+				continue
+			}
+			out = append(out, genai.NewContentFromText(t, genai.RoleUser))
+
+		case ai.RoleSystem:
+			// Mid-conversation system messages (compaction summaries, stall
+			// nudges, goal reminders) must NOT be dropped: they sit between
+			// assistant turns, and removing them made two model turns
+			// adjacent — the API rejects that with INVALID_INPUT. Render
+			// them as user-role text, merged into the previous user turn
+			// when there is one so they cannot create runs of user contents.
+			t := m.TextContent()
+			if t == "" {
+				continue
+			}
+			if n := len(out); n > 0 && out[n-1].Role == string(genai.RoleUser) && len(out[n-1].Parts) == 1 && out[n-1].Parts[0].Text != "" {
+				out[n-1].Parts[0].Text += "\n\n" + t
+				continue
+			}
+			if i == 0 {
+				// A leading system message is the platform context; the
+				// System field usually carries it, so skip a duplicate.
 				continue
 			}
 			out = append(out, genai.NewContentFromText(t, genai.RoleUser))
@@ -519,6 +558,21 @@ func buildContents(messages []ai.Message) []*genai.Content {
 			}
 		}
 	}
+
+	// Belt-and-braces alternation: coalesce adjacent model contents into
+	// single turns. The agent merges consecutive assistants before the
+	// request, but metadata-rebuilt parts and resumed sessions can still
+	// produce runs; the API rejects any adjacent model turns.
+	coalesced := out[:0]
+	for _, c := range out {
+		if n := len(coalesced); n > 0 && c.Role == string(genai.RoleModel) &&
+			coalesced[n-1].Role == string(genai.RoleModel) {
+			coalesced[n-1].Parts = append(coalesced[n-1].Parts, c.Parts...)
+			continue
+		}
+		coalesced = append(coalesced, c)
+	}
+	out = coalesced
 
 	// Gemini requires the last content to be from the user role.
 	// Strip any trailing model-role entries to avoid a 400 error:

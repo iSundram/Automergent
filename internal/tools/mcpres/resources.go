@@ -22,11 +22,13 @@ type Resources interface {
 
 // ListMCPResourcesTool lists resources across connected MCP servers.
 type ListMCPResourcesTool struct {
+	tools.BaseTool
 	res Resources
 }
 
 // ReadMCPResourceTool reads one resource by URI.
 type ReadMCPResourceTool struct {
+	tools.BaseTool
 	res Resources
 }
 

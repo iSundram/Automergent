@@ -2,7 +2,9 @@ package components
 
 import (
 	"fmt"
+	"os"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -22,9 +24,10 @@ import (
 //
 // Key hints deliberately do NOT live here: they belong to the `└─` info line
 // above the prompt, which has the room to phrase them for the current state.
-// Duplicating them in the bar produced two competing sources of truth. There is
-// no clock or session timer either — the bar only repaints on events, so any
-// wall-clock readout it carried sat visibly stale between them.
+// Duplicating them in the bar produced two competing sources of truth. Run
+// timing lives in the spinner slot (live) and its settled "✓ Done (…)" line,
+// never here; the bar's one time readout is the user's IP-located local
+// clock, which the app's live tick repaints on minute changes.
 type StatusBar struct {
 	styles         *themes.Styles
 	width          int
@@ -41,12 +44,20 @@ type StatusBar struct {
 	queued int
 
 	// HUD segments (IDE chrome)
-	ctxPercent   float64 // context window usage, 0-100+
 	pendingEdits int     // edits awaiting review
+	ctxPercent   float64 // context-window usage percent
 	branch       string  // git branch (+ahead/behind suffix)
 	problems     int     // diagnostics introduced this session
 	artifacts    int     // artifacts awaiting /artifact review
 	showSegments bool
+	// clockTZ/country drive the user's local-time readout, located from
+	// their IP (country → timezone). Repainted by the app's live tick on
+	// minute changes, so it never sits stale.
+	clockTZ *time.Location
+	country string
+	// workDir is the project directory, shown ~-abbreviated on the LEFT edge
+	// ("~/OweCode"), the way Claude Code's footer anchors the cwd.
+	workDir string
 }
 
 // Outcome values. These are display-only sentinels for the sticky slot.
@@ -90,8 +101,29 @@ func (s *StatusBar) SetOutcome(outcome string) { s.outcome = outcome }
 // SetQueued records how many messages are waiting to be delivered.
 func (s *StatusBar) SetQueued(n int) { s.queued = n }
 
-// SetContextUsage records context-window usage as a percentage (0-100+).
-func (s *StatusBar) SetContextUsage(pct float64) { s.ctxPercent = pct }
+// SetUserClock installs the user's local-time readout: the timezone located
+// from their IP and the country code it resolved to. A nil tz removes the
+// clock; the app's live tick repaints on minute changes.
+func (s *StatusBar) SetUserClock(tz *time.Location, country string) {
+	s.clockTZ = tz
+	s.country = country
+}
+
+// UserClockSet reports whether the clock segment is active.
+func (s StatusBar) UserClockSet() bool { return s.clockTZ != nil }
+
+// ClockMinute returns the currently displayed "HH:MM" in the clock's
+// timezone ("" when no clock is set), so callers can repaint only when the
+// minute rolls over.
+func (s StatusBar) ClockMinute() string {
+	if s.clockTZ == nil {
+		return ""
+	}
+	return time.Now().In(s.clockTZ).Format("15:04")
+}
+
+// SetWorkDir records the project directory for the HUD.
+func (s *StatusBar) SetWorkDir(dir string) { s.workDir = dir }
 
 // SetPendingEdits records how many proposed edits await review.
 func (s *StatusBar) SetPendingEdits(n int) { s.pendingEdits = n }
@@ -250,10 +282,17 @@ func (s StatusBar) renderBanner(left, right string) string {
 		Render(left + strings.Repeat(" ", gap) + right)
 }
 
-// leftSegments renders the outcome badge and transient activity that sit just
-// right of the mode chip.
+// leftSegments renders the project directory, outcome badge and transient
+// activity that sit just right of the mode chip.
 func (s StatusBar) leftSegments() []segment {
 	var segs []segment
+	// Project directory, ~-abbreviated — the stable anchor of the left side.
+	if s.workDir != "" {
+		segs = append(segs, segment{
+			text:     lipgloss.NewStyle().Foreground(s.styles.T.Subtext).Render(s.dirLabel()),
+			priority: 1,
+		})
+	}
 	if s.outcome != "" {
 		style := lipgloss.NewStyle().Bold(true).Foreground(s.styles.T.Yellow)
 		if s.outcome == OutcomeError {
@@ -303,8 +342,10 @@ func (s StatusBar) activityRedundant(activity string) bool {
 
 // centerSegments is intentionally absent: key hints live in the info line.
 
-// rightSegments renders the IDE-chrome HUD: context meter · pending review ·
-// problems · git branch. No timer or clock — see the type comment.
+// rightSegments renders the IDE-chrome HUD: user's local time · pending
+// review · problems · git branch. Context usage lives
+// ONLY in the header's meter — a second copy here duplicated it and the two
+// disagreed whenever one refreshed before the other.
 func (s StatusBar) rightSegments() []segment {
 	segStyle := lipgloss.NewStyle().Foreground(s.styles.T.Muted)
 	warnStyle := lipgloss.NewStyle().Foreground(s.styles.T.Yellow).Bold(true)
@@ -316,27 +357,22 @@ func (s StatusBar) rightSegments() []segment {
 		return segs
 	}
 
-	// Context meter: "ctx 34% ###-------", warning tint past 80%.
-	if s.ctxPercent > 0 {
-		filled := int(s.ctxPercent / 10)
-		if filled > 10 {
-			filled = 10
-		}
-		if filled < 0 {
-			filled = 0
-		}
-		meter := strings.Repeat("#", filled) + strings.Repeat("-", 10-filled)
-		style := segStyle
-		hint := ""
-		if s.ctxPercent >= 80 {
-			style = warnStyle
-			hint = "!"
+	// User's local time, located from their IP (country → timezone): "21:47
+	// · IN". Lives in the slot the last-run duration used to occupy; the
+	// app's live tick repaints it on minute changes.
+	if s.clockTZ != nil {
+		label := time.Now().In(s.clockTZ).Format("15:04")
+		if s.country != "" {
+			label += " · " + s.country
 		}
 		segs = append(segs, segment{
-			text:     style.Render(fmt.Sprintf("ctx %.0f%% %s%s", s.ctxPercent, meter, hint)),
+			text:     segStyle.Render(label),
 			priority: 4,
 		})
 	}
+
+	// Working directory moved to the LEFT edge (see leftSegments) so the
+	// cwd anchors the bar the way Claude Code's footer does.
 
 	// Pending review count — jumps to diff pane in app handling.
 	if s.pendingEdits > 0 {
@@ -371,6 +407,25 @@ func (s StatusBar) rightSegments() []segment {
 	}
 
 	return segs
+}
+
+// dirLabel renders the working directory the way Claude Code's footer does:
+// "$HOME" collapses to "~" ("~/OweCode"); a directory outside home is shown
+// as-is, keeping only the trailing components when it would run long.
+func (s StatusBar) dirLabel() string {
+	dir := strings.TrimRight(s.workDir, "/")
+	if dir == "" {
+		return "~"
+	}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		if dir == home {
+			return "~"
+		}
+		if strings.HasPrefix(dir, home+"/") {
+			dir = "~" + dir[len(home):]
+		}
+	}
+	return dir
 }
 
 // fitSegments joins segments with " │ " separators, dropping the
@@ -456,4 +511,18 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// formatBarDuration renders a settled run duration compactly: "42s",
+// "4m12s", "12m".
+func formatBarDuration(d time.Duration) string {
+	secs := int(d.Seconds())
+	switch {
+	case secs < 60:
+		return fmt.Sprintf("%ds", secs)
+	case secs < 600:
+		return fmt.Sprintf("%dm%02ds", secs/60, secs%60)
+	default:
+		return fmt.Sprintf("%dm", secs/60)
+	}
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -240,18 +241,45 @@ type CostSummary struct {
 	ByModel           map[string]ModelCost `json:"by_model"`
 }
 
-// DefaultPricing returns known model pricing (as of 2024).
+// DefaultPricing returns known model pricing. Keys are canonical family
+// names; matching is by longest substring so versioned or suffixed model
+// IDs ("gemini-2.5-flash-lite", "gemini-2.5-flash-preview") resolve to
+// their family without enumerating every alias.
 func DefaultPricing() map[string]ModelPricing {
 	return map[string]ModelPricing{
-		"gemini-3.6-flash":  {InputPer1K: 0.000075, OutputPer1K: 0.0003},
-		"gemini-3.6-pro":    {InputPer1K: 0.000125, OutputPer1K: 0.0005},
-		"gemini-2.5-pro":    {InputPer1K: 0.000125, OutputPer1K: 0.0005},
-		"gemini-2.5-flash":  {InputPer1K: 0.000075, OutputPer1K: 0.0003},
-		"gpt-4o":            {InputPer1K: 0.005, OutputPer1K: 0.015},
-		"gpt-4o-mini":       {InputPer1K: 0.00015, OutputPer1K: 0.0006},
-		"claude-3.5-sonnet": {InputPer1K: 0.003, OutputPer1K: 0.015},
-		"claude-3.5-haiku":  {InputPer1K: 0.00025, OutputPer1K: 0.00125},
+		"gemini-3.6-pro":     {InputPer1K: 0.000125, OutputPer1K: 0.0005},
+		"gemini-3.6-flash":   {InputPer1K: 0.000075, OutputPer1K: 0.0003},
+		"gemini-3.5-pro":     {InputPer1K: 0.000125, OutputPer1K: 0.0005},
+		"gemini-3.5-flash":   {InputPer1K: 0.000075, OutputPer1K: 0.0003},
+		"gemini-2.5-pro":     {InputPer1K: 0.000125, OutputPer1K: 0.0005},
+		"gemini-2.5-flash":   {InputPer1K: 0.000075, OutputPer1K: 0.0003},
+		"gpt-4o":             {InputPer1K: 0.005, OutputPer1K: 0.015},
+		"gpt-4o-mini":        {InputPer1K: 0.00015, OutputPer1K: 0.0006},
+		"claude-3.5-sonnet":  {InputPer1K: 0.003, OutputPer1K: 0.015},
+		"claude-3.5-haiku":   {InputPer1K: 0.00025, OutputPer1K: 0.00125},
+		"claude-sonnet-4":    {InputPer1K: 0.003, OutputPer1K: 0.015},
+		"claude-opus-4":      {InputPer1K: 0.015, OutputPer1K: 0.075},
+		"claude-haiku-3":     {InputPer1K: 0.00025, OutputPer1K: 0.00125},
+		"deepseek-chat":      {InputPer1K: 0.00014, OutputPer1K: 0.00028},
+		"deepseek-reasoner":  {InputPer1K: 0.00055, OutputPer1K: 0.00219},
 	}
+}
+
+// pricingFor resolves the pricing entry for a concrete model ID by longest
+// substring match against the table's family names — "gemini-2.5-flash-lite"
+// matches "gemini-2.5-flash", and a longer matching family always wins over
+// a shorter one.
+func pricingFor(pricing map[string]ModelPricing, model string) (ModelPricing, bool) {
+	lower := strings.ToLower(model)
+	best := ""
+	var found ModelPricing
+	for family, p := range pricing {
+		if strings.Contains(lower, family) && len(family) > len(best) {
+			best = family
+			found = p
+		}
+	}
+	return found, best != ""
 }
 
 // NewCostTracker creates a cost tracker with default pricing.
@@ -274,7 +302,7 @@ func (ct *CostTracker) Add(model string, inputTokens, outputTokens int) {
 	mc.InputTokens += inputTokens
 	mc.OutputTokens += outputTokens
 
-	if pricing, ok := ct.pricing[model]; ok {
+	if pricing, ok := pricingFor(ct.pricing, model); ok {
 		mc.TotalCost += float64(inputTokens) / 1000.0 * pricing.InputPer1K
 		mc.TotalCost += float64(outputTokens) / 1000.0 * pricing.OutputPer1K
 	}

@@ -125,79 +125,16 @@ func (c *PhaseClassifier) isDirectQuestion(message string) bool {
 	return false
 }
 
-// checkViolation checks for policy violations.
+// checkViolation is deliberately RETIRED. Substring matching ("password",
+// "token", "hack") flagged ordinary engineering work — "use a token for
+// auth", "fix the exploit in our sanitizer", "rotate the API key" — making
+// the guard itself the bug. Violation detection is the INIT decomposer's
+// job: an LLM judgment with a confirmation step (needs_confirmation routes
+// an explore task to verify before escalation). This classifier is only the
+// decomposer-unavailable fallback, and a fallback that cries wolf on normal
+// requests is worse than one that stays quiet: the escalation ladder
+// (warn → block) can lock a legitimate session.
 func (c *PhaseClassifier) checkViolation(message string) *shared.ViolationCheck {
-	lower := strings.ToLower(message)
-	
-	violationPatterns := map[shared.ViolationType][]struct {
-		pattern   string
-		severity  shared.ViolationSeverity
-	}{
-		shared.ViolationHacking: {
-			{"hack", shared.ViolationSeverityHigh},
-			{"exploit", shared.ViolationSeverityCritical},
-			{"vulnerability", shared.ViolationSeverityMedium},
-			{"penetration", shared.ViolationSeverityHigh},
-			{"bypass", shared.ViolationSeverityHigh},
-			{"backdoor", shared.ViolationSeverityCritical},
-			{"injection", shared.ViolationSeverityCritical},
-			{"xss", shared.ViolationSeverityHigh},
-			{"csrf", shared.ViolationSeverityHigh},
-			{"rce", shared.ViolationSeverityCritical},
-		},
-		shared.ViolationIllegal: {
-			{"illegal", shared.ViolationSeverityHigh},
-			{"unauthorized", shared.ViolationSeverityHigh},
-			{"pirate", shared.ViolationSeverityMedium},
-			{"crack", shared.ViolationSeverityHigh},
-			{"keygen", shared.ViolationSeverityHigh},
-			{"license bypass", shared.ViolationSeverityHigh},
-		},
-		shared.ViolationHarmful: {
-			{"malware", shared.ViolationSeverityCritical},
-			{"virus", shared.ViolationSeverityCritical},
-			{"ransomware", shared.ViolationSeverityCritical},
-			{"keylogger", shared.ViolationSeverityCritical},
-			{"steal", shared.ViolationSeverityHigh},
-			{"destroy", shared.ViolationSeverityHigh},
-			{"delete all", shared.ViolationSeverityHigh},
-			{"wipe", shared.ViolationSeverityHigh},
-			{"ddos", shared.ViolationSeverityCritical},
-		},
-		shared.ViolationCredentials: {
-			{"password", shared.ViolationSeverityHigh},
-			{"credential", shared.ViolationSeverityHigh},
-			{"secret", shared.ViolationSeverityHigh},
-			{"api key", shared.ViolationSeverityCritical},
-			{"token", shared.ViolationSeverityHigh},
-			{"ssh key", shared.ViolationSeverityCritical},
-			{"private key", shared.ViolationSeverityCritical},
-			{"access key", shared.ViolationSeverityCritical},
-		},
-		shared.ViolationSecurity: {
-			{"disable security", shared.ViolationSeverityHigh},
-			{"bypass auth", shared.ViolationSeverityHigh},
-			{"no auth", shared.ViolationSeverityMedium},
-			{"skip verification", shared.ViolationSeverityMedium},
-			{"disable ssl", shared.ViolationSeverityHigh},
-			{"insecure", shared.ViolationSeverityMedium},
-		},
-	}
-	
-	for vType, patterns := range violationPatterns {
-		for _, p := range patterns {
-			if strings.Contains(lower, p.pattern) {
-				return &shared.ViolationCheck{
-					Type:        vType,
-					Severity:    p.severity,
-					UserMessage: message,
-					Count:       1,
-					Action:      "warn",
-				}
-			}
-		}
-	}
-	
 	return nil
 }
 

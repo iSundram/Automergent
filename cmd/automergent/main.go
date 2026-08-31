@@ -23,6 +23,7 @@ import (
 	googleProvider "github.com/iSundram/Automergent/internal/ai/google"
 	"github.com/iSundram/Automergent/internal/cache"
 	"github.com/iSundram/Automergent/internal/config"
+	diagcache "github.com/iSundram/Automergent/internal/diagnostics/cache"
 	"github.com/iSundram/Automergent/internal/debug"
 	automergentErrors "github.com/iSundram/Automergent/internal/errors"
 	"github.com/iSundram/Automergent/internal/git"
@@ -37,6 +38,10 @@ import (
 	toolsInteraction "github.com/iSundram/Automergent/internal/tools/interaction"
 	toolsLSP "github.com/iSundram/Automergent/internal/tools/lsp"
 	toolsSecurity "github.com/iSundram/Automergent/internal/tools/security"
+	toolsCtxinfo "github.com/iSundram/Automergent/internal/tools/ctxinfo"
+	toolsMcpres "github.com/iSundram/Automergent/internal/tools/mcpres"
+	toolsPlanmode "github.com/iSundram/Automergent/internal/tools/planmode"
+	toolsSkills "github.com/iSundram/Automergent/internal/tools/skills"
 	toolsShell "github.com/iSundram/Automergent/internal/tools/shell"
 	toolsWeb "github.com/iSundram/Automergent/internal/tools/web"
 	"github.com/iSundram/Automergent/internal/tui"
@@ -211,6 +216,15 @@ func run(cmd *cobra.Command, args []string) error {
 	format := parseOutputFormat(cfg.Output)
 	cfg.Output = string(format)
 
+	// Initialize the persistent diagnostics cache (best-effort — analysis
+	// falls back to the in-memory cache when the store cannot be opened).
+	if cfg.Diagnostics.Enabled {
+		if err := diagcache.InitGlobalCache("", 24*time.Hour); err != nil {
+			// A read-only or corrupt cache directory must not stop the app.
+			_ = err
+		}
+	}
+
 	// Save config if critical settings were changed via flags to persist as last used.
 	// Only save if a config file was actually loaded (avoid creating fresh config.yaml).
 	configFileWasLoaded := viper.ConfigFileUsed() != ""
@@ -329,9 +343,11 @@ func run(cmd *cobra.Command, args []string) error {
 	reg := tools.NewRegistry()
 
 	// Filesystem tools
-	reg.Register(&toolsFS.ReadFileTool{})
+	reg.Register(toolsFS.NewReadFileTool(cfg))
 	reg.Register(toolsFS.NewWriteFileTool(cfg))
 	reg.Register(toolsFS.NewEditFileTool(cfg))
+	reg.Register(toolsFS.NewNotebookEditTool(cfg))
+	reg.Register(toolsFS.NewArtifactTool(cfg))
 	reg.Register(&toolsFS.ListDirectoryTool{})
 	reg.Register(&toolsFS.GlobTool{})
 	reg.Register(&toolsFS.GrepTool{})
@@ -364,6 +380,25 @@ func run(cmd *cobra.Command, args []string) error {
 	reg.Register(planningPkg.NewTool("."))
 	reg.Register(planningPkg.NewReplanTool("."))
 
+	// Plan-mode, skill and context-inspection tools (UI hooks are installed
+	// by the TUI when it starts; the tools degrade gracefully without them).
+	reg.Register(&toolsPlanmode.EnterPlanModeTool{})
+	reg.Register(&toolsPlanmode.ExitPlanModeTool{})
+	reg.Register(&toolsPlanmode.VerifyPlanExecutionTool{})
+	reg.Register(&toolsSkills.DiscoverSkillsTool{})
+	reg.Register(&toolsSkills.SkillTool{})
+	reg.Register(&toolsCtxinfo.CtxInspectTool{})
+
+	// Skills: project skills override user skills (later dirs win).
+	skillDirs := []string{}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		skillDirs = append(skillDirs, filepath.Join(home, ".automergent", "skills"))
+	}
+	if wd, err := os.Getwd(); err == nil {
+		skillDirs = append(skillDirs, filepath.Join(wd, ".automergent", "skills"))
+	}
+	toolsSkills.SetDirs(skillDirs...)
+
 	// MCP tools
 	var mcpOrch *mcp.Orchestrator
 	var mcpBr *mcpbridge.Bridge
@@ -380,6 +415,9 @@ func run(cmd *cobra.Command, args []string) error {
 			}
 			// Register MCP tools into the registry
 			mcpBr.Sync(reg)
+			// MCP resource tools (list/read published resources).
+			reg.Register(toolsMcpres.NewListTool(mcpOrch))
+			reg.Register(toolsMcpres.NewReadTool(mcpOrch))
 		}()
 		// Watch config for hot-reload (best-effort)
 		if cfg.ConfigFile != "" {

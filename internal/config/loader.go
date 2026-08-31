@@ -24,14 +24,21 @@ const (
 	LayerGlobal
 	// LayerProject is project-specific config (.automergent/config.yaml).
 	LayerProject
+	// LayerLocal is personal, gitignored project overrides
+	// (.automergent/config.local.yaml).
+	LayerLocal
 	// LayerProfile is named profile configuration.
 	LayerProfile
 	// LayerEnv is environment variables (AUTOMERGENT_*).
 	LayerEnv
 	// LayerSession is temporary session overrides.
 	LayerSession
-	// LayerCLI is CLI flags (highest priority).
+	// LayerCLI is CLI flags.
 	LayerCLI
+	// LayerPolicy is managed/enterprise policy config — the highest
+	// precedence, deliberately overriding even CLI flags. Path comes from
+	// AUTOMERGENT_POLICY_CONFIG or /etc/automergent/config.yaml.
+	LayerPolicy
 )
 
 // String returns the layer name.
@@ -43,6 +50,8 @@ func (l Layer) String() string {
 		return "global"
 	case LayerProject:
 		return "project"
+	case LayerLocal:
+		return "local"
 	case LayerProfile:
 		return "profile"
 	case LayerEnv:
@@ -51,6 +60,8 @@ func (l Layer) String() string {
 		return "session"
 	case LayerCLI:
 		return "cli"
+	case LayerPolicy:
+		return "policy"
 	default:
 		return "unknown"
 	}
@@ -186,12 +197,20 @@ func (l *Loader) Load() (*Config, error) {
 		return nil, fmt.Errorf("load project: %w", err)
 	}
 
+	if err := l.loadLocal(); err != nil {
+		return nil, fmt.Errorf("load local: %w", err)
+	}
+
 	if err := l.loadProfile(); err != nil {
 		return nil, fmt.Errorf("load profile: %w", err)
 	}
 
 	if err := l.loadEnv(); err != nil {
 		return nil, fmt.Errorf("load env: %w", err)
+	}
+
+	if err := l.loadPolicy(); err != nil {
+		return nil, fmt.Errorf("load policy: %w", err)
 	}
 
 	// Merge all layers
@@ -309,6 +328,67 @@ func (l *Loader) loadProfile() error {
 		l.sources[k] = LayerSource{Layer: LayerProfile, File: profilePath, Key: k}
 	}
 
+	return nil
+}
+
+// loadLocal loads the personal, gitignored project overrides
+// (.automergent/config.local.yaml next to the project config).
+func (l *Loader) loadLocal() error {
+	if l.projectPath == "" {
+		return nil
+	}
+	localPath := filepath.Join(filepath.Dir(l.projectPath), "config.local.yaml")
+
+	data, err := l.loadFile(localPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	flat := flattenMap(data)
+	l.layers[LayerLocal] = flat
+	for k := range flat {
+		l.sources[k] = LayerSource{Layer: LayerLocal, File: localPath, Key: k}
+	}
+
+	if l.watcher != nil {
+		_ = l.watcher.Add(localPath)
+	}
+	return nil
+}
+
+// loadPolicy loads the managed/enterprise policy layer. It applies above
+// every other layer (including CLI flags) so administrators can enforce
+// settings users cannot override. The path comes from
+// AUTOMERGENT_POLICY_CONFIG, falling back to /etc/automergent/config.yaml;
+// when neither exists the layer is simply absent.
+func (l *Loader) loadPolicy() error {
+	policyPath := os.Getenv("AUTOMERGENT_POLICY_CONFIG")
+	if policyPath == "" {
+		defaultPolicy := "/etc/automergent/config.yaml"
+		if _, err := os.Stat(defaultPolicy); err == nil {
+			policyPath = defaultPolicy
+		}
+	}
+	if policyPath == "" {
+		return nil
+	}
+
+	data, err := l.loadFile(policyPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+
+	flat := flattenMap(data)
+	l.layers[LayerPolicy] = flat
+	for k := range flat {
+		l.sources[k] = LayerSource{Layer: LayerPolicy, File: policyPath, Key: k}
+	}
 	return nil
 }
 
@@ -526,8 +606,9 @@ func (l *Loader) merge() (*Config, error) {
 	// Start with defaults
 	cfg := Default()
 
-	// Apply each layer in priority order
-	for layer := LayerGlobal; layer <= LayerCLI; layer++ {
+	// Apply each layer in priority order — policy last so managed settings
+	// override everything, including CLI flags.
+	for layer := LayerGlobal; layer <= LayerPolicy; layer++ {
 		data, ok := l.layers[layer]
 		if !ok || len(data) == 0 {
 			continue

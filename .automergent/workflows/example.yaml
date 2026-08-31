@@ -1,0 +1,29 @@
+# Example multi-agent pipeline. Place specs in .automergent/workflows/
+# and run with: /workflow run example
+#
+# Steps reference each other's outputs with ${step-id}; a step runs once
+# every step in its dependsOn list has finished. Independent steps run in
+# parallel (bounded by `concurrency`); `budget` caps total output tokens.
+name: example
+description: Build, then test, then summarize — a starter pipeline
+concurrency: 2
+budget: 200000
+steps:
+  - id: build
+    prompt: >
+      Run the project build (go build ./...). Report failures with
+      file:line references. If the build is clean, say so plainly.
+  - id: test
+    prompt: >
+      Run the test suite (go test ./...). Prioritize packages related
+      to any build failures reported here:
+      ${build}
+    dependsOn: [build]
+  - id: summary
+    prompt: >
+      Summarize the pipeline outcome in three bullets: build status,
+      test status, and the single most important fix. Build report:
+      ${build}
+      Test report:
+      ${test}
+    dependsOn: [build, test]

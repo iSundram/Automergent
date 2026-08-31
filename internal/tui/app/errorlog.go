@@ -72,7 +72,10 @@ func (r apiErrorRecord) displayCode() string {
 
 // recordAPIError appends to the ring buffer, evicting the oldest entry when
 // full. Messages are sanitized on the way in so an API key embedded in a
-// request URL can never be persisted or re-displayed.
+// request URL can never be persisted or re-displayed. The same failure
+// reaches the log through several event paths (retry observer, terminal
+// error, phase-loop propagation), so a record identical to the previous one
+// is skipped — one failure must read as one entry.
 func (a *App) recordAPIError(rec apiErrorRecord) {
 	if rec.At.IsZero() {
 		rec.At = time.Now()
@@ -82,10 +85,28 @@ func (a *App) recordAPIError(rec apiErrorRecord) {
 	rec.Suggestion = sanitizeURLs(rec.Suggestion)
 	rec.Resource = sanitizeURLs(rec.Resource)
 
+	if n := len(a.apiErrors); n > 0 && sameAPIError(a.apiErrors[n-1], rec) {
+		// The retry sequence advanced (attempt 2 of the same failure):
+		// update the tail in place instead of stacking a near-duplicate.
+		if rec.Attempt > a.apiErrors[n-1].Attempt {
+			a.apiErrors[n-1].Attempt = rec.Attempt
+			a.apiErrors[n-1].Retrying = rec.Retrying
+			a.apiErrors[n-1].At = rec.At
+		}
+		return
+	}
+
 	a.apiErrors = append(a.apiErrors, rec)
 	if len(a.apiErrors) > maxAPIErrors {
 		a.apiErrors = a.apiErrors[len(a.apiErrors)-maxAPIErrors:]
 	}
+}
+
+// sameAPIError reports whether two records describe the same failure: same
+// code/status and message. Timestamps and retry-attempt counters are ignored
+// by design — those advance for one failure.
+func sameAPIError(x, y apiErrorRecord) bool {
+	return x.Code == y.Code && x.Status == y.Status && x.Message == y.Message
 }
 
 // latestAPIError returns the most recent record, if any.

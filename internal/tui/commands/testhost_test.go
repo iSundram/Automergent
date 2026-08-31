@@ -57,6 +57,7 @@ type mockHost struct {
 	startAgentCalls     []string
 	cancelActiveRuns    []string
 	compactContextCalls int
+	blocksExpanded      bool
 
 	// Cross-command invocation (DispatchCommand) and custom reload state.
 	commandMessages   [][2]string
@@ -441,6 +442,16 @@ func (m *mockHost) CompactContext() tea.Cmd {
 	defer m.mu.Unlock()
 	m.compactContextCalls++
 	return nil
+}
+
+func (m *mockHost) SetBlocksExpanded(expanded bool) string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.blocksExpanded = expanded
+	if expanded {
+		return "Expanded — /collapse to collapse blocks"
+	}
+	return "Collapsed — /expand to expand blocks"
 }
 
 func (m *mockHost) Provider() string {

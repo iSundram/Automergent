@@ -158,6 +158,26 @@ func (d *Decomposition) ToTaskSpecs() []shared.TaskSpec {
 }
 
 // newTaskSpecFromPart builds a TaskSpec from a routed task part.
+// phaseForPart resolves the arc phase for a task part: explicit phase wins;
+// otherwise the task type maps (explore→explore, plan→plan, anything else
+// →build). Never returns an invalid phase string.
+func phaseForPart(p DecomposedPart) shared.AgentPhase {
+	if p.Phase != "" {
+		switch shared.AgentPhase(p.Phase) {
+		case shared.PhaseExplore, shared.PhasePlan, shared.PhaseBuild:
+			return shared.AgentPhase(p.Phase)
+		}
+	}
+	switch p.TaskType {
+	case "explore":
+		return shared.PhaseExplore
+	case "plan":
+		return shared.PhasePlan
+	default:
+		return shared.PhaseBuild
+	}
+}
+
 func newTaskSpecFromPart(p DecomposedPart, constraints []string) shared.TaskSpec {
 	spec := shared.TaskSpec{
 		ID:           p.ID,
@@ -167,6 +187,7 @@ func newTaskSpecFromPart(p DecomposedPart, constraints []string) shared.TaskSpec
 		Description:  p.Text,
 		Priority:     p.Priority,
 		Dependencies: p.Dependencies,
+		Phase:        phaseForPart(p),
 		Context:      map[string]any{"reason": p.Reason},
 	}
 	if len(constraints) > 0 {
