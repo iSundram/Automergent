@@ -1,11 +1,11 @@
-# ✦ AUTOMERGENT
+# AUTOMERGENT
 
 <p align="center">
-  <strong>Terminal-native autonomous AI coding agent built with Charm (Bubble Tea, Lip Gloss & Glamour) and Tree-sitter.</strong>
+  <strong>Next-gen autonomous coding engineer built on Gemini & Vertex AI with multi-phase context intelligence, subagent orchestration, and deep root-cause error diagnostics.</strong>
 </p>
 
 <p align="center">
-  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.24%2B-00ADD8?style=flat-square&logo=go" alt="Go Version" /></a>
+  <a href="https://golang.org"><img src="https://img.shields.io/badge/Go-1.25%2B-00ADD8?style=flat-square&logo=go" alt="Go Version" /></a>
   <a href="https://github.com/iSundram/Automergent/actions"><img src="https://img.shields.io/badge/build-passing-4ade80?style=flat-square&logo=githubactions" alt="Build Status" /></a>
   <a href="https://github.com/iSundram/Automergent/actions"><img src="https://img.shields.io/badge/tests-passing-4ade80?style=flat-square&logo=github" alt="Tests Status" /></a>
   <a href="https://goreportcard.com/report/github.com/iSundram/Automergent"><img src="https://img.shields.io/badge/go%20report-A%2B-38bdf8?style=flat-square" alt="Go Report Card" /></a>
@@ -15,7 +15,7 @@
 
 ---
 
-## ⚡ What is Automergent?
+## What is Automergent?
 
 **Automergent** is a high-performance, terminal-native AI pair-programmer that lives in your command line. It reads, writes, searches, tests, and refactors your codebase autonomously or interactively with approval at every step.
 
@@ -24,7 +24,7 @@
 
 ---
 
-## 🖥️ Live TUI Experience
+## Live TUI Experience
 
 Automergent's terminal interface features real-time streaming, structured tool execution slabs, automated diagnostic recovery, and live telemetry:
 
@@ -70,29 +70,31 @@ Automergent's terminal interface features real-time streaming, structured tool e
 
 ---
 
-## 🚀 Quickstart & Installation
+## Quickstart & Installation
 
-### Option 1: Go Install (Recommended)
+### Option 1: One-Line Install
 
 ```bash
-# Requires Go 1.24+ with CGO enabled
+curl -fsSL https://automergent.github.io/install.sh | bash
+```
+
+### Option 2: Go Install
+
+```bash
+# Requires Go 1.25+ with CGO enabled
 CGO_ENABLED=1 go install github.com/iSundram/Automergent/cmd/automergent@latest
 ```
 
-### Option 2: Build From Source
+### Option 3: Build From Source
 
 ```bash
 git clone https://github.com/iSundram/Automergent.git
 cd Automergent
-
-# Build binary into ./bin/automergent
 make build
-
-# Install globally to $GOPATH/bin
 make install
 ```
 
-### Option 3: Launch
+### Option 4: Launch
 
 ```bash
 cd your-project/
@@ -104,38 +106,16 @@ automergent
 
 ---
 
-## 🧩 Key Capabilities
+## Configuration & AI Providers
 
-| Capability | Category | Supported Operations |
-| :--- | :--- | :--- |
-| **📁 Filesystem** | `read`, `write`, `edit` | `read_file`, `write_file`, `edit_file`, `list_directory`, `glob`, `grep`, `tree` |
-| **💻 Terminal PTY** | `shell`, `exec` | Synchronous commands, persistent background shells, interactive PTY sessions, exit status tracking |
-| **🧠 Code Intelligence** | `AST`, `tree-sitter` | Tree-sitter syntax parsing, symbol search, AST-aware diff application |
-| **🔍 Search & Web** | `grep`, `fetch` | Ripgrep pattern matching, live web fetch, documentation scraping, web search |
-| **🩺 Diagnostics & LSP** | `lsp`, `compiler` | Real-time `gopls` / compiler error parsing, semantic error detection, automated recovery |
-| **🤖 Multi-Agent Orchestration**| `agents`, `tasks` | Autonomous sub-agents, concurrent background docks, hierarchical task planning |
-| **🔌 MCP Protocol** | `mcp`, `tools` | Model Context Protocol server client, custom tool extensions |
-| **💾 Session Memory** | `persistence` | JSONL conversation transcripts, undo/redo state stack, project memory |
-
----
-
-## ⚙️ Configuration & AI Providers
-
-Automergent supports multiple AI backends. Configure your preferred provider via environment variables or `~/.automergent/config.yaml`:
+Configure via environment variables or `~/.automergent/config.yaml`:
 
 ```yaml
-# ~/.automergent/config.yaml
 provider: "gemini" # gemini | openai | anthropic | deepseek | ollama
 model: "gemini-2.5-pro"
 temperature: 0.2
-
-# Approval Autonomy Mode: manual | accept-edits | auto | plan
-mode: "accept-edits"
-
-# UI Theme
-theme: "modern" # modern | catppuccin | tokyonight | dracula | nord | gruvbox | onedark
-
-# Key API Tokens (or set via environment variables)
+mode: "accept-edits"  # manual | accept-edits | auto | plan
+theme: "modern"       # modern | catppuccin | tokyonight | dracula | nord | gruvbox | onedark
 providers:
   gemini:
     api_key: "${GEMINI_API_KEY}"
@@ -155,94 +135,67 @@ export ANTHROPIC_API_KEY="your-anthropic-key"
 
 ---
 
-## 🎨 Themes
+## Capabilities
 
-Automergent includes 10 built-in color themes optimized for truecolor and standard terminal palettes. Switch anytime with `/theme <name>`:
-
-| Theme Name | Style / Palette Description |
+| Capability | Description |
 | :--- | :--- |
-| `modern` *(default)* | Clean obsidian-slate surface with Catppuccin semantic accents |
-| `catppuccin` | Soothing Catppuccin Mocha palette with mauve highlights |
-| `tokyonight` | Tokyo Night deep navy blue and vibrant neon accents |
-| `dracula` | Famous Dracula dark theme with purple and pink accents |
-| `nord` | Arctic, north-bluish clean pastel aesthetic |
-| `gruvbox` | Retro groove warm brown/amber color scheme |
-| `onedark` | Atom One Dark iconic balanced colors |
-| `solarized` | Solarized Dark precision contrast palette |
-| `monokai` | Classic Monokai high-contrast green/yellow highlights |
-| `high-contrast` | OLED true black with maximum readability neon tokens |
+| **Filesystem** | Read, write, edit, glob, grep, tree — full codebase access |
+| **Terminal PTY** | Synchronous commands, persistent background shells, interactive sessions |
+| **Code Intelligence** | Tree-sitter AST parsing, symbol search, AST-aware diffs |
+| **Search & Web** | Ripgrep pattern matching, live web fetch, documentation scraping |
+| **Diagnostics** | Compiler error parsing, root-cause analysis, automated recovery |
+| **Multi-Agent** | Sub-agent orchestration, concurrent background tasks, parallel execution |
+| **Session Memory** | Persistent transcripts, undo/redo, project-scoped sessions |
+| **Artifact System** | Plan documents, approval workflows, structured deliverables |
+
+For slash commands, keyboard shortcuts, and detailed feature documentation, visit **[automergent.github.io](https://automergent.github.io)**.
 
 ---
 
-## ⌨️ Shortcuts & Slash Commands
+## Themes
 
-### Slash Commands
-
-| Command | Action |
-| :--- | :--- |
-| `/help` | Show interactive command help overlay |
-| `/theme <name>` | Switch active color palette in real-time |
-| `/model <name>` | Switch active LLM model and provider |
-| `/mode <mode>` | Change approval mode (`manual`, `accept-edits`, `auto`, `plan`) |
-| `/clear` | Clear active conversation history |
-| `/diff` | Open full-screen interactive diff review pane |
-| `/tasks` | Open background taskboard and sub-agent dock |
-
-### Keyboard Shortcuts
-
-| Shortcut | Description |
-| :--- | :--- |
-| `Ctrl + P` | Open fuzzy Command Palette & omni-search |
-| `Ctrl + E` | Expand / collapse full tool output & slabs |
-| `Ctrl + D` | Toggle interactive Diff reviewer |
-| `Ctrl + B` | Toggle background Agent & Process Dock |
-| `Shift + Tab` | Switch focus to conversation history browser |
-| `Esc` | Cancel running operation / dismiss modals |
-| `Ctrl + C` | Send interrupt signal to active shell or agent |
+11 built-in color themes optimized for truecolor and standard terminal palettes. Switch anytime with `/theme <name>`. Visit **[automergent.github.io](https://automergent.github.io)** for the full theme gallery.
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```text
 Automergent/
-├── cmd/
-│   └── automergent/      # Primary CLI entrypoint & command bootstrapping
+├── cmd/automergent/          # CLI entrypoint
 ├── internal/
-│   ├── agent/            # AI agent loop, orchestration, planning & approval policies
-│   ├── tui/              # Bubble Tea v2 TUI, Lip Gloss styles & Glamour rendering
-│   │   ├── app/          # Core application event loop, layout & view composition
-│   │   ├── components/   # Modular UI widgets (Header, StatusBar, Tools, Diff, Palette)
-│   │   ├── themes/       # 10 built-in color palettes & syntax styling engine
-│   │   └── render/       # ANSI streaming parser, diff engine & Markdown renderer
-│   ├── tools/            # 48 extensible tools (FS, Terminal, AST, Web, Diagnostics)
-│   ├── diagnostics/      # Compiler & LSP diagnostic parsers and error recovery
-│   ├── mcp/              # Model Context Protocol client & server transport
-│   ├── config/           # Viper configuration loader & validation
-│   └── session/          # Persistent transcripts, history & undo stack
-└── Makefile              # Build, test, lint, and release recipes
+│   ├── agent/                # Agent loop, orchestration, approval policies
+│   ├── ai/                   # Provider abstraction (Gemini, OpenAI, Anthropic)
+│   ├── config/               # Viper configuration, validation
+│   ├── context/              # Budget management, dependency tracking
+│   ├── diagnostics/          # Compiler error parsing, root-cause analysis
+│   ├── errors/               # Structured errors, retry policies
+│   ├── prompt/               # Phased prompt system (init→explore→plan→build)
+│   ├── sandbox/              # OS-level sandboxing
+│   ├── session/              # Persistent transcripts, history, undo stack
+│   ├── tools/                # 43+ tools (FS, Terminal, AST, Web, Diagnostics)
+│   ├── tui/                  # Bubble Tea v2 TUI
+│   │   ├── app/              # Core event loop, layout, view composition
+│   │   ├── components/       # Modular UI widgets
+│   │   ├── themes/           # 11 color palettes
+│   │   └── render/           # ANSI parser, diff engine, Markdown renderer
+│   └── workflow/             # Artifact system, plan management
+└── Makefile                  # Build, test, lint, release
 ```
 
 ---
 
-## 🧪 Development & Testing
+## Development
 
 ```bash
-# Run all unit and integration tests
-make test
-
-# Run linter checks
-make lint
-
-# Format code and imports
-make fmt
-
-# Run continuous integration checks locally
-make ci
+make test    # Run all tests
+make lint    # Linter checks
+make fmt     # Format code
+make ci      # Full CI checks locally
 ```
 
 ---
 
-## 📄 License
+## License
 
-Distributed under the [MIT License](LICENSE). Built with ❤️ by [iSundram](https://github.com/iSundram) and contributors.
+Distributed under the [MIT License](LICENSE). Built by [iSundram](https://github.com/iSundram) and contributors.
