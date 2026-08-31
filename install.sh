@@ -44,7 +44,7 @@ else
 fi
 
 DOWNLOAD_URL=$(curl -fsSL "$RELEASE_URL" | \
-    grep -o "https://github.com/[^\"]*${OS}_${ARCH}.tar.gz" | \
+    grep -o "https://github.com/[^\"]*${OS}_${ARCH}[^\"]*\.tar\.gz" | \
     head -n 1)
 
 if [ -z "$DOWNLOAD_URL" ]; then

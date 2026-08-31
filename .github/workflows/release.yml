@@ -57,8 +57,10 @@ jobs:
 
       - name: Package
         run: |
-          tar -czf automergent_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz automergent
-          echo "ASSET=automergent_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz" >> "$GITHUB_ENV"
+          VERSION="${GITHUB_REF_NAME}"
+          FILENAME="automergent_${VERSION}_${{ matrix.goos }}_${{ matrix.goarch }}.tar.gz"
+          tar -czf "$FILENAME" automergent
+          echo "ASSET=$FILENAME" >> "$GITHUB_ENV"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
