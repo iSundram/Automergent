@@ -741,7 +741,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.fileTree.SetItems(m.Items)
 	case components.SessionSelectedMsg:
 		if m.Session != nil {
-			if err := a.restoreSession(m.Session); err != nil {
+			// The browser's rows come from the lite session listing (no
+			// messages); restore by id so the full transcript loads.
+			if err := a.resumeSession(m.Session.ID); err != nil {
 				a.statusBar.SetStatus("Session resume failed: " + err.Error())
 			}
 		}

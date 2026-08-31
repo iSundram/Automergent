@@ -95,6 +95,9 @@ func TestResumeSessionByIDRestoresStructuredConversation(t *testing.T) {
 	}
 	app.storage = storage
 	app.handleSlashCommand("/resume " + saved.ID)
+	// Replayed blocks render collapsed by default; expand before asserting
+	// on their content.
+	app.handleSlashCommand("/expand")
 	view := ansiStrip(app.conversation.View())
 	for _, want := range []string{"inspect main.go", "checking the file", "Read", "main.go"} {
 		if !strings.Contains(view, want) {

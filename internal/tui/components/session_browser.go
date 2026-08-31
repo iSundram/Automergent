@@ -79,7 +79,7 @@ func (s sessionItem) Description() string {
 	if !s.sess.UpdatedAt.IsZero() {
 		parts = append(parts, formatRelativeTime(s.sess.UpdatedAt))
 	}
-	parts = append(parts, fmt.Sprintf("%d msgs", len(s.sess.Messages)))
+	parts = append(parts, fmt.Sprintf("%d msgs", s.messageCount()))
 	if s.sess.SizeBytes > 0 {
 		parts = append(parts, formatBytes(s.sess.SizeBytes))
 	}

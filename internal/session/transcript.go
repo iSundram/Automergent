@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -638,6 +639,11 @@ func readLiteSession(path string) *Session {
 				if e.Summary.Title != "" {
 					sess.Title = e.Summary.Title
 				}
+				// The lite listing carries no messages; the count rides in
+				// metadata so display surfaces can show "N msgs" without a
+				// full parse. Keyed without a dot to stay distinct from
+				// user-set metadata.
+				sess.Metadata["lite_message_count"] = strconv.Itoa(e.Summary.MessageCount)
 				if e.Summary.UpdatedAt.After(updated) {
 					updated = e.Summary.UpdatedAt
 				}

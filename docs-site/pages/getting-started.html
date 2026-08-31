@@ -56,7 +56,7 @@
                             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8zm6.5-.25A.75.75 0 017.25 7h1a.75.75 0 01.75.75v2.75h.25a.75.75 0 010 1.5h-2a.75.75 0 010-1.5h.25v-2h-.25a.75.75 0 01-.75-.75zM8 6a1 1 0 100-2 1 1 0 000 2z"/></svg>
                             Note
                         </div>
-                        The installer downloads the latest release for your platform and places it in <code>/usr/local/bin</code>. Requires <code>curl</code> and <code>bash</code>.
+                        The installer downloads the latest release for your platform, places it in <code>/usr/local/bin</code>, and creates the <code>amt</code> alias (same binary, every flag works on both — <code>amt -s &lt;id&gt;</code> resumes a session). Requires <code>curl</code> and <code>bash</code>.
                     </div>
                 </div>
 
@@ -259,8 +259,9 @@ export GEMINI_API_KEY="your-gemini-api-key"</code></pre>
                             </button>
                         </div>
                         <div class="code-content">
-                            <pre><code>providers:
-  gemini:
+                            <pre><code>provider: "google-vertex"
+providers:
+  google-vertex:
     project: "your-gcp-project-id"
     location: "us-central1"</code></pre>
                         </div>
@@ -271,19 +272,27 @@ export GEMINI_API_KEY="your-gemini-api-key"</code></pre>
             <div class="card">
                 <div class="card-header">
                     <svg class="card-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z"/></svg>
-                    <span class="card-title">OpenAI</span>
+                    <span class="card-title">Any OpenAI-Compatible Endpoint (Custom)</span>
                 </div>
                 <div class="card-content">
+                    <p>OpenAI, Anthropic, DeepSeek, Ollama and friends all connect through
+                    the <code>custom</code> provider — any OpenAI- or Gemini-compatible
+                    endpoint works with <code>apiKey</code> + <code>baseUrl</code> + <code>defaultModel</code>:</p>
                     <div class="code-block">
                         <div class="code-header">
-                            <span class="code-lang">bash</span>
+                            <span class="code-lang">yaml</span>
                             <button class="copy-btn" onclick="copyCode(this)">
                                 <svg viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00-.25-.25h-7.5z"/></svg>
                                 Copy
                             </button>
                         </div>
                         <div class="code-content">
-                            <pre><code>export OPENAI_API_KEY="your-openai-api-key"</code></pre>
+                            <pre><code>provider: "custom"
+providers:
+  custom:
+    apiKey: "${PROVIDER_API_KEY}"
+    baseUrl: "https://api.openai.com/v1"
+    defaultModel: "gpt-4o"</code></pre>
                         </div>
                     </div>
                 </div>
@@ -292,19 +301,24 @@ export GEMINI_API_KEY="your-gemini-api-key"</code></pre>
             <div class="card">
                 <div class="card-header">
                     <svg class="card-icon" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0a8 8 0 100 16A8 8 0 008 0zM1.5 8a6.5 6.5 0 1113 0 6.5 6.5 0 01-13 0z"/></svg>
-                    <span class="card-title">Anthropic</span>
+                    <span class="card-title">Ollama (Local)</span>
                 </div>
                 <div class="card-content">
+                    <p>Local models connect through <code>custom</code> with no API key:</p>
                     <div class="code-block">
                         <div class="code-header">
-                            <span class="code-lang">bash</span>
+                            <span class="code-lang">yaml</span>
                             <button class="copy-btn" onclick="copyCode(this)">
                                 <svg viewBox="0 0 16 16" fill="currentColor"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 010 1.5h-1.5a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00.25-.25v-1.5a.75.75 0 011.5 0v1.5A1.75 1.75 0 019.25 16h-7.5A1.75 1.75 0 010 14.25v-7.5z"/><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0114.25 11h-7.5A1.75 1.75 0 015 9.25v-7.5zm1.75-.25a.25.25 0 00-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 00-.25-.25h-7.5z"/></svg>
                                 Copy
                             </button>
                         </div>
                         <div class="code-content">
-                            <pre><code>export ANTHROPIC_API_KEY="your-anthropic-api-key"</code></pre>
+                            <pre><code>provider: "custom"
+providers:
+  custom:
+    baseUrl: "http://localhost:11434/v1"
+    defaultModel: "llama3"</code></pre>
                         </div>
                     </div>
                 </div>
@@ -316,7 +330,7 @@ export GEMINI_API_KEY="your-gemini-api-key"</code></pre>
                     <span class="card-title">Custom / OpenAI-Compatible Providers</span>
                 </div>
                 <div class="card-content">
-                    <p>Connect to any OpenAI-compatible API (Ollama, LiteLLM, etc.):</p>
+                    <p>Connect to any OpenAI- or Gemini-compatible API (LiteLLM, OpenRouter, self-hosted, etc.) with <code>apiKey</code>, <code>baseUrl</code> and <code>defaultModel</code>:</p>
                     <div class="code-block">
                         <div class="code-header">
                             <span class="code-lang">yaml</span>
@@ -326,12 +340,12 @@ export GEMINI_API_KEY="your-gemini-api-key"</code></pre>
                             </button>
                         </div>
                         <div class="code-content">
-                            <pre><code>provider: "openai-compatible"
+                            <pre><code>provider: "custom"
 providers:
-  openai-compatible:
-    api_key: "${CUSTOM_API_KEY}"
-    base_url: "http://localhost:11434/v1"
-    model: "llama3"</code></pre>
+  custom:
+    apiKey: "${CUSTOM_API_KEY}"
+    baseUrl: "http://localhost:11434/v1"
+    defaultModel: "llama3"</code></pre>
                         </div>
                     </div>
                 </div>
@@ -351,30 +365,26 @@ providers:
                         <tr>
                             <td><code>GOOGLE_API_KEY</code></td>
                             <td>Google AI Studio</td>
-                            <td>API key for Gemini models</td>
+                            <td>API key for Gemini models (preferred)</td>
                         </tr>
                         <tr>
                             <td><code>GEMINI_API_KEY</code></td>
                             <td>Google AI Studio</td>
-                            <td>Alias for GOOGLE_API_KEY</td>
+                            <td>Alias for GOOGLE_API_KEY, used as fallback</td>
                         </tr>
                         <tr>
-                            <td><code>OPENAI_API_KEY</code></td>
-                            <td>OpenAI</td>
-                            <td>API key for GPT models</td>
-                        </tr>
-                        <tr>
-                            <td><code>ANTHROPIC_API_KEY</code></td>
-                            <td>Anthropic</td>
-                            <td>API key for Claude models</td>
-                        </tr>
-                        <tr>
-                            <td><code>DEEPSEEK_API_KEY</code></td>
-                            <td>DeepSeek</td>
-                            <td>API key for DeepSeek models</td>
+                            <td><code>AUTOMERGENT_REDUCED_MOTION</code></td>
+                            <td>Any</td>
+                            <td><code>1</code> disables spinner animations</td>
                         </tr>
                     </tbody>
                 </table>
+                <div class="callout callout-info" style="margin-top: 1rem;">
+                    <div class="alert-title">Note</div>
+                    Other providers (OpenAI, Anthropic, DeepSeek, Ollama) connect through the
+                    <code>custom</code> provider with <code>apiKey</code> + <code>baseUrl</code> in
+                    <code>~/.automergent/config.yaml</code> — no dedicated environment variables are read for them.
+                </div>
             </div>
         </section>
 
@@ -399,7 +409,7 @@ providers:
                 </div>
                 <div class="code-content">
                     <pre><code># ~/.automergent/config.yaml
-provider: "gemini"
+provider: "google-aistudio"
 model: "gemini-3.6-flash"
 temperature: 0.2
 mode: "accept-edits"
@@ -420,7 +430,7 @@ theme: "modern"</code></pre>
                     <tbody>
                         <tr>
                             <td><code>provider</code></td>
-                            <td><code>gemini</code>, <code>openai</code>, <code>anthropic</code>, <code>deepseek</code>, <code>ollama</code></td>
+                            <td><code>google-aistudio</code>, <code>google-vertex</code>, <code>custom</code> (legacy aliases: <code>google</code>, <code>openai</code>, <code>anthropic</code>, <code>deepseek</code>, <code>ollama</code>)</td>
                             <td>AI provider to use</td>
                         </tr>
                         <tr>

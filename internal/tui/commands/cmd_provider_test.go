@@ -1,7 +1,10 @@
 package commands
 
 import (
+	"strings"
 	"testing"
+
+	"github.com/iSundram/Automergent/internal/config"
 )
 
 func TestHandleProviderStatus(t *testing.T) {

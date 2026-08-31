@@ -196,7 +196,9 @@ func ClampContextLimit(n int) int {
 // DefaultModelFor returns the catalog default model for a provider, or ""
 // when the provider is unknown.
 func DefaultModelFor(provider string) string {
-	if spec, ok := providerSpecs[provider]; ok {
+	// Alias-aware: legacy names ("google") resolve through the same lookup
+	// the rest of the catalog uses.
+	if spec, ok := ProviderSpecFor(provider); ok {
 		return spec.DefaultModel
 	}
 	return ""
@@ -205,7 +207,7 @@ func DefaultModelFor(provider string) string {
 // ProviderEnvKeys returns the environment variables consulted for a
 // provider's API key, in priority order.
 func ProviderEnvKeys(provider string) []string {
-	if spec, ok := providerSpecs[provider]; ok {
+	if spec, ok := ProviderSpecFor(provider); ok {
 		return append([]string{}, spec.EnvKeys...)
 	}
 	return nil
@@ -225,7 +227,8 @@ func IsValidBackend(provider, backend string) bool {
 	if backend == "" {
 		return true
 	}
-	spec, ok := providerSpecs[provider]
+	// Alias-aware, like every other spec lookup.
+	spec, ok := ProviderSpecFor(provider)
 	if !ok || len(spec.Backends) == 0 {
 		return false
 	}
@@ -240,7 +243,7 @@ func IsValidBackend(provider, backend string) bool {
 // DefaultBackend returns the provider's default backend ("" when the provider
 // has a single implicit backend).
 func DefaultBackend(provider string) string {
-	if spec, ok := providerSpecs[provider]; ok {
+	if spec, ok := ProviderSpecFor(provider); ok {
 		return spec.DefaultBackend
 	}
 	return ""
@@ -254,7 +257,7 @@ func EffectiveBackend(provider string, pc ProviderConfig) string {
 	if pc.Backend != "" {
 		return pc.Backend
 	}
-	if spec, ok := providerSpecs[provider]; ok && len(spec.Backends) > 0 {
+	if spec, ok := ProviderSpecFor(provider); ok && len(spec.Backends) > 0 {
 		for _, b := range spec.Backends {
 			if b == "vertex" && pc.Project != "" && pc.Location != "" {
 				return "vertex"

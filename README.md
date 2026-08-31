@@ -52,11 +52,14 @@ make install
 
 ```bash
 cd your-project/
-automergent
+automergent   # or the short alias: amt
 ```
 
 > [!TIP]
-> Automergent automatically detects git context, repository root, configuration files, and project languages on startup.
+> The installer creates `amt` as an alias for `automergent` — every flag works
+> on both (`amt -s <id>` resumes a session; the exit banner prints the exact
+> command for you). Automergent automatically detects git context, repository
+> root, configuration files, and project languages on startup.
 
 ---
 
@@ -108,7 +111,24 @@ export GOOGLE_API_KEY="your-key"   # or GEMINI_API_KEY — both are accepted
 | **Session Memory** | Persistent sessions, undo/redo, project-scoped history |
 | **Artifact System** | Plan documents, approval workflows, structured deliverables |
 
-For slash commands, keyboard shortcuts, and detailed feature documentation, visit **[automergent.github.io](https://automergent.github.io)**.
+For keyboard shortcuts and detailed feature documentation, visit **[automergent.github.io](https://automergent.github.io)**.
+
+### Slash Commands
+
+61 built-in slash commands, all available from the command palette (`/`). The ones you'll use first:
+
+| Command | What it does |
+| :--- | :--- |
+| `/provider`, `/model` | Switch provider, model, or run setup and connectivity tests |
+| `/plan`, `/review`, `/security-review` | Plan before editing; review changes or a PR; security-focused review |
+| `/diff`, `/artifact` | Review workspace changes; approve agent-produced plans and docs |
+| `/sessions`, `/resume`, `/rewind` | Browse sessions, resume one, or restore a conversation checkpoint |
+| `/compact`, `/context`, `/cost` | Keep the context window lean; inspect usage and spend |
+| `/doctor`, `/error`, `/stats` | Diagnose config, provider, and API health |
+| `/workflow`, `/agents`, `/goal` | Multi-agent pipelines, the live subagent fleet, autonomous goals |
+| `/theme`, `/keybindings`, `/export` | Make it yours |
+
+Type `/help` in a session for the full list, or `/commands` to manage custom project commands (`.automergent/commands/`).
 
 ---
 

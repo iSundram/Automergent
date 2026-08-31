@@ -255,6 +255,9 @@ func TestResumeRestoresFullConversation(t *testing.T) {
 	a = model.(*App)
 
 	a.width, a.height = 100, 40
+	// Replayed blocks render collapsed by default; expand before asserting
+	// on their content.
+	a.handleSlashCommand("/expand")
 	a.layout()
 	conv := ansiStrip(a.conversation.View())
 	for _, want := range []string{"hello agent", "let me think about this", "I will check the file", "Read", "main.go"} {

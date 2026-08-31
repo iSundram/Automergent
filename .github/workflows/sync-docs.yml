@@ -18,8 +18,8 @@ jobs:
         env:
           DOCS_TOKEN: ${{ secrets.DOCS_TOKEN }}
         run: |
-          git config user.email "deploy@automergent.github.io"
-          git config user.name "Automergent Docs Bot"
+          git config --global user.email "deploy@automergent.github.io"
+          git config --global user.name "Automergent Docs Bot"
 
           # Clone the docs repo
           git clone --depth 1 \

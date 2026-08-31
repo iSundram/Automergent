@@ -108,8 +108,9 @@ The **approval system** (`internal/agent/approval_policy.go`, `internal/tui/app/
 I decided early on to build on the **Gemini 3.5 ecosystem**. The `internal/ai/google/client.go` lists the supported models:
 
 ```
-gemini-3.5-flash, gemini-3.5-flash-lite, gemini-3.1-flash-lite,
-gemini-3.1-pro-preview, gemini-3-flash-preview, gemini-2.5-pro
+gemini-3.6-flash, gemini-3.5-flash, gemini-3.5-flash-lite,
+gemini-3.1-flash-lite, gemini-3.1-pro-preview, gemini-3-flash-preview,
+gemini-2.5-pro, gemini-2.5-flash, gemini-2.5-flash-lite, …
 ```
 
 The default model is `gemini-3.6-flash`. Google's models were fast, cheap, and had the best tool-calling support at the time.
@@ -217,7 +218,7 @@ Automergent/
 │   └── automergent/          # CLI entrypoint & command bootstrapping
 ├── internal/
 │   ├── agent/                # AI agent loop, orchestration, approval policies
-│   ├── ai/                   # Provider abstraction (Google, OpenAI, Anthropic)
+│   ├── ai/                   # Provider abstraction (Google AI Studio + Vertex AI, OpenAI-compatible custom)
 │   │   └── google/           # Gemini client with retry, streaming, SDK integration
 │   ├── config/               # Viper configuration loader, validation, providers
 │   ├── context/              # Budget management, dependency tracking, staleness
@@ -232,7 +233,7 @@ Automergent/
 │   ├── session/              # Persistent transcripts, history, undo stack
 │   ├── shared/               # Shared types and interfaces
 │   ├── taskstate/            # Task state store for agent workflows
-│   ├── tools/                # 43+ tool implementations across 13 categories
+│   ├── tools/                # 45+ registered tools across 12 packages
 │   ├── tui/                  # Bubble Tea v2 TUI
 │   │   ├── app/              # Core event loop, layout, view composition
 │   │   ├── commands/         # Slash command handlers
@@ -257,10 +258,12 @@ Automergent/
 | Total commits (first-parent) | ~120+ |
 | Largest single commit | 50,336 insertions (`8d62d35`) |
 | Days from first commit to v0.1.0 | ~3 |
-| Tool files | 43 (across 13 categories) |
+| Registered tools | 45+ (32 in `cmd/automergent/main.go` + task-state, violation, MCP and agent registrations) |
+| Slash commands | 61 built-in (plus custom markdown commands) |
 | Color themes | 11 |
-| AI providers | 5 (Gemini, OpenAI, Anthropic + DeepSeek/Ollama via OpenAI compat) |
-| Prompt phases | 4 (init → explore → plan → build) |
+| AI providers | 2 first-class (Google AI Studio, Google Vertex AI) + `custom` for any compatible endpoint; 5 legacy aliases (google, openai, anthropic, deepseek, ollama) kept for old configs |
+| Default model | `gemini-3.6-flash` |
+| Prompt phases | 4 (init → explore → plan → build; classifier also routes `verify` tasks) |
 | Prompt system files | 29 in `internal/prompt/` |
 | Subsystems added then removed | 8+ (learning, graph engine, reasoning, verification, LSP, accessibility, git tools, co-author) |
 | Google client rewrites | 4 major (non-streaming → SSE → mutex-protected → GenAI SDK) |
@@ -335,8 +338,9 @@ This document was written by reading git diffs and current codebase state. Some 
 
 **What may be slightly off:**
 - **Theme count (11)** was checked against `internal/tui/themes/engine.go` at HEAD. If themes were added or removed in uncommitted changes or very recent commits, this number could be different.
-- **Tool file count (43)** counts `.go` files under `internal/tools/` excluding tests. Some files are metadata or shared utilities, not individual tool registrations. The actual registered tool count depends on what `init()` functions register, which could differ from the file count.
-- **"5 providers"** — the config system lists DeepSeek and Ollama as hidden/legacy providers using the OpenAI-compatible API. Whether they fully work or are just stubs at this point is unclear from the git history alone.
+- **Registered tool count (45+)** counts `reg.Register(...)` call sites in `cmd/automergent/main.go` (32) plus task-state, violation, MCP-bridge and agent registrations wired elsewhere. The exact runtime count depends on config (MCP servers, subagent types).
+- **Slash command count (61)** counts distinct `Command` constructors in `internal/tui/commands/cmd_*.go`, excluding aliases (`/stop`, `/tokens`, `/usage`, `/errors`, `/bug`) and user-defined markdown commands.
+- **"2 first-class providers + custom"** reflects the narrowed catalog in `internal/config/providers.go` (`google-aistudio`, `google-vertex`, `custom`). The legacy names (including openai, anthropic, deepseek, ollama) still resolve so old configs keep working, but they are aliases, not supported providers.
 - **"Rounded TUI scrapped"** — `lipgloss.RoundedBorder()` is still used in many places. The claim that it was "scrapped" is an overstatement. The real change was making line-based the dominant structure, not eliminating rounded corners entirely.
 - **"config.yaml dead"** — the file is never committed to git, but the code at `internal/tui/app/host.go` references it as a runtime config location. It's not "dead" in the sense that nothing uses it — it's just not a checked-in file. The original claim was imprecise.
 - **The Google client rewrite count ("four times")** is based on major milestone commits. The actual git log for `internal/ai/google/client.go` shows ~110 commits across branches, many of which are small fixes or merges. Calling it "four rewrites" simplifies a messier reality.
