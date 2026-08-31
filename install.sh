@@ -48,7 +48,7 @@ else
     exit 1
 fi
 
-printf "%s\n" "${DIM}✧$RESET Installing Automergent for ${TEXT}${OS}/${ARCH}${RESET}..."
+printf "%b✧%b Installing Automergent for %b%s/%s%b...\n" "$DIM" "$RESET" "$TEXT" "$OS" "$ARCH" "$RESET"
 
 # Fetch latest release or use VERSION env var if set
 if [ -n "$VERSION" ]; then
@@ -62,7 +62,7 @@ fi
 TMP_DIR=$(mktemp -d)
 trap 'rm -rf "$TMP_DIR"' EXIT
 
-printf "%s\n" "${DIM}✧$RESET Fetching release metadata..."
+printf "%b✧%b Fetching release metadata...\n" "$DIM" "$RESET"
 if ! curl -fsSL "$RELEASE_URL" -o "$TMP_DIR/release.json"; then
     echo "Error: Could not fetch release information."
     exit 1
@@ -80,13 +80,13 @@ if [ -z "$DOWNLOAD_URL" ]; then
     exit 1
 fi
 
-printf "%s\n" "${DIM}✧$RESET Downloading ${TEXT}${TAG:-latest}${RESET}..."
+printf "%b✧%b Downloading %b%s%b...\n" "$DIM" "$RESET" "$TEXT" "${TAG:-latest}" "$RESET"
 if ! curl -fSL "$DOWNLOAD_URL" -o "$TMP_DIR/release.tar.gz"; then
     echo "Error: Download failed."
     exit 1
 fi
 
-printf "%s\n" "${DIM}✧$RESET Extracting..."
+printf "%b✧%b Extracting...\n" "$DIM" "$RESET"
 tar -xzf "$TMP_DIR/release.tar.gz" -C "$TMP_DIR"
 
 if [ ! -f "$TMP_DIR/$BINARY_NAME" ]; then
@@ -107,7 +107,8 @@ LABEL_WIDTH=11
 
 field() {
     # field <label> <value> — one padded label/value row, like the exit card.
-    printf " %b%s%b%s%b\n" "$DIM" "$(printf '%-*s' $LABEL_WIDTH "$1")" "$RESET" "$TEXT" "$2" "$RESET"
+    # All four pieces go through %b so the ANSI variables expand.
+    printf " %b%-11s%b%b%s%b\n" "$DIM" "$1" "$RESET" "$TEXT" "$2" "$RESET"
 }
 
 PATH_NOTE=""
