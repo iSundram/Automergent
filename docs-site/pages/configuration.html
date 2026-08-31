@@ -4,271 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Configuration Reference — Automergent</title>
-    <style>
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif, 'Apple Color Emoji';
-            background-color: #0d1117;
-            color: #e6edf3;
-            line-height: 1.6;
-            min-height: 100vh;
-        }
-
-        .page-wrapper {
-            display: flex;
-            min-height: 100vh;
-        }
-
-        /* ── Sidebar ── */
-        .sidebar {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 280px;
-            height: 100vh;
-            background: #161b22;
-            border-right: 1px solid #21262d;
-            overflow-y: auto;
-            padding: 24px 0;
-            z-index: 100;
-        }
-
-        .sidebar-logo {
-            padding: 0 20px 20px;
-            border-bottom: 1px solid #21262d;
-            margin-bottom: 16px;
-        }
-
-        .sidebar-logo a {
-            text-decoration: none;
-            color: #e6edf3;
-            font-size: 18px;
-            font-weight: 700;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .sidebar-logo a span { color: #58a6ff; }
-
-        .sidebar nav { padding: 0 12px; }
-
-        .sidebar nav a {
-            display: block;
-            padding: 6px 12px;
-            color: #8b949e;
-            text-decoration: none;
-            font-size: 13px;
-            border-radius: 6px;
-            transition: all 0.15s;
-        }
-
-        .sidebar nav a:hover { color: #e6edf3; background: #21262d; }
-        .sidebar nav a.active { color: #58a6ff; background: rgba(88,166,255,0.08); }
-
-        .sidebar nav .nav-section {
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-            color: #484f58;
-            padding: 16px 12px 6px;
-        }
-
-        /* ── Main Content ── */
-        .main-content {
-            margin-left: 280px;
-            flex: 1;
-            max-width: 960px;
-            padding: 48px 56px 96px;
-        }
-
-        h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; color: #e6edf3; }
-        .subtitle { color: #8b949e; font-size: 16px; margin-bottom: 40px; }
-
-        h2 {
-            font-size: 22px;
-            font-weight: 600;
-            color: #e6edf3;
-            margin-top: 56px;
-            margin-bottom: 16px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid #21262d;
-        }
-
-        h3 {
-            font-size: 16px;
-            font-weight: 600;
-            color: #e6edf3;
-            margin-top: 32px;
-            margin-bottom: 12px;
-        }
-
-        p, li { font-size: 15px; color: #e6edf3; }
-        p { margin-bottom: 16px; }
-        ul, ol { margin-bottom: 16px; padding-left: 24px; }
-        li { margin-bottom: 6px; }
-
-        a { color: #58a6ff; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-
-        code {
-            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-            font-size: 13px;
-            background: #1c2129;
-            padding: 2px 6px;
-            border-radius: 4px;
-            color: #79c0ff;
-        }
-
-        pre {
-            background: #161b22;
-            border: 1px solid #21262d;
-            border-radius: 8px;
-            padding: 20px 24px;
-            overflow-x: auto;
-            margin-bottom: 24px;
-            position: relative;
-        }
-
-        pre code {
-            background: transparent;
-            padding: 0;
-            color: #e6edf3;
-            font-size: 13px;
-            line-height: 1.55;
-        }
-
-        .code-label {
-            position: absolute;
-            top: 8px;
-            right: 12px;
-            font-size: 11px;
-            color: #484f58;
-            text-transform: uppercase;
-            letter-spacing: 0.05em;
-        }
-
-        /* ── YAML Syntax Colors ── */
-        .yaml-key { color: #7ee787; }
-        .yaml-val { color: #a5d6ff; }
-        .yaml-str { color: #a5d6ff; }
-        .yaml-comment { color: #484f58; font-style: italic; }
-        .yaml-bool { color: #ff7b72; }
-        .yaml-num { color: #79c0ff; }
-        .yaml-null { color: #ff7b72; }
-
-        /* ── Tables ── */
-        .table-wrapper {
-            overflow-x: auto;
-            margin-bottom: 24px;
-            border: 1px solid #21262d;
-            border-radius: 8px;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 14px;
-        }
-
-        thead th {
-            background: #161b22;
-            color: #8b949e;
-            font-weight: 600;
-            text-align: left;
-            padding: 12px 16px;
-            border-bottom: 1px solid #21262d;
-            white-space: nowrap;
-        }
-
-        tbody td {
-            padding: 10px 16px;
-            border-bottom: 1px solid #21262d;
-            vertical-align: top;
-        }
-
-        tbody tr:last-child td { border-bottom: none; }
-        tbody tr:hover { background: rgba(88,166,255,0.04); }
-
-        td code {
-            font-size: 12px;
-            background: #1c2129;
-            padding: 2px 5px;
-            border-radius: 3px;
-        }
-
-        /* ── Callout Boxes ── */
-        .callout {
-            border-radius: 8px;
-            padding: 16px 20px;
-            margin-bottom: 24px;
-            border-left: 4px solid;
-            font-size: 14px;
-        }
-
-        .callout-info { background: rgba(88,166,255,0.08); border-color: #58a6ff; }
-        .callout-warn { background: rgba(210,153,34,0.08); border-color: #d29922; }
-        .callout-tip { background: rgba(63,185,80,0.08); border-color: #3fb950; }
-        .callout-danger { background: rgba(248,81,73,0.08); border-color: #f85149; }
-
-        .callout strong { color: #e6edf3; }
-
-        /* ── Config Section Card ── */
-        .config-section {
-            background: #161b22;
-            border: 1px solid #21262d;
-            border-radius: 8px;
-            padding: 24px;
-            margin-bottom: 24px;
-        }
-
-        .config-section h3 {
-            margin-top: 0;
-            color: #58a6ff;
-            font-size: 15px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .config-section h3::before {
-            content: '';
-            display: inline-block;
-            width: 3px;
-            height: 16px;
-            background: #58a6ff;
-            border-radius: 2px;
-        }
-
-        /* ── Tag / Badge ── */
-        .tag {
-            display: inline-block;
-            padding: 2px 8px;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 0.03em;
-        }
-
-        .tag-required { background: rgba(248,81,73,0.15); color: #f85149; }
-        .tag-optional { background: rgba(88,166,255,0.12); color: #58a6ff; }
-        .tag-default { background: rgba(63,185,80,0.12); color: #3fb950; }
-
-        /* ── Scrollbar ── */
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #484f58; }
-
-        /* ── Responsive ── */
-        @media (max-width: 960px) {
-            .sidebar { display: none; }
-            .main-content { margin-left: 0; padding: 32px 24px 64px; }
-        }
-    </style>
+    <link rel="stylesheet" href="../css/style.css">
 </head>
 <body>
 <div class="page-wrapper">
@@ -277,38 +13,23 @@
      SIDEBAR
      ═══════════════════════════════════════════════════════════════════════ -->
 <aside class="sidebar">
-    <div class="sidebar-logo"><a href="/"><span>⚡</span> Automergent</a></div>
+    <div class="sidebar-title">Configuration</div>
     <nav>
-        <div class="nav-section">Getting Started</div>
-        <a href="/">Overview</a>
-        <a href="/installation.html">Installation</a>
-        <a href="/quickstart.html">Quickstart</a>
+        <div class="cat-label">Hierarchy &amp; Schema</div>
+        <a href="#config-locations">Config Locations</a>
+        <a href="#config-schema">Full Schema</a>
+        <a href="#core">Core Settings</a>
+        <a href="#providers">Providers &amp; Models</a>
+        <a href="#context-window">Context Window</a>
+        <a href="#security">Security &amp; Sandboxing</a>
+        <a href="#git">Git Integration</a>
+        <a href="#sessions">Sessions &amp; Memory</a>
+        <a href="#tools-cfg">Tools Configuration</a>
+        <a href="#skills-cfg">Skills &amp; MCP</a>
 
-        <div class="nav-section">Reference</div>
-        <a href="/configuration.html" class="active">Configuration</a>
-        <a href="/cli-flags.html">CLI Flags</a>
-        <a href="/environment-variables.html">Environment Variables</a>
-        <a href="/providers.html">Providers</a>
-        <a href="/models.html">Models</a>
-
-        <div class="nav-section">Features</div>
-        <a href="/tools.html">Tools</a>
-        <a href="/modes.html">Modes</a>
-        <a href="/sessions.html">Sessions</a>
-        <a href="/context-management.html">Context Management</a>
-        <a href="/subagents.html">Sub-Agents</a>
-
-        <div class="nav-section">Advanced</div>
-        <a href="/security.html">Security</a>
-        <a href="/mcp.html">MCP Servers</a>
-        <a href="/lsp.html">LSP Integration</a>
-        <a href="/hooks.html">Hooks</a>
-        <a href="/debugging.html">Debugging</a>
-
-        <div class="nav-section">Customization</div>
-        <a href="/themes.html">Themes</a>
-        <a href="/keybindings.html">Keybindings</a>
-        <a href="/skills.html">Skills</a>
+        <div class="cat-label">CLI Diagnostics</div>
+        <a href="#cli-config-cmd">amt config Commands</a>
+        <a href="#full-example">Full Example YAML</a>
     </nav>
 </aside>
 
@@ -1975,5 +1696,6 @@
 </div>
 <script src="../js/nav.js"></script>
 <script src="../js/footer.js"></script>
+<script src="../js/main.js"></script>
 </body>
 </html>

@@ -8,8 +8,7 @@
 </head>
 <body>
 
-  <!-- Navigation will be injected by nav.js -->
-
+<div class="page-wrapper">
   <!-- Sidebar TOC -->
   <aside class="sidebar">
     <div class="sidebar-title">Examples & Tutorials</div>
@@ -1432,26 +1431,11 @@ Use when the user says "deploy to staging" or "push staging".
 <h2 id="git-pr" style="display:none"></h2>
 <h2 id="advanced-artifacts" style="display:none"></h2>
 <h2 id="advanced-autonomy" style="display:none"></h2>
-<h2 id="advanced-skills" style="display:none"></h2>
-
-</div><!-- .main -->
-
-<script>
-// Sidebar active state
-const observer = new IntersectionObserver(entries => {
-  entries.forEach(e => {
-    if (e.isIntersecting) {
-      document.querySelectorAll('.sidebar nav a').forEach(a => a.classList.remove('active'));
-      const link = document.querySelector(`.sidebar nav a[href="#${e.target.id}"]`);
-      if (link) link.classList.add('active');
-    }
-  });
-}, { rootMargin: '-20% 0px -60% 0px' });
-
-document.querySelectorAll('h2[id]').forEach(h => observer.observe(h));
-</script>
+</main>
+</div>
 
 <script src="../js/nav.js"></script>
 <script src="../js/footer.js"></script>
+<script src="../js/main.js"></script>
 </body>
 </html>

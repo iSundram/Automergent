@@ -8,8 +8,7 @@
 </head>
 <body>
 
-  <!-- Navigation will be injected by nav.js -->
-
+<div class="page-wrapper">
   <!-- Sidebar TOC -->
   <aside class="sidebar">
     <div class="sidebar-title">Themes & UI</div>
@@ -787,13 +786,11 @@ agentNotificationMsg{
     duration: 45s,
 }</code></pre>
 
-  <div class="callout">
-    <strong>Notification rate limiting:</strong> The <code>NotifyTool</code> enforces rate limits via <code>SetNotifyRateLimit()</code>. Notifications exceeding the limit are dropped or summarized to avoid spamming the user during high-frequency tool execution.
-  </div>
+  </main>
+</div>
 
-  </div><!-- .main -->
-
-  <script src="../js/nav.js"></script>
-  <script src="../js/footer.js"></script>
+<script src="../js/nav.js"></script>
+<script src="../js/footer.js"></script>
+<script src="../js/main.js"></script>
 </body>
 </html>

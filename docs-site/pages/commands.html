@@ -4,121 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Commands Reference - Automergent</title>
-<style>
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --bg: #0d1117; --card: #161b22; --border: #30363d; --text: #e6edf3;
-    --text-muted: #8b949e; --accent: #58a6ff; --accent-dim: #1f3a5f;
-    --green: #3fb950; --red: #f85149; --yellow: #d29922; --purple: #bc8cff;
-    --orange: #f0883e; --sidebar-w: 260px; --row-alt: #1c2128;
-  }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    background: var(--bg); color: var(--text); line-height: 1.6;
-    display: flex; min-height: 100vh;
-  }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-
-  /* Sidebar */
-  .sidebar {
-    position: fixed; top: 0; left: 0; width: var(--sidebar-w); height: 100vh;
-    background: var(--card); border-right: 1px solid var(--border);
-    overflow-y: auto; padding: 24px 16px; z-index: 100;
-  }
-  .sidebar h2 {
-    font-size: 15px; color: var(--accent); margin-bottom: 16px;
-    letter-spacing: 0.5px; text-transform: uppercase; font-weight: 600;
-  }
-  .sidebar .cat-label {
-    font-size: 11px; text-transform: uppercase; color: var(--text-muted);
-    margin: 14px 0 6px 0; letter-spacing: 0.8px; font-weight: 600;
-  }
-  .sidebar ul { list-style: none; }
-  .sidebar li a {
-    display: block; padding: 3px 8px; font-size: 13px; color: var(--text-muted);
-    border-radius: 4px; font-family: 'SFMono-Regular', Consolas, monospace;
-  }
-  .sidebar li a:hover { background: var(--accent-dim); color: var(--accent); text-decoration: none; }
-
-  /* Main content */
-  .main { margin-left: var(--sidebar-w); flex: 1; padding: 40px 48px 80px; max-width: 960px; }
-  h1 { font-size: 32px; margin-bottom: 8px; }
-  h1 span { color: var(--accent); }
-  .subtitle { color: var(--text-muted); margin-bottom: 32px; font-size: 15px; }
-  h2 {
-    font-size: 22px; margin: 48px 0 16px; padding-bottom: 8px;
-    border-bottom: 1px solid var(--border); color: var(--accent);
-  }
-  h3 {
-    font-size: 16px; margin: 28px 0 10px; color: var(--text);
-    font-family: 'SFMono-Regular', Consolas, monospace;
-  }
-  h3 code { background: var(--card); padding: 2px 8px; border-radius: 4px; border: 1px solid var(--border); }
-
-  /* Tables */
-  table {
-    width: 100%; border-collapse: collapse; margin: 8px 0 24px;
-    font-size: 14px;
-  }
-  th {
-    text-align: left; background: #1c2128; color: var(--text-muted);
-    padding: 8px 12px; font-size: 12px; text-transform: uppercase;
-    letter-spacing: 0.5px; border-bottom: 2px solid var(--border);
-  }
-  td { padding: 8px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  tr:nth-child(even) td { background: var(--row-alt); }
-  tr:hover td { background: #1f2937; }
-  code {
-    font-family: 'SFMono-Regular', Consolas, monospace; font-size: 13px;
-    background: #1c2128; padding: 2px 6px; border-radius: 3px;
-    color: var(--accent); border: 1px solid var(--border);
-  }
-  .cmd-name { color: var(--green); font-weight: 600; }
-  .cmd-desc { color: var(--text-muted); }
-  .cmd-example { color: var(--yellow); }
-  .cmd-related a { font-size: 12px; }
-
-  /* Keyboard section */
-  .kb-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; margin: 12px 0 32px; }
-  .kb-card {
-    background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 16px;
-  }
-  .kb-card h4 { font-size: 14px; color: var(--accent); margin-bottom: 10px; }
-  .kb-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
-  .kb-key {
-    font-family: 'SFMono-Regular', Consolas, monospace; background: #21262d;
-    padding: 1px 8px; border-radius: 4px; border: 1px solid var(--border); color: var(--text);
-  }
-  .kb-action { color: var(--text-muted); }
-
-  /* Badges */
-  .badge {
-    display: inline-block; font-size: 10px; padding: 1px 6px; border-radius: 10px;
-    font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
-    vertical-align: middle; margin-left: 4px;
-  }
-  .badge-new { background: #1f3a5f; color: var(--accent); }
-  .badge-pro { background: #3b2f1e; color: var(--orange); }
-
-  .toc-link {
-    font-family: 'SFMono-Regular', Consolas, monospace; font-size: 13px;
-    display: inline-block; background: var(--card); border: 1px solid var(--border);
-    padding: 6px 12px; border-radius: 6px; margin: 4px 4px 4px 0; color: var(--accent);
-  }
-  .toc-link:hover { background: var(--accent-dim); text-decoration: none; }
-
-  @media (max-width: 800px) {
-    .sidebar { display: none; }
-    .main { margin-left: 0; padding: 24px 16px; }
-  }
-</style>
+<link rel="stylesheet" href="../css/style.css">
 </head>
 <body>
 
+<div class="page-wrapper">
 <!-- Sidebar TOC -->
-<nav class="sidebar">
-  <h2>Commands</h2>
+<aside class="sidebar">
+  <div class="sidebar-title">Commands (61)</div>
 
   <div class="cat-label">Session</div>
   <ul>
@@ -239,16 +132,11 @@
     <li><a href="#feedback">/feedback</a></li>
   </ul>
 
-  <div class="cat-label">Keyboard Shortcuts</div>
-  <ul>
-    <li><a href="#shortcuts-default">Default</a></li>
-    <li><a href="#shortcuts-vim">Vim</a></li>
-    <li><a href="#shortcuts-emacs">Emacs</a></li>
   </ul>
-</nav>
+</aside>
 
 <!-- Main Content -->
-<div class="main">
+<main class="main">
   <h1><span>Automergent</span> Commands Reference</h1>
   <p class="subtitle">Complete reference for all 62+ slash commands. Type <code>/</code> in the terminal to see suggestions.</p>
 
@@ -348,9 +236,9 @@
     <tr><th colspan="4">/model — Switch AI Model</th></tr>
     <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
     <tr>
-      <td><code>/model [model-name]</code></td>
-      <td class="cmd-desc">Change the active AI model. Without arguments, shows available models and current selection.</td>
-      <td class="cmd-example"><code>/model gpt-4o</code> <code>/model claude-sonnet-4-20250514</code></td>
+      <td><code>/model [model-name]</code><br><code>/model list</code><br><code>/model info &lt;name&gt;</code><br><code>/model refresh</code></td>
+      <td class="cmd-desc">Change the active AI model, or inspect the catalog: <code>list</code> shows every supported model with context limit and pricing, <code>info</code> shows full details for one model, and <code>refresh</code> re-fetches the <a href="https://models.dev">models.dev</a> catalog. Model listings come from the models.dev community catalog — filtered to tool-call capable models with at least 1M tokens of context — and work fully offline via a disk cache and an embedded snapshot.</td>
+      <td class="cmd-example"><code>/model gemini-3.6-flash</code> <code>/model info claude-sonnet-4-5</code></td>
       <td class="cmd-related"><a href="#provider">/provider</a> <a href="#effort">/effort</a></td>
     </tr>
   </table>
@@ -875,7 +763,7 @@
     <tr><th>Syntax</th><th>Description</th><th>Example</th><th>Related</th></tr>
     <tr>
       <td><code>/doctor</code></td>
-      <td class="cmd-desc">Run diagnostics: verify API keys, provider connectivity, LSP servers, git status, and config validity.</td>
+      <td class="cmd-desc">Run diagnostics: verify API keys, provider connectivity, LSP servers, git status, config validity, and the models.dev catalog state (cache freshness, embedded snapshot fallback) for the active provider.</td>
       <td class="cmd-example"><code>/doctor</code></td>
       <td class="cmd-related"><a href="#provider-test">/provider test</a> <a href="#config">/config</a></td>
     </tr>
@@ -1215,12 +1103,14 @@
     </div>
   </div>
 
-  <div style="margin-top: 48px; padding: 16px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); font-size: 13px;">
-    <strong style="color: var(--accent);">Tip:</strong> Type <code>/</code> at any time to see autocomplete suggestions. Use <code>Tab</code> to cycle through options. All commands support <code>--help</code> for additional flags.
+  <div style="margin-top: 48px; padding: 16px; background: var(--bg-card); border: 1px solid var(--border-primary); border-radius: var(--radius-md); color: var(--text-secondary); font-size: 13px;">
+    <strong style="color: var(--accent-blue);">Tip:</strong> Type <code>/</code> at any time to see autocomplete suggestions. Use <code>Tab</code> to cycle through options. All commands support <code>--help</code> for additional flags.
   </div>
 
+</main>
 </div>
 <script src="../js/nav.js"></script>
 <script src="../js/footer.js"></script>
+<script src="../js/main.js"></script>
 </body>
 </html>

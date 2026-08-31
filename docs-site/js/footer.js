@@ -1,50 +1,67 @@
 // Shared footer for Automergent docs site
 (function() {
+  const currentPath = window.location.pathname;
+  const isIndex = currentPath === '/' || currentPath.endsWith('/index.html') || currentPath.endsWith('/docs-site/') || currentPath.endsWith('/docs-site/index.html');
+  const logoSrc = isIndex ? 'assets/logo.svg' : '../assets/logo.svg';
+  const basePath = isIndex ? '' : '../';
+
   const footerHTML = `
-  <footer class="docs-footer">
-    <div class="docs-footer-inner">
-      <div class="docs-footer-brand">
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
-          <polyline points="16 18 22 12 16 6"></polyline>
-          <polyline points="8 6 2 12 8 18"></polyline>
-        </svg>
-        <span>Automergent</span>
+  <footer class="footer docs-footer">
+    <div class="footer-inner docs-footer-inner">
+      <div class="footer-brand docs-footer-brand">
+        <a href="${isIndex ? 'index.html' : '../index.html'}" class="navbar-logo">
+          <img src="${logoSrc}" alt="Automergent" height="26" style="height:26px; width:auto;">
+          <span>Auto<span class="logo-accent">mergent</span></span>
+        </a>
+        <p>Next-gen autonomous coding engineer built on Gemini & Vertex AI with multi-phase context intelligence, subagent orchestration, and deep root-cause error diagnostics.</p>
       </div>
-      <div class="docs-footer-links">
-        <a href="https://github.com/iSundram/Automergent">GitHub</a>
-        <a href="https://github.com/iSundram/Automergent/releases">Releases</a>
-        <a href="https://github.com/iSundram/Automergent/issues">Issues</a>
-        <a href="https://github.com/iSundram/Automergent/blob/main/LICENSE">MIT License</a>
+
+      <div class="footer-col">
+        <h4>Documentation</h4>
+        <ul>
+          <li><a href="${isIndex ? 'pages/getting-started.html' : 'getting-started.html'}">Getting Started</a></li>
+          <li><a href="${isIndex ? 'pages/commands.html' : 'commands.html'}">Commands Reference</a></li>
+          <li><a href="${isIndex ? 'pages/tools.html' : 'tools.html'}">Tools Reference</a></li>
+          <li><a href="${isIndex ? 'pages/configuration.html' : 'configuration.html'}">Configuration</a></li>
+        </ul>
       </div>
-      <div class="docs-footer-copy">Built by iSundram & contributors</div>
+
+      <div class="footer-col">
+        <h4>Architecture & UI</h4>
+        <ul>
+          <li><a href="${isIndex ? 'pages/architecture.html' : 'architecture.html'}">Architecture</a></li>
+          <li><a href="${isIndex ? 'pages/themes-ui.html' : 'themes-ui.html'}">Themes & UI</a></li>
+          <li><a href="${isIndex ? 'pages/advanced-features.html' : 'advanced-features.html'}">Advanced Features</a></li>
+          <li><a href="${isIndex ? 'pages/examples.html' : 'examples.html'}">Examples & Tutorials</a></li>
+        </ul>
+      </div>
+
+      <div class="footer-col">
+        <h4>Community</h4>
+        <ul>
+          <li><a href="https://github.com/iSundram/Automergent" target="_blank" rel="noopener">GitHub Repository</a></li>
+          <li><a href="https://github.com/iSundram/Automergent/releases" target="_blank" rel="noopener">Releases & Changelog</a></li>
+          <li><a href="https://github.com/iSundram/Automergent/issues" target="_blank" rel="noopener">Report an Issue</a></li>
+          <li><a href="${isIndex ? 'pages/developer-guide.html' : 'developer-guide.html'}">Developer Guide</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="footer-bottom">
+      <span>&copy; 2026 Automergent. Released under the <a href="https://opensource.org/licenses/MIT" target="_blank" rel="noopener">MIT License</a>.</span>
+      <span>Built with pride by <a href="https://github.com/iSundram" target="_blank" rel="noopener">iSundram</a> and contributors.</span>
     </div>
   </footer>
-  <style>
-    .docs-footer {
-      background: #161b22; border-top: 1px solid #30363d;
-      padding: 32px 24px; margin-top: 64px;
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    }
-    .docs-footer-inner {
-      max-width: 1400px; margin: 0 auto;
-      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;
-    }
-    .docs-footer-brand {
-      display: flex; align-items: center; gap: 8px;
-      color: #e6edf3; font-weight: 600; font-size: 14px;
-    }
-    .docs-footer-brand svg { color: #58a6ff; }
-    .docs-footer-links { display: flex; gap: 20px; }
-    .docs-footer-links a {
-      color: #8b949e; text-decoration: none; font-size: 13px;
-      transition: color 0.15s;
-    }
-    .docs-footer-links a:hover { color: #58a6ff; }
-    .docs-footer-copy { color: #6e7681; font-size: 12px; }
-    @media (max-width: 640px) {
-      .docs-footer-inner { flex-direction: column; text-align: center; }
-    }
-  </style>`;
 
-  document.body.insertAdjacentHTML('beforeend', footerHTML);
+  <button class="back-to-top" aria-label="Back to top" title="Back to top">
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="18 15 12 9 6 15"></polyline>
+    </svg>
+  </button>
+  `;
+
+  const existingFooter = document.querySelector('footer.footer, footer.docs-footer');
+  if (!existingFooter) {
+    document.body.insertAdjacentHTML('beforeend', footerHTML);
+  }
 })();

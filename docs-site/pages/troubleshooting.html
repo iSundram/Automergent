@@ -4,386 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Troubleshooting &amp; FAQ — Automergent</title>
-<style>
-  :root {
-    --bg: #0d1117;
-    --card: #161b22;
-    --accent: #58a6ff;
-    --border: #30363d;
-    --text: #c9d1d9;
-    --text-muted: #8b949e;
-    --success: #3fb950;
-    --warning: #d29922;
-    --danger: #f85149;
-    --code-bg: #0d1117;
-    --sidebar-bg: #0d1117;
-    --sidebar-hover: #161b22;
-  }
-
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-
-  html { scroll-behavior: smooth; }
-
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.6;
-    display: flex;
-    min-height: 100vh;
-  }
-
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-
-  code {
-    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
-    background: var(--code-bg);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 0.875em;
-  }
-
-  pre {
-    background: var(--code-bg);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 16px;
-    overflow-x: auto;
-    margin: 12px 0;
-  }
-
-  pre code {
-    background: none;
-    border: none;
-    padding: 0;
-    font-size: 0.85em;
-    color: var(--text);
-  }
-
-  /* Sidebar */
-  .sidebar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 280px;
-    height: 100vh;
-    background: var(--sidebar-bg);
-    border-right: 1px solid var(--border);
-    padding: 24px 16px;
-    overflow-y: auto;
-    z-index: 100;
-  }
-
-  .sidebar-title {
-    font-size: 1.1em;
-    font-weight: 700;
-    color: var(--accent);
-    margin-bottom: 4px;
-  }
-
-  .sidebar-subtitle {
-    font-size: 0.8em;
-    color: var(--text-muted);
-    margin-bottom: 24px;
-    padding-bottom: 16px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .sidebar a {
-    display: block;
-    padding: 6px 12px;
-    border-radius: 6px;
-    color: var(--text-muted);
-    font-size: 0.875em;
-    transition: all 0.15s;
-    margin-bottom: 2px;
-  }
-
-  .sidebar a:hover {
-    background: var(--sidebar-hover);
-    color: var(--text);
-    text-decoration: none;
-  }
-
-  .sidebar a.active {
-    background: var(--sidebar-hover);
-    color: var(--accent);
-    font-weight: 500;
-  }
-
-  .sidebar .section-label {
-    font-size: 0.7em;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    color: var(--text-muted);
-    padding: 16px 12px 6px;
-  }
-
-  /* Main content */
-  .main {
-    margin-left: 280px;
-    padding: 40px 48px 80px;
-    max-width: 960px;
-    flex: 1;
-  }
-
-  h1 {
-    font-size: 2em;
-    font-weight: 700;
-    margin-bottom: 8px;
-    color: #fff;
-  }
-
-  .subtitle {
-    font-size: 1.1em;
-    color: var(--text-muted);
-    margin-bottom: 32px;
-  }
-
-  h2 {
-    font-size: 1.5em;
-    font-weight: 600;
-    margin: 48px 0 16px;
-    color: #fff;
-    padding-bottom: 8px;
-    border-bottom: 1px solid var(--border);
-  }
-
-  h3 {
-    font-size: 1.15em;
-    font-weight: 600;
-    margin: 24px 0 10px;
-    color: #fff;
-  }
-
-  p { margin-bottom: 12px; }
-
-  /* Cards */
-  .card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 20px;
-    margin-bottom: 16px;
-  }
-
-  .card-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
-  }
-
-  .card-header .icon {
-    font-size: 1.3em;
-  }
-
-  .card-header h3 {
-    margin: 0;
-    font-size: 1.05em;
-  }
-
-  /* Error code badges */
-  .badge {
-    display: inline-block;
-    padding: 2px 10px;
-    border-radius: 12px;
-    font-size: 0.75em;
-    font-weight: 600;
-    font-family: 'SF Mono', 'Fira Code', monospace;
-  }
-
-  .badge-error {
-    background: rgba(248, 81, 73, 0.15);
-    color: var(--danger);
-    border: 1px solid rgba(248, 81, 73, 0.3);
-  }
-
-  .badge-warning {
-    background: rgba(210, 153, 34, 0.15);
-    color: var(--warning);
-    border: 1px solid rgba(210, 153, 34, 0.3);
-  }
-
-  .badge-info {
-    background: rgba(88, 166, 255, 0.15);
-    color: var(--accent);
-    border: 1px solid rgba(88, 166, 255, 0.3);
-  }
-
-  .badge-success {
-    background: rgba(63, 185, 80, 0.15);
-    color: var(--success);
-    border: 1px solid rgba(63, 185, 80, 0.3);
-  }
-
-  /* Solution arrows */
-  .problem-solution {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 12px 16px;
-    background: rgba(88, 166, 255, 0.05);
-    border-left: 3px solid var(--accent);
-    border-radius: 0 6px 6px 0;
-    margin: 8px 0;
-  }
-
-  .problem-solution .label {
-    font-size: 0.75em;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .problem-solution .problem { color: var(--danger); }
-  .problem-solution .solution { color: var(--success); }
-
-  /* FAQ accordion */
-  .faq-item {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    margin-bottom: 8px;
-    overflow: hidden;
-  }
-
-  .faq-question {
-    width: 100%;
-    background: none;
-    border: none;
-    padding: 16px 20px;
-    color: #fff;
-    font-size: 1em;
-    font-weight: 500;
-    text-align: left;
-    cursor: pointer;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-family: inherit;
-    transition: background 0.15s;
-  }
-
-  .faq-question:hover { background: rgba(88, 166, 255, 0.05); }
-
-  .faq-question .chevron {
-    transition: transform 0.2s;
-    color: var(--text-muted);
-    font-size: 0.85em;
-  }
-
-  .faq-item.open .faq-question .chevron {
-    transform: rotate(90deg);
-  }
-
-  .faq-answer {
-    max-height: 0;
-    overflow: hidden;
-    transition: max-height 0.3s ease;
-  }
-
-  .faq-item.open .faq-answer {
-    max-height: 600px;
-  }
-
-  .faq-answer-content {
-    padding: 0 20px 16px;
-    color: var(--text);
-    line-height: 1.7;
-  }
-
-  /* Command table */
-  .cmd-table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 16px 0;
-  }
-
-  .cmd-table th,
-  .cmd-table td {
-    padding: 10px 14px;
-    text-align: left;
-    border-bottom: 1px solid var(--border);
-  }
-
-  .cmd-table th {
-    font-size: 0.8em;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: var(--text-muted);
-    font-weight: 600;
-  }
-
-  .cmd-table td:first-child {
-    font-family: 'SF Mono', monospace;
-    font-size: 0.9em;
-    color: var(--accent);
-    white-space: nowrap;
-  }
-
-  .cmd-table tr:last-child td { border-bottom: none; }
-
-  /* Grid */
-  .grid-2 {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 16px;
-  }
-
-  /* Callout */
-  .callout {
-    padding: 16px 20px;
-    border-radius: 8px;
-    margin: 16px 0;
-    border-left: 4px solid;
-  }
-
-  .callout-info {
-    background: rgba(88, 166, 255, 0.08);
-    border-color: var(--accent);
-  }
-
-  .callout-warning {
-    background: rgba(210, 153, 34, 0.08);
-    border-color: var(--warning);
-  }
-
-  .callout-danger {
-    background: rgba(248, 81, 73, 0.08);
-    border-color: var(--danger);
-  }
-
-  .callout-success {
-    background: rgba(63, 185, 80, 0.08);
-    border-color: var(--success);
-  }
-
-  .callout strong { color: #fff; }
-
-  ul {
-    padding-left: 20px;
-    margin: 8px 0;
-  }
-
-  li { margin-bottom: 6px; }
-
-  /* Responsive */
-  @media (max-width: 900px) {
-    .sidebar { display: none; }
-    .main { margin-left: 0; padding: 24px 20px; }
-    .grid-2 { grid-template-columns: 1fr; }
-  }
-</style>
+<link rel="stylesheet" href="../css/style.css">
 </head>
 <body>
 
-<nav class="sidebar">
-  <div class="sidebar-title">Automergent</div>
-  <div class="sidebar-subtitle">Troubleshooting &amp; FAQ</div>
+<div class="page-wrapper">
+<aside class="sidebar">
+  <div class="sidebar-title">Troubleshooting</div>
+  <div class="sidebar-subtitle">FAQ &amp; Diagnostics</div>
 
   <div class="section-label">Common Issues</div>
   <a href="#provider-connection">Provider Connection</a>
@@ -400,22 +28,23 @@
   <div class="section-label">Reference</div>
   <a href="#diagnostics">Diagnostics Commands</a>
   <a href="#error-codes">Error Codes</a>
-  <a href="#performance">Performance Tips</a>
-  <a href="#security">Security FAQ</a>
+  <a href="#security-trouble">Security &amp; Sandboxing</a>
   <a href="#terminal-compat">Terminal Compatibility</a>
-
-  <div class="section-label">FAQ</div>
-  <a href="#faq">Frequently Asked Questions</a>
-</nav>
+  <a href="#faq">FAQ</a>
+</aside>
 
 <main class="main">
-  <h1>Troubleshooting &amp; FAQ</h1>
-  <p class="subtitle">Common issues, diagnostics, error reference, and frequently asked questions for Automergent.</p>
+  <h1><span>Automergent</span> Troubleshooting &amp; FAQ</h1>
+  <p class="subtitle">Diagnose common issues, understand error codes, check terminal compatibility, and find answers to frequently asked questions.</p>
+
+  <div class="callout callout-info">
+    <strong>Quick Diagnosis:</strong> Run <code>automergent doctor</code> or <code>/doctor</code> inside the TUI to automatically test your environment, API keys, provider latency, LSP diagnostics, and disk permissions.
+  </div>
 
   <!-- ═══════════════════════════════════════════ -->
   <!-- COMMON ISSUES -->
   <!-- ═══════════════════════════════════════════ -->
-  <h2 id="common-issues">Common Issues &amp; Solutions</h2>
+  <h2 id="provider-connection">Provider &amp; Connection Issues</h2>
 
   <div class="card" id="provider-connection">
     <div class="card-header">
@@ -433,11 +62,11 @@
     <div class="problem-solution">
       <span class="label solution">Solutions</span>
       <ul>
-        <li>Verify your API key is correct: <code>opencode env list</code> and check the relevant <code>*_API_KEY</code> variable.</li>
-        <li>Check network connectivity: <code>curl -s -o /dev/null -w "%{http_code}" https://api.openai.com</code></li>
-        <li>If using a custom base URL, confirm it includes the full path (e.g., <code>https://my-proxy.example.com/v1</code>).</li>
+        <li>Verify your API key is configured: run <code>amt /env</code> or check <code>GOOGLE_API_KEY</code> / <code>GEMINI_API_KEY</code>.</li>
+        <li>Check network connectivity: <code>curl -s -o /dev/null -w "%{http_code}" https://generativelanguage.googleapis.com</code></li>
+        <li>If using a custom base URL, confirm it includes the full path (e.g., <code>https://api.openai.com/v1</code>).</li>
         <li>For corporate proxies, set <code>HTTP_PROXY</code> / <code>HTTPS_PROXY</code> environment variables.</li>
-        <li>Check provider status pages for outages (OpenAI, Anthropic, etc.).</li>
+        <li>Check provider status pages for outages (Google AI Studio, Vertex AI, OpenAI).</li>
       </ul>
     </div>
   </div>
@@ -461,12 +90,12 @@
         <li>Run <code>/compact</code> to summarize and compress the conversation history.</li>
         <li>Monitor usage in real-time with <code>/context</code> — compact when approaching 80%.</li>
         <li>Start a fresh session: <code>/new</code> — carry over key context manually.</li>
-        <li>Use a model with a larger context window (e.g., Claude with 200K).</li>
+        <li>Automergent supports up to 1M+ tokens on Gemini 3.6 / Vertex AI models natively.</li>
       </ul>
     </div>
 
     <div class="callout callout-info">
-      <strong>Tip:</strong> Run <code>/compact</code> proactively every ~30 minutes during long coding sessions to keep context healthy.
+      <strong>Tip:</strong> Automergent automatically triggers compaction when reaching <code>autoCompressAt: 0.55</code> (55% budget).
     </div>
   </div>
 
@@ -481,11 +110,9 @@
     <div class="problem-solution">
       <span class="label solution">Solutions</span>
       <ul>
-        <li>Open permissions manager: <code>/permissions</code></li>
-        <li>Set specific tools to <code>always-allow</code> (e.g., <code>Read</code>, <code>Glob</code>, <code>Grep</code>).</li>
-        <li>Use <code>/permissions allow-all read</code> to allow all read operations without prompting.</li>
-        <li>For full auto mode: <code>/permissions mode auto</code> — use with caution.</li>
-        <li>Review permission rules in <code>.opencode/permissions.json</code>.</li>
+        <li>Switch approval mode: <code>/mode accept-edits</code> or <code>/mode auto</code> (caution).</li>
+        <li>Configure permissions in <code>~/.automergent/config.yaml</code> or <code>.automergent/config.yaml</code>.</li>
+        <li>Cycle approval modes anytime with <code>Shift+Tab</code> in the terminal.</li>
       </ul>
     </div>
   </div>
@@ -502,10 +129,9 @@
       <span class="label solution">Solutions</span>
       <ul>
         <li>Ensure your terminal supports <strong>truecolor (24-bit color)</strong>. Run <code>/env</code> to check.</li>
-        <li>Try a known-good terminal: iTerm2, WezTerm, Alacritty, kitty, Windows Terminal.</li>
-        <li>Set <code>TERM=xterm-256color</code> or <code>TERM=xterm-16color</code> as a fallback.</li>
-        <li>Increase terminal window to at least <strong>80×24</strong> characters.</li>
-        <li>Disable emoji in themes if your terminal lacks Unicode support: <code>"emoji": false</code>.</li>
+        <li>Try a modern terminal: iTerm2, WezTerm, Alacritty, kitty, Ghostty, Windows Terminal.</li>
+        <li>Set <code>TERM=xterm-256color</code> as a fallback.</li>
+        <li>Increase terminal window to at least <strong>80×24</strong> characters (recommended 120×40).</li>
       </ul>
     </div>
   </div>
@@ -520,17 +146,16 @@
 
     <div class="problem-solution">
       <span class="label problem">Symptom</span>
-      <code>go build ./cmd/opencode: build constraints exclude all Go files</code> or CGO-related errors.
+      <code>go build ./cmd/automergent: build constraints exclude all Go files</code> or CGO-related errors.
     </div>
 
     <div class="problem-solution">
       <span class="label solution">Solutions</span>
       <ul>
         <li>Ensure <strong>Go 1.25+</strong> is installed: <code>go version</code></li>
-        <li>CGO is required: <code>CGO_ENABLED=1 go build ./cmd/opencode</code></li>
+        <li>CGO is required for tree-sitter AST parsing: <code>CGO_ENABLED=1 go build ./cmd/automergent</code></li>
         <li>On Linux, install <code>gcc</code> or <code>musl-gcc</code> for CGO compilation.</li>
         <li>On macOS, install Xcode Command Line Tools: <code>xcode-select --install</code></li>
-        <li>For static builds: <code>CGO_ENABLED=0 go build -tags netgo,osusergo ./cmd/opencode</code></li>
       </ul>
     </div>
   </div>
@@ -546,10 +171,9 @@
     <div class="problem-solution">
       <span class="label solution">Solutions</span>
       <ul>
-        <li>Check session directory exists and is writable: <code>ls -la ~/.config/opencode/sessions/</code></li>
-        <li>Ensure disk space is available: <code>df -h ~/.config/opencode/</code></li>
-        <li>Verify no symlink or mount issues if using cloud-synced directories.</li>
-        <li>Run <code>/doctor</code> to validate storage permissions.</li>
+        <li>Check session directory exists and is writable: <code>ls -la ~/.automergent/sessions/</code></li>
+        <li>Ensure disk space is available: <code>df -h ~/.automergent/</code></li>
+        <li>Run <code>automergent doctor</code> to validate storage permissions.</li>
       </ul>
     </div>
   </div>
@@ -565,11 +189,9 @@
     <div class="problem-solution">
       <span class="label solution">Solutions</span>
       <ul>
-        <li>Check agent status: <code>/agents</code> — review active and completed agents.</li>
+        <li>Check agent status: <code>/agents</code> — review active and completed agents in the fleet.</li>
         <li>Cancel a stuck agent: <code>/cancel agent &lt;id&gt;</code></li>
-        <li>Verify the sub-agent has enough context — provide explicit instructions.</li>
-        <li>Check if the sub-agent's model is available (not rate-limited).</li>
-        <li>Use <code>/agents kill-all</code> to terminate all stuck agents.</li>
+        <li>Use <code>/agents kill-all</code> to terminate all stuck background subagents.</li>
       </ul>
     </div>
   </div>
@@ -586,9 +208,8 @@
       <span class="label solution">Solutions</span>
       <ul>
         <li>Verify truecolor support: <code>/env</code> — check <code>Truecolor</code> field.</li>
-        <li>Use a 256-color fallback theme: <code>opencode.json → "theme": "256"</code></li>
-        <li>Some terminal multiplexers (tmux/screen) strip truecolor — use <code>tmux -e TERM=xterm-256color</code> or switch to direct terminal.</li>
-        <li>Windows Terminal and ConEmu support truecolor; cmd.exe and old PowerShell do not.</li>
+        <li>Switch themes: <code>/theme modern</code>, <code>/theme catppuccin</code>, <code>/theme tokyonight</code>, <code>/theme dracula</code>, etc.</li>
+        <li>For tmux/screen, use <code>set -ga terminal-overrides ",*256col*:Tc"</code> in <code>.tmux.conf</code>.</li>
       </ul>
     </div>
   </div>
@@ -604,12 +225,10 @@
     <div class="problem-solution">
       <span class="label solution">Solutions</span>
       <ul>
-        <li>Check MCP config in <code>.opencode/mcp.json</code> for syntax errors.</li>
+        <li>Check MCP config in <code>~/.automergent/config.yaml</code> under <code>mcp.servers</code> for syntax errors.</li>
         <li>Verify transport type matches: <code>"stdio"</code> (default) or <code>"sse"</code>.</li>
         <li>For stdio servers, ensure the binary is in PATH or uses an absolute path.</li>
-        <li>Check server logs: <code>/mcp logs &lt;server-name&gt;</code></li>
-        <li>Test server independently: run the command manually to verify it starts.</li>
-        <li>Ensure required environment variables are set for the server.</li>
+        <li>Run <code>/mcp</code> in the TUI to check server connectivity and registered dynamic tools.</li>
       </ul>
     </div>
   </div>
@@ -625,10 +244,9 @@
     <div class="problem-solution">
       <span class="label solution">Solutions</span>
       <ul>
-        <li>Check sandbox config: <code>.opencode/sandbox.json</code></li>
-        <li>Add allowed paths: <code>"write": ["/usr/local/lib/custom/**"]</code></li>
-        <li>Add allowed commands: <code>"commands": ["npm run build", "cargo test"]</code></li>
-        <li>Disable sandbox for specific tools: <code>/permissions sandbox-off Write</code></li>
+        <li>Check sandbox config in <code>.automergent/config.yaml</code>.</li>
+        <li>Add allowed paths: <code>allowedWritePaths: [".", "/tmp/build"]</code></li>
+        <li>Run with <code>--no-sandbox</code> or configure <code>sandbox: auto</code> in config.</li>
         <li>Use <code>/doctor</code> to see sandbox status and recent violations.</li>
         <li>For debugging, run with <code>--no-sandbox</code> flag (not recommended in production).</li>
       </ul>
@@ -873,7 +491,7 @@
       <li>Automergent scans file diffs for patterns matching common secret formats (API keys, tokens, passwords).</li>
       <li>Coverage includes: AWS keys, GitHub tokens, npm tokens, generic API keys, private keys.</li>
       <li>Detected secrets are redacted from output and the user is warned.</li>
-      <li>Custom patterns can be added to <code>.opencode/security.json</code>.</li>
+      <li>Custom patterns can be added to <code>.automergent/config.yaml</code>.</li>
     </ul>
   </div>
 
@@ -882,7 +500,7 @@
     <ul>
       <li>Automergent can run <code>npm audit</code>, <code>cargo audit</code>, <code>govulncheck</code>, or <code>pip-audit</code> via sub-agents.</li>
       <li>Vulnerability reports are summarized with severity levels and remediation suggestions.</li>
-      <li>Configure automated audits in your CI workflow using <code>/workflows</code>.</li>
+      <li>Configure automated audits in your CI workflow using <code>/workflow</code>.</li>
     </ul>
   </div>
 
@@ -908,7 +526,7 @@ echo -e "\e[38;2;255;100;0mTruecolor\e[0m"
         <tr><td>iTerm2</td><td><span class="badge badge-success">Yes</span></td><td>Full support</td></tr>
         <tr><td>WezTerm</td><td><span class="badge badge-success">Yes</span></td><td>Full support</td></tr>
         <tr><td>Alacritty</td><td><span class="badge badge-success">Yes</span></td><td>Full support</td></tr>
-        <tr><td>kitty</td><td><span class="badge badge-success">Yes</span></td><td>Full support</td></tr>
+        <tr><td>kitty / Ghostty</td><td><span class="badge badge-success">Yes</span></td><td>Full support</td></tr>
         <tr><td>Windows Terminal</td><td><span class="badge badge-success">Yes</span></td><td>Requires Windows 10+</td></tr>
         <tr><td>tmux</td><td><span class="badge badge-warning">Partial</span></td><td>Requires <code>set -g default-terminal "xterm-256color"</code></td></tr>
         <tr><td>screen</td><td><span class="badge badge-error">No</span></td><td>Falls back to 256-color</td></tr>
@@ -921,8 +539,8 @@ echo -e "\e[38;2;255;100;0mTruecolor\e[0m"
     <h3>&#x2728; Unicode Rendering</h3>
     <ul>
       <li>Minimum: UTF-8 encoding with box-drawing characters.</li>
-      <li>Recommended: Full Unicode support including emoji.</li>
-      <li>If characters render as <code>??</code> or boxes, set <code>"emoji": false</code> in theme config.</li>
+      <li>Recommended: Full Unicode support including glyphs.</li>
+      <li>If characters render as <code>??</code> or boxes, set <code>noAnimation: true</code> or <code>noColor: true</code> in config.</li>
     </ul>
   </div>
 
@@ -943,7 +561,7 @@ echo -e "\e[38;2;255;100;0mTruecolor\e[0m"
     </button>
     <div class="faq-answer">
       <div class="faq-answer-content">
-        Automergent supports OpenAI (GPT-4o, GPT-4o-mini, o1, o3), Anthropic (Claude 4 Sonnet, Claude 4 Opus, Haiku), Google (Gemini 2.5 Pro, Gemini 2.5 Flash), and Azure OpenAI. You can also use any OpenAI-compatible API via the <code>baseURL</code> config option. Custom providers can be added by implementing the provider interface.
+        Automergent natively supports Google AI Studio (<code>google-aistudio</code>) and Google Vertex AI (<code>google-vertex</code>) as first-class backends. Any other OpenAI- or Gemini-compatible endpoint (OpenAI, Anthropic, DeepSeek, Ollama, vLLM, LiteLLM) connects through the <code>custom</code> provider.
       </div>
     </div>
   </div>
@@ -955,7 +573,7 @@ echo -e "\e[38;2;255;100;0mTruecolor\e[0m"
     </button>
     <div class="faq-answer">
       <div class="faq-answer-content">
-        No. Automergent requires an active connection to an AI provider API. It does not bundle local models. However, if you have a local inference server (e.g., llama.cpp, Ollama) exposing an OpenAI-compatible API, you can point Automergent at it via <code>baseURL</code>.
+        Yes, if you point Automergent at a local inference server (such as Ollama, LocalAI, or vLLM) using the <code>custom</code> provider with <code>baseUrl: "http://localhost:11434/v1"</code>. Automergent's models.dev catalog also maintains an offline fallback snapshot.
       </div>
     </div>
   </div>
@@ -967,7 +585,7 @@ echo -e "\e[38;2;255;100;0mTruecolor\e[0m"
     </button>
     <div class="faq-answer">
       <div class="faq-answer-content">
-        When you run <code>/compact</code>, Automergent sends the full conversation to the AI with instructions to produce a concise summary. The summary preserves: key decisions, file paths, code patterns, open tasks, and recent context. Original messages are replaced by the summary, freeing ~70–80% of context space. You can also add specific instructions: <code>/compact focus on the auth module refactor</code>.
+        When you run <code>/compact</code> (or when automatic compaction triggers at <code>autoCompressAt: 0.55</code>), Automergent compresses session history into structured summaries preserving key decisions, file paths, open tasks, and active dependencies while freeing ~70–80% of token budget.
       </div>
     </div>
   </div>
@@ -979,7 +597,7 @@ echo -e "\e[38;2;255;100;0mTruecolor\e[0m"
     </button>
     <div class="faq-answer">
       <div class="faq-answer-content">
-        Yes. Create a <code>.opencode/AGENTS.md</code> file in your project root with instructions for the agent. You can define coding conventions, preferred libraries, architecture patterns, and domain-specific knowledge. The agent reads this file at session start. Global instructions go in <code>~/.config/opencode/AGENTS.md</code>.
+        Yes. Create an <code>AUTOMERGENT.md</code> file in your project root with instructions, style conventions, or architecture patterns for the agent. The agent reads this file automatically on startup unless <code>--no-context</code> is specified.
       </div>
     </div>
   </div>
@@ -991,7 +609,7 @@ echo -e "\e[38;2;255;100;0mTruecolor\e[0m"
     </button>
     <div class="faq-answer">
       <div class="faq-answer-content">
-        Sub-agents are independent AI sessions spawned by the main agent for parallel or specialized tasks. They receive a focused context (their task description + relevant files) and return results to the main agent. Use cases include: code exploration, testing, research, and parallel refactoring. Sub-agents can run simultaneously — the main agent orchestrates and merges their outputs. Monitor them with <code>/agents</code>.
+        Sub-agents are independent specialist sessions spawned by the main agent for parallel or specialized tasks (exploration, code reviews, deep builds). They receive scoped tool sets and return results to the main agent with real-time steering notifications. Monitor them with <code>/agents</code>.
       </div>
     </div>
   </div>
@@ -1003,115 +621,7 @@ echo -e "\e[38;2;255;100;0mTruecolor\e[0m"
     </button>
     <div class="faq-answer">
       <div class="faq-answer-content">
-        Automergent is language-agnostic — it works with any language the AI model has been trained on. The tooling layer (LSP integration, build commands, test runners) has first-class support for: Go, TypeScript/JavaScript, Python, Rust, Java, C/C++, Ruby, PHP, and Swift. Custom language support can be added via MCP servers.
-      </div>
-    </div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-question" onclick="this.parentElement.classList.toggle('open')">
-      <span>How does the approval system work?</span>
-      <span class="chevron">&#x25B6;</span>
-    </button>
-    <div class="faq-answer">
-      <div class="faq-answer-content">
-        Every tool execution (file write, shell command, etc.) goes through an approval gate. By default, you are prompted to confirm each action. You can configure per-tool policies: <code>allow</code> (never ask), <code>confirm</code> (always ask), or <code>deny</code> (block). Use <code>/permissions</code> to manage these policies. The <code>auto</code> mode skips all prompts — recommended only for trusted, well-tested workflows.
-      </div>
-    </div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-question" onclick="this.parentElement.classList.toggle('open')">
-      <span>Can I use Automergent in CI/CD?</span>
-      <span class="chevron">&#x25B6;</span>
-    </button>
-    <div class="faq-answer">
-      <div class="faq-answer-content">
-        Yes. Automergent can run in non-interactive/headless mode. Set <code>--non-interactive</code> flag and provide a task via stdin or file. The approval system can be pre-configured or bypassed. Common CI/CD uses: automated code review, dependency updates, test generation, and documentation updates. See the CI/CD integration guide in the docs.
-      </div>
-    </div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-question" onclick="this.parentElement.classList.toggle('open')">
-      <span>How do I contribute?</span>
-      <span class="chevron">&#x25B6;</span>
-    </button>
-    <div class="faq-answer">
-      <div class="faq-answer-content">
-        Automergent is open-source. Contributions welcome via GitHub PRs. Start by reading <code>CONTRIBUTING.md</code> and checking open issues. Key areas: provider integrations, MCP servers, language support, documentation, and theme creation. All PRs require tests and pass CI checks (lint, typecheck, integration tests).
-      </div>
-    </div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-question" onclick="this.parentElement.classList.toggle('open')">
-      <span>What is the maximum context window?</span>
-      <span class="chevron">&#x25B6;</span>
-    </button>
-    <div class="faq-answer">
-      <div class="faq-answer-content">
-        Depends on the model: Claude supports up to 200K tokens, GPT-4o supports 128K, Gemini supports 1M+. Automergent dynamically detects the model's limit and adjusts. Use <code>/context</code> to monitor usage. When nearing the limit, <code>/compact</code> frees space by summarizing the conversation.
-      </div>
-    </div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-question" onclick="this.parentElement.classList.toggle('open')">
-      <span>How does memory persist across sessions?</span>
-      <span class="chevron">&#x25B6;</span>
-    </button>
-    <div class="faq-answer">
-      <div class="faq-answer-content">
-        Session history is saved to <code>~/.config/opencode/sessions/</code> and can be resumed with <code>/resume</code>. For cross-session memory, use <code>.opencode/memory.md</code> — the agent reads this file at session start. You can manually add notes or let the agent add them with <code>/memory add "key insight"</code>. Project-level instructions live in <code>.opencode/AGENTS.md</code>.
-      </div>
-    </div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-question" onclick="this.parentElement.classList.toggle('open')">
-      <span>Can I use custom MCP servers?</span>
-      <span class="chevron">&#x25B6;</span>
-    </button>
-    <div class="faq-answer">
-      <div class="faq-answer-content">
-        Yes. MCP (Model Context Protocol) servers extend Automergent with custom tools and resources. Configure them in <code>.opencode/mcp.json</code>. Supports stdio and SSE transports. Community MCP servers exist for databases, APIs, Jira, Slack, and more. You can also write your own — see the MCP developer guide.
-      </div>
-    </div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-question" onclick="this.parentElement.classList.toggle('open')">
-      <span>How do workflows work?</span>
-      <span class="chevron">&#x25B6;</span>
-    </button>
-    <div class="faq-answer">
-      <div class="faq-answer-content">
-        Workflows are reusable, multi-step task definitions. Create them in <code>.opencode/workflows/</code> as YAML or Markdown files. Each workflow defines: trigger, steps, approval policy, and output format. Run with <code>/workflow &lt;name&gt;</code>. Examples: <code>release-checklist</code>, <code>dependency-update</code>, <code>code-review</code>.
-      </div>
-    </div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-question" onclick="this.parentElement.classList.toggle('open')">
-      <span>What sandboxing is used?</span>
-      <span class="chevron">&#x25B6;</span>
-    </button>
-    <div class="faq-answer">
-      <div class="faq-answer-content">
-        Automergent uses a tool-level sandbox — not OS-level containers. Each file write and shell command is checked against configurable allowlists before execution. This approach has zero overhead (no VM/container spin-up) while preventing destructive operations. For stronger isolation, combine with Docker or gVisot at the OS level.
-      </div>
-    </div>
-  </div>
-
-  <div class="faq-item">
-    <button class="faq-question" onclick="this.parentElement.classList.toggle('open')">
-      <span>How do I report bugs?</span>
-      <span class="chevron">&#x25B6;</span>
-    </button>
-    <div class="faq-answer">
-      <div class="faq-answer-content">
-        File issues on GitHub with: description, steps to reproduce, expected vs actual behavior, and diagnostic output (<code>/doctor</code>, <code>/env</code>, <code>/error</code>). Include your OS, terminal, and Automergent version (<code>/version</code>). For crashes, attach the log from <code>~/.config/opencode/logs/</code>.
+        Automergent is language-agnostic with AST-aware tree-sitter indexing and compiler error parsing across Go, TypeScript/JavaScript, Python, Rust, C/C++, Java, Ruby, PHP, and more.
       </div>
     </div>
   </div>
@@ -1123,32 +633,16 @@ echo -e "\e[38;2;255;100;0mTruecolor\e[0m"
     </button>
     <div class="faq-answer">
       <div class="faq-answer-content">
-        <code>go install github.com/opencode-ai/opencode@latest</code> for Go installations. For Homebrew: <code>brew upgrade opencode</code>. Check your version with <code>/version</code>. Review the changelog for breaking changes before updating. The agent will notify you if a new version is available.
+        Run <code>curl -fsSL https://automergent.github.io/install.sh | bash</code> or <code>CGO_ENABLED=1 go install github.com/iSundram/Automergent/cmd/automergent@latest</code>. Check your current version with <code>automergent version</code> or <code>/version</code>.
       </div>
     </div>
   </div>
 
 </main>
+</div>
 
-<script>
-  // Highlight active sidebar link on scroll
-  const sections = document.querySelectorAll('[id]');
-  const sidebarLinks = document.querySelectorAll('.sidebar a');
-
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        const id = entry.target.id;
-        sidebarLinks.forEach(link => {
-          link.classList.toggle('active', link.getAttribute('href') === '#' + id);
-        });
-      }
-    });
-  }, { rootMargin: '-20% 0px -70% 0px' });
-
-  sections.forEach(section => observer.observe(section));
-</script>
 <script src="../js/nav.js"></script>
 <script src="../js/footer.js"></script>
+<script src="../js/main.js"></script>
 </body>
 </html>
