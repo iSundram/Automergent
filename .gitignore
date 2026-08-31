@@ -3,6 +3,8 @@ error.txt
 *.txt
 !internal/prompt/bases/*.txt
 !internal/prompt/phases/*.txt
+!internal/prompt/compact/*.txt
+!internal/prompt/**/*.txt
 *-research
 !.github/pull_request_template.md
 # Runtime persistence files

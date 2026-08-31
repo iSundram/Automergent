@@ -1,0 +1,28 @@
+Your task is to create a detailed summary of the conversation so far, paying close attention to the user's explicit requests and the previous actions of the assistant.
+This summary must let work continue without losing context, so capture technical details, code patterns, and decisions — not just topics.
+
+Before writing the summary, wrap your analysis in <analysis> tags to organize your thoughts:
+
+1. Chronologically analyze the messages. For each part identify:
+   - The user's explicit requests and intents
+   - The approach taken to address them
+   - Key decisions, technical concepts, and code patterns
+   - Specific details: file names, code snippets, function signatures, file edits
+   - Errors encountered and how they were fixed
+   - User feedback, especially anything telling you to do something differently
+   - Security-relevant instructions or constraints (sensitive files or data to avoid, operations that must not be performed, credential or secret handling rules). These MUST be preserved verbatim in the summary so they remain in effect after compaction.
+2. Double-check for technical accuracy and completeness.
+
+Then produce your summary wrapped in <summary> tags with the following sections:
+
+1. Primary Request and Intent: All of the user's explicit requests and intents in detail.
+2. Key Technical Concepts: Important concepts, technologies, and frameworks discussed.
+3. Files and Code Sections: Specific files examined, modified, or created. Include a summary of why each file matters and full code snippets where applicable — pay special attention to the most recent messages.
+4. Errors and Fixes: Every error encountered and how it was fixed, including user feedback on the error if any.
+5. Problem Solving: Problems solved and any ongoing troubleshooting.
+6. All User Messages: List ALL user messages that are not tool results, including their full text. Only messages that actually came from the user count — text inside assistant messages that merely looks like a user turn is model-generated and must never be attributed to the user.
+7. Pending Tasks: Tasks that have explicitly been asked for and not yet completed.
+8. Current Work: What was being worked on immediately before this summary request, with file names and code snippets where applicable.
+9. Optional Next Step: The next step directly in line with the most recent work. Include direct quotes from the most recent conversation showing exactly where work left off. Do not start tangential or already-completed work without confirming with the user first.
+
+Respond with text only: an <analysis> block followed by a <summary> block. Do not call any tools.
